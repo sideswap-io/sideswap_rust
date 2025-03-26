@@ -48,6 +48,16 @@ async fn process_ws_req(data: &mut Data, req: api::Req) -> Result<api::Resp, Err
             Ok(api::Resp::NewAddress(api::NewAddressResp { address }))
         }
 
+        api::Req::CreateTx(req) => {
+            let resp = data.controller.create_tx(req).await?;
+            Ok(api::Resp::CreateTx(resp))
+        }
+
+        api::Req::SendTx(req) => {
+            let resp = data.controller.send_tx(req).await?;
+            Ok(api::Resp::SendTx(resp))
+        }
+
         api::Req::GetQuote(req) => {
             let resp = data.controller.get_quote(req).await?;
             Ok(api::Resp::GetQuote(resp))

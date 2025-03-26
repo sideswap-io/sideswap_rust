@@ -48,6 +48,8 @@ pub enum Error {
     QuoteExpired,
     #[error("No quote")]
     NoQuote,
+    #[error("No stored tx with this txid, please try again")]
+    NoCreatedTx,
 }
 
 impl From<tokio::sync::oneshot::error::RecvError> for Error {
@@ -83,7 +85,8 @@ impl Error {
             | Error::EncodeError(_)
             | Error::PsetError(_)
             | Error::QuoteExpired
-            | Error::NoQuote => api::ErrorCode::InvalidRequest,
+            | Error::NoQuote
+            | Error::NoCreatedTx => api::ErrorCode::InvalidRequest,
             Error::ChannelClosed | Error::NoUtxos => api::ErrorCode::ServerError,
             Error::WsError(_) => api::ErrorCode::NetworkError,
         }

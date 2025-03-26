@@ -73,7 +73,10 @@ fn process_market_event(data: &mut Data, event: market::Event) {
 
         market::Event::BroadcastTx { tx } => {
             data.wallet_command_sender
-                .send(sideswap_lwk::Command::BroadcastTx { tx })
+                .send(sideswap_lwk::Command::BroadcastTx {
+                    tx,
+                    res_sender: None,
+                })
                 .expect("must be open");
         }
 

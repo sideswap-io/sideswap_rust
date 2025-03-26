@@ -48,6 +48,13 @@ pub struct Swap {
     pub status: SwapStatus,
 }
 
+#[derive(Deserialize)]
+pub struct Recipient {
+    pub address: elements::Address,
+    pub asset: DealerTicker,
+    pub amount: f64,
+}
+
 // Requests
 
 #[derive(Deserialize)]
@@ -57,6 +64,25 @@ pub struct NewAddressReq {}
 pub struct NewAddressResp {
     pub address: elements::Address,
 }
+
+#[derive(Deserialize)]
+pub struct CreateTxReq {
+    pub recipients: Vec<Recipient>,
+}
+
+#[derive(Serialize)]
+pub struct CreateTxResp {
+    pub txid: elements::Txid,
+    pub network_fee: u64,
+}
+
+#[derive(Deserialize)]
+pub struct SendTxReq {
+    pub txid: elements::Txid,
+}
+
+#[derive(Serialize)]
+pub struct SendTxResp {}
 
 #[derive(Deserialize)]
 pub struct GetQuoteReq {
@@ -126,21 +152,25 @@ pub struct BalancesNotif {
 #[derive(Deserialize)]
 pub enum Req {
     NewAddress(NewAddressReq),
+    CreateTx(CreateTxReq),
+    SendTx(SendTxReq),
     GetQuote(GetQuoteReq),
     AcceptQuote(AcceptQuoteReq),
+    GetSwaps(GetSwapsReq),
     NewPeg(NewPegReq),
     DelPeg(DelPegReq),
-    GetSwaps(GetSwapsReq),
 }
 
 #[derive(Serialize)]
 pub enum Resp {
     NewAddress(NewAddressResp),
+    CreateTx(CreateTxResp),
+    SendTx(SendTxResp),
     GetQuote(GetQuoteResp),
     AcceptQuote(AcceptQuoteResp),
+    GetSwaps(GetSwapsResp),
     NewPeg(NewPegResp),
     DelPeg(DelPegResp),
-    GetSwaps(GetSwapsResp),
 }
 
 #[derive(Serialize, Clone)]

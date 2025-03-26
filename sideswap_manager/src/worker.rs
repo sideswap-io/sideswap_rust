@@ -45,6 +45,14 @@ pub enum Command {
     NewAddress {
         res_sender: UncheckedOneshotSender<Result<elements::Address, Error>>,
     },
+    CreateTx {
+        req: api::CreateTxReq,
+        res_sender: UncheckedOneshotSender<Result<api::CreateTxResp, Error>>,
+    },
+    SendTx {
+        req: api::SendTxReq,
+        res_sender: UncheckedOneshotSender<Result<api::SendTxResp, Error>>,
+    },
     GetQuote {
         req: api::GetQuoteReq,
         res_sender: UncheckedOneshotSender<Result<api::GetQuoteResp, Error>>,
@@ -93,7 +101,7 @@ impl Quote {
 struct Data {
     _settings: Settings,
 
-    _policy_asset: AssetId,
+    policy_asset: AssetId,
 
     ticker_loader: Arc<TickerLoader>,
 
@@ -118,6 +126,8 @@ struct Data {
     swaps: BTreeSet<elements::Txid>,
 
     quotes: BTreeMap<QuoteId, Quote>,
+
+    created_txs: BTreeMap<elements::Txid, elements::Transaction>,
 }
 
 fn encode_pset(pset: &PartiallySignedTransaction) -> String {
@@ -194,6 +204,74 @@ async fn new_recv_address(data: &Data) -> Result<elements::Address, Error> {
         })?;
     let address = res_receiver.await?.map_err(Error::Wallet)?;
     Ok(address)
+}
+
+async fn create_tx(
+    data: &mut Data,
+    api::CreateTxReq { recipients }: api::CreateTxReq,
+) -> Result<api::CreateTxResp, Error> {
+    let recipients = recipients
+        .into_iter()
+        .map(|recipient| {
+            verify!(
+                data.ticker_loader.has_ticker(recipient.asset),
+                Error::UnknownTicker(recipient.asset)
+            );
+
+            let asset_id = data.ticker_loader.asset_id(recipient.asset);
+            let precision = data.ticker_loader.precision(recipient.asset);
+            let amount = try_convert_asset_amount(recipient.amount, precision)?;
+
+            Ok(sideswap_common::recipient::Recipient {
+                address: recipient.address,
+                asset_id: *asset_id,
+                amount,
+            })
+        })
+        .collect::<Result<Vec<sideswap_common::recipient::Recipient>, Error>>()?;
+
+    let (res_sender, res_receiver) = tokio::sync::oneshot::channel();
+    data.wallet_command_sender
+        .send(sideswap_lwk::Command::CreateTx {
+            req: sideswap_lwk::CreateTxReq { recipients },
+            res_sender: res_sender.into(),
+        })?;
+    let resp = res_receiver.await?.map_err(Error::Wallet)?;
+
+    let txid = resp.tx.txid();
+    let network_fee = resp.tx.fee_in(data.policy_asset);
+
+    data.created_txs.insert(txid, resp.tx);
+
+    Ok(api::CreateTxResp { txid, network_fee })
+}
+
+async fn send_tx(data: &mut Data, req: api::SendTxReq) -> Result<api::SendTxResp, Error> {
+    let tx = data.created_txs.get(&req.txid).ok_or(Error::NoCreatedTx)?;
+
+    let outpoints = tx.input.iter().map(|input| input.previous_output).collect();
+
+    let tx = elements::encode::serialize_hex(tx);
+
+    let _verify_resp = make_market_request!(
+        data.ws,
+        CheckOutpoints,
+        mkt::CheckOutpointsRequest { outpoints }
+    )?;
+
+    // FIXME: Save txid in the DB
+
+    let (res_sender, res_receiver) = tokio::sync::oneshot::channel();
+    data.wallet_command_sender
+        .send(sideswap_lwk::Command::BroadcastTx {
+            tx,
+            res_sender: Some(res_sender.into()),
+        })?;
+    let _txid = res_receiver.await?.map_err(Error::Wallet)?;
+
+    data.created_txs.clear();
+
+    Ok(api::SendTxResp {})
 }
 
 async fn get_quote(data: &mut Data, req: api::GetQuoteReq) -> Result<api::GetQuoteResp, Error> {
@@ -535,6 +613,16 @@ async fn process_command(data: &mut Data, command: Command) {
             res_sender.send(res);
         }
 
+        Command::CreateTx { req, res_sender } => {
+            let res = create_tx(data, req).await;
+            res_sender.send(res);
+        }
+
+        Command::SendTx { req, res_sender } => {
+            let res = send_tx(data, req).await;
+            res_sender.send(res);
+        }
+
         Command::GetQuote { req, res_sender } => {
             let res = get_quote(data, req).await;
             res_sender.send(res);
@@ -775,7 +863,7 @@ pub async fn run(
 
     let mut data = Data {
         _settings: settings,
-        _policy_asset: policy_asset,
+        policy_asset,
         ticker_loader,
         db,
         ws,
@@ -788,6 +876,7 @@ pub async fn run(
         peg_statuses: BTreeMap::new(),
         swaps,
         quotes: BTreeMap::new(),
+        created_txs: BTreeMap::new(),
     };
 
     let term_signal = sideswap_dealer::signals::TermSignal::new();

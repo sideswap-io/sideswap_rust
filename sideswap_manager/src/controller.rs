@@ -76,6 +76,24 @@ impl Controller {
         Ok(address)
     }
 
+    pub async fn create_tx(&self, req: api::CreateTxReq) -> Result<api::CreateTxResp, Error> {
+        let (res_sender, res_receiver) = oneshot::channel();
+        self.make_request(Command::CreateTx {
+            req,
+            res_sender: res_sender.into(),
+        })?;
+        res_receiver.await?
+    }
+
+    pub async fn send_tx(&self, req: api::SendTxReq) -> Result<api::SendTxResp, Error> {
+        let (res_sender, res_receiver) = oneshot::channel();
+        self.make_request(Command::SendTx {
+            req,
+            res_sender: res_sender.into(),
+        })?;
+        res_receiver.await?
+    }
+
     pub async fn get_quote(&self, req: api::GetQuoteReq) -> Result<api::GetQuoteResp, Error> {
         let (res_sender, res_receiver) = oneshot::channel();
         self.make_request(Command::GetQuote {

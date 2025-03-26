@@ -6,12 +6,13 @@ use std::{
     time::{Duration, Instant},
 };
 
+use anyhow::ensure;
 use elements::{
     bitcoin::bip32,
     confidential::{AssetBlindingFactor, ValueBlindingFactor},
     Txid,
 };
-use lwk_common::singlesig_desc;
+use lwk_common::{singlesig_desc, Signer};
 use lwk_wollet::{
     blocking::BlockchainBackend, elements_miniscript, secp256k1::SECP256K1, ElementsNetwork,
     WalletTx, WolletDescriptor,
@@ -19,6 +20,7 @@ use lwk_wollet::{
 use sideswap_common::{
     channel_helpers::{UncheckedOneshotSender, UncheckedUnboundedSender},
     network::Network,
+    recipient::Recipient,
     retry_delay::RetryDelay,
 };
 use sideswap_dealer::{
@@ -57,12 +59,25 @@ pub struct GetTxsResp {
     pub txs: Vec<WalletTx>,
 }
 
+pub struct CreateTxReq {
+    pub recipients: Vec<Recipient>,
+}
+
+pub struct CreateTxResp {
+    pub tx: elements::Transaction,
+}
+
 pub enum Command {
     NewAdddress {
         res_sender: UncheckedOneshotSender<Result<elements::Address, anyhow::Error>>,
     },
+    CreateTx {
+        req: CreateTxReq,
+        res_sender: UncheckedOneshotSender<Result<CreateTxResp, anyhow::Error>>,
+    },
     BroadcastTx {
         tx: String,
+        res_sender: Option<UncheckedOneshotSender<Result<elements::Txid, anyhow::Error>>>,
     },
     SendAsset {
         req: SendAssetReq,
@@ -76,6 +91,42 @@ pub enum Command {
 
 pub enum Event {
     Utxos { utxo_data: UtxoData },
+}
+
+fn create_tx(
+    network: Network,
+    req: CreateTxReq,
+    wallet: &lwk_wollet::Wollet,
+    signer: &lwk_signer::SwSigner,
+) -> Result<CreateTxResp, anyhow::Error> {
+    let mut tx_builder = wallet.tx_builder().enable_ct_discount();
+    ensure!(!req.recipients.is_empty(), "recipients list can't be empty");
+
+    let network_params = network.d().elements_params;
+
+    for recipient in req.recipients {
+        let blinding_pubkey = recipient.address.blinding_pubkey;
+        ensure!(
+            blinding_pubkey.is_some(),
+            "address must be confidential: {}",
+            recipient.address
+        );
+        ensure!(
+            recipient.address.params == network_params,
+            "address is from a different network: {}",
+            recipient.address
+        );
+        tx_builder = tx_builder.add_validated_recipient(lwk_wollet::Recipient {
+            satoshi: recipient.amount,
+            script_pubkey: recipient.address.script_pubkey(),
+            blinding_pubkey,
+            asset: recipient.asset_id,
+        });
+    }
+    let mut pset = tx_builder.finish()?;
+    signer.sign(&mut pset)?;
+    let tx = wallet.finalize(&mut pset)?;
+    Ok(CreateTxResp { tx })
 }
 
 fn broadcast_tx(
@@ -94,7 +145,6 @@ fn send_asset(
     signer: &lwk_signer::SwSigner,
     electrum_client: &lwk_wollet::ElectrumClient,
 ) -> Result<SendAssetResp, anyhow::Error> {
-    use lwk_common::Signer;
     let mut pset = wallet
         .tx_builder()
         .enable_ct_discount()
@@ -285,11 +335,20 @@ fn run(
                         res_sender.send(res);
                     }
 
-                    Command::BroadcastTx { tx } => {
+                    Command::CreateTx { req, res_sender } => {
+                        let res = create_tx(network, req, &wallet, &signer);
+                        res_sender.send(res);
+                    }
+
+                    Command::BroadcastTx { tx, res_sender } => {
                         let res = broadcast_tx(&electrum_client, &tx);
-                        match res {
-                            Ok(txid) => log::debug!("tx broadcast succeed: {txid}"),
-                            Err(err) => log::error!("tx broadcast failed: {err}"),
+                        if let Some(res_sender) = res_sender {
+                            res_sender.send(res);
+                        } else {
+                            match res {
+                                Ok(txid) => log::debug!("tx broadcast succeed: {txid}"),
+                                Err(err) => log::error!("tx broadcast failed: {err}"),
+                            }
                         }
                     }
 
