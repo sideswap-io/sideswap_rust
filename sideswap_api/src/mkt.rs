@@ -610,6 +610,24 @@ pub struct AckRequest {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct AckResponse {}
 
+#[derive(Serialize, Deserialize, Debug)]
+pub struct CheckOutpointsRequest {
+    pub outpoints: Vec<OutPoint>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct CheckOutpointsResponse {}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct BroadcastTxRequest {
+    pub tx: TransactionHex,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct BroadcastTxResponse {
+    pub txid: elements::Txid,
+}
+
 // Notifications
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -727,6 +745,8 @@ pub enum Request {
     ChartUnsub(ChartUnsubRequest),
     LoadHistory(LoadHistoryRequest),
     Ack(AckRequest),
+    CheckOutpoints(CheckOutpointsRequest),
+    BroadcastTx(BroadcastTxRequest),
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -755,6 +775,8 @@ pub enum Response {
     ChartUnsub(ChartUnsubResponse),
     LoadHistory(LoadHistoryResponse),
     Ack(AckResponse),
+    CheckOutpoints(CheckOutpointsResponse),
+    BroadcastTx(BroadcastTxResponse),
 }
 
 #[derive(Serialize, Deserialize, Debug)]

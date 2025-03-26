@@ -626,7 +626,9 @@ fn process_market_resp(data: &mut Data, resp: mkt::Response) {
         | mkt::Response::ChartSub(_)
         | mkt::Response::ChartUnsub(_)
         | mkt::Response::LoadHistory(_)
-        | mkt::Response::Ack(_) => {}
+        | mkt::Response::Ack(_)
+        | mkt::Response::CheckOutpoints(_)
+        | mkt::Response::BroadcastTx(_) => {}
     }
 }
 
