@@ -1110,29 +1110,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e8566979429cf69b49a5c740c60791108e86440e8be149bbea4fe54d2c32d6e2"
 
 [[package]]
-name = "depix_convert"
-version = "0.1.2"
-dependencies = [
- "anyhow",
- "base64 0.21.7",
- "bip39",
- "config",
- "elements",
- "hex",
- "log",
- "lwk_common",
- "lwk_signer",
- "lwk_wollet",
- "serde 1.0.214",
- "sideswap_api",
- "sideswap_common",
- "sideswap_dealer",
- "sideswap_lwk",
- "sideswap_types",
- "tokio",
-]
-
-[[package]]
 name = "der"
 version = "0.7.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
