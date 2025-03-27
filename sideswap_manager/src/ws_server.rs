@@ -78,9 +78,9 @@ async fn process_ws_req(data: &mut Data, req: api::Req) -> Result<api::Resp, Err
             Ok(api::Resp::DelPeg(resp))
         }
 
-        api::Req::GetSwaps(req) => {
-            let resp = data.controller.get_swaps(req).await?;
-            Ok(api::Resp::GetSwaps(resp))
+        api::Req::GetMonitoredTxs(req) => {
+            let resp = data.controller.get_monitored_txs(req).await?;
+            Ok(api::Resp::GetMonitoredTxs(resp))
         }
     }
 }

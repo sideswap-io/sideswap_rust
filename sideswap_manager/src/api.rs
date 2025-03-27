@@ -13,6 +13,9 @@ pub enum ErrorCode {
     ServerError,
     /// Network error
     NetworkError,
+    /// Transaction send failed due to a failed UTXO check.
+    /// Since the transaction did not leave the wallet, it is safe to cancel the transaction and try again.
+    UtxoCheckFailed,
 }
 
 #[derive(Debug, Serialize)]
@@ -43,9 +46,10 @@ pub enum SwapStatus {
 }
 
 #[derive(Serialize)]
-pub struct Swap {
+pub struct MonitoredTx {
     pub txid: elements::Txid,
     pub status: SwapStatus,
+    pub note: String,
 }
 
 #[derive(Deserialize)]
@@ -53,6 +57,13 @@ pub struct Recipient {
     pub address: elements::Address,
     pub asset: DealerTicker,
     pub amount: f64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BroadcastStatus {
+    Success {},
+    Error { error_msg: String },
 }
 
 // Requests
@@ -82,7 +93,10 @@ pub struct SendTxReq {
 }
 
 #[derive(Serialize)]
-pub struct SendTxResp {}
+pub struct SendTxResp {
+    pub res_wallet: BroadcastStatus,
+    pub res_server: BroadcastStatus,
+}
 
 #[derive(Deserialize)]
 pub struct GetQuoteReq {
@@ -132,11 +146,11 @@ pub struct DelPegReq {
 pub struct DelPegResp {}
 
 #[derive(Deserialize)]
-pub struct GetSwapsReq {}
+pub struct GetMonitoredTxsReq {}
 
 #[derive(Serialize)]
-pub struct GetSwapsResp {
-    pub swaps: Vec<Swap>,
+pub struct GetMonitoredTxsResp {
+    pub txs: Vec<MonitoredTx>,
 }
 
 // Notifications
@@ -156,7 +170,7 @@ pub enum Req {
     SendTx(SendTxReq),
     GetQuote(GetQuoteReq),
     AcceptQuote(AcceptQuoteReq),
-    GetSwaps(GetSwapsReq),
+    GetMonitoredTxs(GetMonitoredTxsReq),
     NewPeg(NewPegReq),
     DelPeg(DelPegReq),
 }
@@ -168,7 +182,7 @@ pub enum Resp {
     SendTx(SendTxResp),
     GetQuote(GetQuoteResp),
     AcceptQuote(AcceptQuoteResp),
-    GetSwaps(GetSwapsResp),
+    GetMonitoredTxs(GetMonitoredTxsResp),
     NewPeg(NewPegResp),
     DelPeg(DelPegResp),
 }

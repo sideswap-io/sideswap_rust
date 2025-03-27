@@ -7,7 +7,7 @@ use sqlx::{
     SqlitePool,
 };
 
-use crate::models::{Peg, Swap};
+use crate::models::{MonitoredTx, Peg};
 
 pub struct Db {
     pool: SqlitePool,
@@ -60,26 +60,30 @@ impl Db {
         .expect("must not fail")
     }
 
-    pub async fn add_swap(&self, swap: Swap) {
-        let txid = Text(swap.txid.0);
-        sqlx::query!("insert into swaps (txid) values (?)", txid)
-            .execute(&self.pool)
-            .await
-            .expect("must not fail");
+    pub async fn add_monitored_tx(&self, tx: MonitoredTx) {
+        let txid = Text(tx.txid.0);
+        sqlx::query!(
+            "insert into monitored_txs (txid, note) values (?, ?)",
+            txid,
+            tx.note
+        )
+        .execute(&self.pool)
+        .await
+        .expect("must not fail");
     }
 
-    pub async fn delete_swap(&self, txid: elements::Txid) {
+    pub async fn delete_monitored_tx(&self, txid: elements::Txid) {
         let txid = Text(txid);
-        sqlx::query!("delete from swaps where txid = ?", txid)
+        sqlx::query!("delete from monitored_txs where txid = ?", txid)
             .execute(&self.pool)
             .await
             .expect("must not fail");
     }
 
-    pub async fn load_swaps(&self) -> Vec<Swap> {
+    pub async fn load_monitored_txs(&self) -> Vec<MonitoredTx> {
         sqlx::query_as!(
-            Swap,
-            "select txid as 'txid!: Text<elements::Txid>' from swaps"
+            MonitoredTx,
+            "select txid as 'txid!: Text<elements::Txid>', note from monitored_txs"
         )
         .fetch_all(&self.pool)
         .await

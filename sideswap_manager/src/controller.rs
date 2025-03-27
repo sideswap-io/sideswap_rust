@@ -137,9 +137,12 @@ impl Controller {
         Ok(resp)
     }
 
-    pub async fn get_swaps(&self, req: api::GetSwapsReq) -> Result<api::GetSwapsResp, Error> {
+    pub async fn get_monitored_txs(
+        &self,
+        req: api::GetMonitoredTxsReq,
+    ) -> Result<api::GetMonitoredTxsResp, Error> {
         let (res_sender, res_receiver) = oneshot::channel();
-        self.make_request(Command::GetSwaps {
+        self.make_request(Command::GetMonitoredTxs {
             req,
             res_sender: res_sender.into(),
         })?;

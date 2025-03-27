@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "delete from monitored_txs where txid = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "700604bf95e736a6994d4dd67adb747901183e96c9e9ded52d0cd5e5fe02e85f"
+}

@@ -50,6 +50,8 @@ pub enum Error {
     NoQuote,
     #[error("No stored tx with this txid, please try again")]
     NoCreatedTx,
+    #[error("UTXO check failed: {0}, please retry")]
+    UtxoCheckFailed(String),
 }
 
 impl From<tokio::sync::oneshot::error::RecvError> for Error {
@@ -89,6 +91,7 @@ impl Error {
             | Error::NoCreatedTx => api::ErrorCode::InvalidRequest,
             Error::ChannelClosed | Error::NoUtxos => api::ErrorCode::ServerError,
             Error::WsError(_) => api::ErrorCode::NetworkError,
+            Error::UtxoCheckFailed(_) => api::ErrorCode::UtxoCheckFailed,
         }
     }
 }

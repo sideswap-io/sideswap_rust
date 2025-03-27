@@ -26,6 +26,7 @@ use sideswap_common::{
 };
 use sideswap_dealer::utxo_data::UtxoData;
 use sideswap_types::asset_precision::AssetPrecision;
+use sideswap_types::utxo_ext::UtxoExt;
 use sqlx::types::Text;
 use tokio::{
     sync::mpsc::{unbounded_channel, UnboundedReceiver},
@@ -36,7 +37,7 @@ use crate::{
     api,
     db::Db,
     error::Error,
-    models::{Peg, Swap},
+    models::{self, MonitoredTx, Peg},
     ws_server::ClientId,
     Settings,
 };
@@ -69,9 +70,9 @@ pub enum Command {
         req: api::DelPegReq,
         res_sender: UncheckedOneshotSender<Result<api::DelPegResp, Error>>,
     },
-    GetSwaps {
-        req: api::GetSwapsReq,
-        res_sender: UncheckedOneshotSender<Result<api::GetSwapsResp, Error>>,
+    GetMonitoredTxs {
+        req: api::GetMonitoredTxsReq,
+        res_sender: UncheckedOneshotSender<Result<api::GetMonitoredTxsResp, Error>>,
     },
     ClientConnected {
         client_id: ClientId,
@@ -90,6 +91,7 @@ struct Quote {
     txid: elements::Txid,
     pset: PartiallySignedTransaction,
     expires_at: Instant,
+    note: String,
 }
 
 impl Quote {
@@ -97,6 +99,13 @@ impl Quote {
         Instant::now() < self.expires_at
     }
 }
+
+struct CreatedTx {
+    tx: elements::Transaction,
+    note: String,
+}
+
+type MinitoredTxs = BTreeMap<elements::Txid, models::MonitoredTx>;
 
 struct Data {
     _settings: Settings,
@@ -123,11 +132,11 @@ struct Data {
 
     peg_statuses: BTreeMap<OrderId, PegStatus>,
 
-    swaps: BTreeSet<elements::Txid>,
+    monitored_txs: MinitoredTxs,
 
     quotes: BTreeMap<QuoteId, Quote>,
 
-    created_txs: BTreeMap<elements::Txid, elements::Transaction>,
+    created_txs: BTreeMap<elements::Txid, CreatedTx>,
 }
 
 fn encode_pset(pset: &PartiallySignedTransaction) -> String {
@@ -190,6 +199,15 @@ fn convert_balances(data: &Data, utxo_data: &UtxoData) -> api::Balances {
         .collect()
 }
 
+async fn new_monitored_tx(
+    db: &Db,
+    monitored_txs: &mut MinitoredTxs,
+    monitored_tx: models::MonitoredTx,
+) {
+    db.add_monitored_tx(monitored_tx.clone()).await;
+    monitored_txs.insert(monitored_tx.txid.0, monitored_tx);
+}
+
 enum QuoteStatus {
     Disconnected,
     Timeout(tokio::time::error::Elapsed),
@@ -210,6 +228,17 @@ async fn create_tx(
     data: &mut Data,
     api::CreateTxReq { recipients }: api::CreateTxReq,
 ) -> Result<api::CreateTxResp, Error> {
+    let note = recipients
+        .iter()
+        .map(|recipient| {
+            format!(
+                "send {} {} to {}",
+                recipient.amount, recipient.asset, recipient.address
+            )
+        })
+        .collect::<Vec<_>>();
+    let note = note.join(", ");
+
     let recipients = recipients
         .into_iter()
         .map(|recipient| {
@@ -241,25 +270,64 @@ async fn create_tx(
     let txid = resp.tx.txid();
     let network_fee = resp.tx.fee_in(data.policy_asset);
 
-    data.created_txs.insert(txid, resp.tx);
+    data.created_txs
+        .insert(txid, CreatedTx { tx: resp.tx, note });
 
     Ok(api::CreateTxResp { txid, network_fee })
 }
 
 async fn send_tx(data: &mut Data, req: api::SendTxReq) -> Result<api::SendTxResp, Error> {
-    let tx = data.created_txs.get(&req.txid).ok_or(Error::NoCreatedTx)?;
+    let created = data.created_txs.get(&req.txid).ok_or(Error::NoCreatedTx)?;
 
-    let outpoints = tx.input.iter().map(|input| input.previous_output).collect();
+    let outpoints = created
+        .tx
+        .input
+        .iter()
+        .map(|input| input.previous_output)
+        .collect::<Vec<_>>();
 
-    let tx = elements::encode::serialize_hex(tx);
+    {
+        let mut tx_outpoints = outpoints.iter().copied().collect::<BTreeSet<_>>();
+        let utxo_data = data
+            .utxo_data
+            .as_ref()
+            .ok_or_else(|| Error::UtxoCheckFailed("utxo_data is None".to_owned()))?;
+        for utxo in utxo_data.utxos() {
+            tx_outpoints.remove(&utxo.outpoint());
+        }
+        verify!(
+            tx_outpoints.is_empty(),
+            Error::UtxoCheckFailed("Can't find wallet UTXOs".to_owned())
+        );
+    }
 
+    // Verify that UTXOs are not spent and known on the server
     let _verify_resp = make_market_request!(
         data.ws,
         CheckOutpoints,
         mkt::CheckOutpointsRequest { outpoints }
-    )?;
+    )
+    .map_err(|err| Error::UtxoCheckFailed(err.to_string()))?;
 
-    // FIXME: Save txid in the DB
+    new_monitored_tx(
+        &data.db,
+        &mut data.monitored_txs,
+        MonitoredTx {
+            txid: Text(req.txid),
+            note: Some(created.note.clone()),
+        },
+    )
+    .await;
+
+    let tx = elements::encode::serialize_hex(&created.tx);
+
+    let res_server = make_market_request!(
+        data.ws,
+        BroadcastTx,
+        mkt::BroadcastTxRequest {
+            tx: created.tx.clone().into()
+        }
+    );
 
     let (res_sender, res_receiver) = tokio::sync::oneshot::channel();
     data.wallet_command_sender
@@ -267,11 +335,28 @@ async fn send_tx(data: &mut Data, req: api::SendTxReq) -> Result<api::SendTxResp
             tx,
             res_sender: Some(res_sender.into()),
         })?;
-    let _txid = res_receiver.await?.map_err(Error::Wallet)?;
+    let res_wallet = res_receiver.await.expect("must not fail");
 
     data.created_txs.clear();
 
-    Ok(api::SendTxResp {})
+    let res_wallet = match res_wallet {
+        Ok(_txid) => api::BroadcastStatus::Success {},
+        Err(err) => api::BroadcastStatus::Error {
+            error_msg: err.to_string(),
+        },
+    };
+
+    let res_server = match res_server {
+        Ok(_txid) => api::BroadcastStatus::Success {},
+        Err(err) => api::BroadcastStatus::Error {
+            error_msg: err.to_string(),
+        },
+    };
+
+    Ok(api::SendTxResp {
+        res_wallet,
+        res_server,
+    })
 }
 
 async fn get_quote(data: &mut Data, req: api::GetQuoteReq) -> Result<api::GetQuoteResp, Error> {
@@ -344,7 +429,7 @@ async fn get_quote(data: &mut Data, req: api::GetQuoteReq) -> Result<api::GetQuo
             amount: send_amount,
             trade_dir: TradeDir::Sell,
             utxos,
-            receive_address,
+            receive_address: receive_address.clone(),
             change_address,
             order_id: None,
             private_id: None,
@@ -441,12 +526,18 @@ async fn get_quote(data: &mut Data, req: api::GetQuoteReq) -> Result<api::GetQuo
                 .ok_or(Error::NoUtxos)?
                 .sign_pset(pset);
 
+            let note = format!(
+                "swap {} {} for {} {} to {}",
+                req.send_amount, req.send_asset, quote_recv_amount, req.recv_asset, receive_address
+            );
+
             data.quotes.insert(
                 quote_id,
                 Quote {
                     txid,
                     pset,
                     expires_at,
+                    note,
                 },
             );
 
@@ -487,13 +578,15 @@ async fn accept_quote(
 
     let pset = encode_pset(&quote.pset);
 
-    data.db
-        .add_swap(Swap {
+    new_monitored_tx(
+        &data.db,
+        &mut data.monitored_txs,
+        MonitoredTx {
             txid: Text(quote.txid),
-        })
-        .await;
-
-    data.swaps.insert(quote.txid);
+            note: Some(quote.note.clone()),
+        },
+    )
+    .await;
 
     let accept_resp = make_market_request!(
         data.ws,
@@ -566,25 +659,24 @@ async fn del_peg(
     Ok(api::DelPegResp {})
 }
 
-async fn get_swaps(
+async fn get_monitored_txs(
     data: &mut Data,
-    api::GetSwapsReq {}: api::GetSwapsReq,
-) -> Result<api::GetSwapsResp, Error> {
+    api::GetMonitoredTxsReq {}: api::GetMonitoredTxsReq,
+) -> Result<api::GetMonitoredTxsResp, Error> {
     let (res_sender, res_receiver) = tokio::sync::oneshot::channel();
+    let txids = data.monitored_txs.keys().copied().collect::<BTreeSet<_>>();
     data.wallet_command_sender
         .send(sideswap_lwk::Command::GetTxs {
-            req: sideswap_lwk::GetTxsReq {
-                txids: data.swaps.clone(),
-            },
+            req: sideswap_lwk::GetTxsReq { txids },
             res_sender: res_sender.into(),
         })?;
     let txs = res_receiver.await?.map_err(Error::Wallet)?;
 
-    let swaps = data
-        .swaps
-        .iter()
-        .map(|txid| {
-            let tx = txs.txs.iter().find(|tx| tx.txid == *txid);
+    let monitored_txs = data
+        .monitored_txs
+        .values()
+        .map(|monitored_txid| {
+            let tx = txs.txs.iter().find(|tx| tx.txid == monitored_txid.txid.0);
 
             let status = if let Some(tx) = tx {
                 if tx.height.is_some() {
@@ -596,14 +688,15 @@ async fn get_swaps(
                 api::SwapStatus::NotFound
             };
 
-            api::Swap {
-                txid: *txid,
+            api::MonitoredTx {
+                txid: monitored_txid.txid.0,
                 status,
+                note: monitored_txid.note.clone().unwrap_or_default(),
             }
         })
         .collect::<Vec<_>>();
 
-    Ok(api::GetSwapsResp { swaps })
+    Ok(api::GetMonitoredTxsResp { txs: monitored_txs })
 }
 
 async fn process_command(data: &mut Data, command: Command) {
@@ -643,8 +736,8 @@ async fn process_command(data: &mut Data, command: Command) {
             res_sender.send(res);
         }
 
-        Command::GetSwaps { req, res_sender } => {
-            let res = get_swaps(data, req).await;
+        Command::GetMonitoredTxs { req, res_sender } => {
+            let res = get_monitored_txs(data, req).await;
             res_sender.send(res);
         }
 
@@ -854,12 +947,12 @@ pub async fn run(
         .map(|peg| peg.order_id.0)
         .collect();
 
-    let swaps = db
-        .load_swaps()
+    let monitored_txs = db
+        .load_monitored_txs()
         .await
-        .iter()
-        .map(|swap| swap.txid.0)
-        .collect();
+        .into_iter()
+        .map(|monitored_tx| (monitored_tx.txid.0, monitored_tx))
+        .collect::<BTreeMap<_, _>>();
 
     let mut data = Data {
         _settings: settings,
@@ -874,7 +967,7 @@ pub async fn run(
         utxo_data: None,
         pegs,
         peg_statuses: BTreeMap::new(),
-        swaps,
+        monitored_txs,
         quotes: BTreeMap::new(),
         created_txs: BTreeMap::new(),
     };

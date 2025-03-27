@@ -1,11 +1,16 @@
 {
   "db_name": "SQLite",
-  "query": "select txid as 'txid!: Text<elements::Txid>' from swaps",
+  "query": "select txid as 'txid!: Text<elements::Txid>', note from monitored_txs",
   "describe": {
     "columns": [
       {
         "name": "txid!: Text<elements::Txid>",
         "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "note",
+        "ordinal": 1,
         "type_info": "Text"
       }
     ],
@@ -13,8 +18,9 @@
       "Right": 0
     },
     "nullable": [
+      true,
       true
     ]
   },
-  "hash": "cfaa3bf0773cc85fd2b0ee291366ee23ef265c4ab8f6f60dafb4a1e980183a0d"
+  "hash": "e009a2f242e746bb02e5e6ce350d1c5bc8013d9cfe3775aa95a19df40da26f3e"
 }
