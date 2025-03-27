@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "select ind, address as 'address!: Text<elements::Address>', user_note from addresses",
+  "describe": {
+    "columns": [
+      {
+        "name": "ind",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "address!: Text<elements::Address>",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "user_note",
+        "ordinal": 2,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "2c354191fdc09f772e1e9a2f40b186d898f435950f88237dbce381a5c0047e72"
+}

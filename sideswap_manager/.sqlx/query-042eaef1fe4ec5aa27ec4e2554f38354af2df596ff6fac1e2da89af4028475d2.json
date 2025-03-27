@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "insert into addresses (ind, address, user_note) values (?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "042eaef1fe4ec5aa27ec4e2554f38354af2df596ff6fac1e2da89af4028475d2"
+}
