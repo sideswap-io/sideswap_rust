@@ -314,7 +314,8 @@ async fn send_tx(data: &mut Data, req: api::SendTxReq) -> Result<api::SendTxResp
         &mut data.monitored_txs,
         MonitoredTx {
             txid: Text(req.txid),
-            note: Some(created.note.clone()),
+            description: Some(created.note.clone()),
+            user_note: req.user_note,
         },
     )
     .await;
@@ -583,7 +584,8 @@ async fn accept_quote(
         &mut data.monitored_txs,
         MonitoredTx {
             txid: Text(quote.txid),
-            note: Some(quote.note.clone()),
+            description: Some(quote.note.clone()),
+            user_note: req.user_note,
         },
     )
     .await;
@@ -691,7 +693,8 @@ async fn get_monitored_txs(
             api::MonitoredTx {
                 txid: monitored_txid.txid.0,
                 status,
-                note: monitored_txid.note.clone().unwrap_or_default(),
+                description: monitored_txid.description.clone().unwrap_or_default(),
+                user_note: monitored_txid.user_note.clone(),
             }
         })
         .collect::<Vec<_>>();

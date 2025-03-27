@@ -63,9 +63,10 @@ impl Db {
     pub async fn add_monitored_tx(&self, tx: MonitoredTx) {
         let txid = Text(tx.txid.0);
         sqlx::query!(
-            "insert into monitored_txs (txid, note) values (?, ?)",
+            "insert into monitored_txs (txid, description, user_note) values (?, ?, ?)",
             txid,
-            tx.note
+            tx.description,
+            tx.user_note,
         )
         .execute(&self.pool)
         .await
@@ -83,7 +84,7 @@ impl Db {
     pub async fn load_monitored_txs(&self) -> Vec<MonitoredTx> {
         sqlx::query_as!(
             MonitoredTx,
-            "select txid as 'txid!: Text<elements::Txid>', note from monitored_txs"
+            "select txid as 'txid!: Text<elements::Txid>', description, user_note from monitored_txs"
         )
         .fetch_all(&self.pool)
         .await

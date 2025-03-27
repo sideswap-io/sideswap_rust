@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "insert into monitored_txs (txid, description, user_note) values (?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "14d881af142bd300406e4a223ec3ad02e0847b4d3cd841fb01861a79e8663056"
+}

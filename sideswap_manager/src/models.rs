@@ -9,5 +9,6 @@ pub struct Peg {
 #[derive(Clone)]
 pub struct MonitoredTx {
     pub txid: Text<elements::Txid>,
-    pub note: Option<String>,
+    pub description: Option<String>,
+    pub user_note: Option<String>,
 }

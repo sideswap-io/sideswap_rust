@@ -49,7 +49,8 @@ pub enum SwapStatus {
 pub struct MonitoredTx {
     pub txid: elements::Txid,
     pub status: SwapStatus,
-    pub note: String,
+    pub description: String,
+    pub user_note: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -90,6 +91,7 @@ pub struct CreateTxResp {
 #[derive(Deserialize)]
 pub struct SendTxReq {
     pub txid: elements::Txid,
+    pub user_note: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -117,6 +119,7 @@ pub struct GetQuoteResp {
 #[derive(Deserialize)]
 pub struct AcceptQuoteReq {
     pub quote_id: QuoteId,
+    pub user_note: Option<String>,
 }
 
 #[derive(Serialize)]

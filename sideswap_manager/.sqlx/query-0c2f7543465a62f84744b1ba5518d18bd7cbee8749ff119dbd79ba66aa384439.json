@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "select txid as 'txid!: Text<elements::Txid>', note from monitored_txs",
+  "query": "select txid as 'txid!: Text<elements::Txid>', description, user_note from monitored_txs",
   "describe": {
     "columns": [
       {
@@ -9,8 +9,13 @@
         "type_info": "Text"
       },
       {
-        "name": "note",
+        "name": "description",
         "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "user_note",
+        "ordinal": 2,
         "type_info": "Text"
       }
     ],
@@ -19,8 +24,9 @@
     },
     "nullable": [
       true,
+      true,
       true
     ]
   },
-  "hash": "e009a2f242e746bb02e5e6ce350d1c5bc8013d9cfe3775aa95a19df40da26f3e"
+  "hash": "0c2f7543465a62f84744b1ba5518d18bd7cbee8749ff119dbd79ba66aa384439"
 }
