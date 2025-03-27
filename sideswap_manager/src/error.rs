@@ -52,6 +52,8 @@ pub enum Error {
     NoCreatedTx,
     #[error("UTXO check failed: {0}, please retry")]
     UtxoCheckFailed(String),
+    #[error("Gap limit reached")]
+    GapLimit,
 }
 
 impl From<tokio::sync::oneshot::error::RecvError> for Error {
@@ -88,7 +90,8 @@ impl Error {
             | Error::PsetError(_)
             | Error::QuoteExpired
             | Error::NoQuote
-            | Error::NoCreatedTx => api::ErrorCode::InvalidRequest,
+            | Error::NoCreatedTx
+            | Error::GapLimit => api::ErrorCode::InvalidRequest,
             Error::ChannelClosed | Error::NoUtxos => api::ErrorCode::ServerError,
             Error::WsError(_) => api::ErrorCode::NetworkError,
             Error::UtxoCheckFailed(_) => api::ErrorCode::UtxoCheckFailed,

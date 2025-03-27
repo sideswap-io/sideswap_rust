@@ -106,6 +106,7 @@ pub enum Event {
         pset: PartiallySignedTransaction,
     },
     NewAddress {
+        change: bool,
         res_sender: UncheckedOneshotSender<Result<Address, anyhow::Error>>,
     },
     SwapSucceed {
@@ -1336,9 +1337,13 @@ fn signed_accepted_quote(
     );
 }
 
-async fn new_address(event_sender: &UncheckedUnboundedSender<Event>) -> Result<Address, Error> {
+async fn new_address(
+    event_sender: &UncheckedUnboundedSender<Event>,
+    change: bool,
+) -> Result<Address, Error> {
     let (res_sender, res_receiver) = oneshot::channel();
     event_sender.send(Event::NewAddress {
+        change,
         res_sender: res_sender.into(),
     });
     let address = res_receiver.await?.map_err(Error::WalletError)?;
@@ -1423,6 +1428,7 @@ async fn process_client_command(data: &mut Data, command: ClientCommand) {
 
         ClientCommand::NewAddress { res_sender } => {
             data.event_sender.send(Event::NewAddress {
+                change: false,
                 res_sender: res_sender.into(),
             });
         }
@@ -1896,10 +1902,10 @@ async fn try_sync_market(data: &mut Data, key: &OrderGroupKey) -> Result<(), any
 
             resp.address
         } else {
-            new_address(&data.event_sender).await?
+            new_address(&data.event_sender, false).await?
         };
 
-        let change_address = new_address(&data.event_sender).await?;
+        let change_address = new_address(&data.event_sender, true).await?;
 
         let resp = make_market_request!(
             data.ws,

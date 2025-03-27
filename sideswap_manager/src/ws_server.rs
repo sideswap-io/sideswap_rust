@@ -43,9 +43,9 @@ async fn send_notif(data: &mut Data, notif: api::Notif) {
 
 async fn process_ws_req(data: &mut Data, req: api::Req) -> Result<api::Resp, Error> {
     match req {
-        api::Req::NewAddress(api::NewAddressReq {}) => {
-            let address = data.controller.new_address().await?;
-            Ok(api::Resp::NewAddress(api::NewAddressResp { address }))
+        api::Req::NewAddress(req) => {
+            let resp = data.controller.new_address(req).await?;
+            Ok(api::Resp::NewAddress(resp))
         }
 
         api::Req::CreateTx(req) => {

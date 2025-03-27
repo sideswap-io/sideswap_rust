@@ -110,7 +110,10 @@ async fn process_market_event(data: &mut Data, event: market::Event) {
             });
         }
 
-        market::Event::NewAddress { res_sender } => {
+        market::Event::NewAddress {
+            change: _,
+            res_sender,
+        } => {
             let wallet = Arc::clone(&data.wallet);
             tokio::spawn(async move {
                 let res = wallet

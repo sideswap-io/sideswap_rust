@@ -12,3 +12,10 @@ pub struct MonitoredTx {
     pub description: Option<String>,
     pub user_note: Option<String>,
 }
+
+#[derive(Clone)]
+pub struct Address {
+    pub ind: i64,
+    pub address: Text<elements::Address>,
+    pub user_note: Option<String>,
+}

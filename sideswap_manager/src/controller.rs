@@ -1,6 +1,5 @@
 use std::{str::FromStr, sync::Arc};
 
-use elements::Address;
 use sideswap_common::{
     channel_helpers::UncheckedUnboundedSender, dealer_ticker::TickerLoader, network::Network,
     verify,
@@ -67,9 +66,10 @@ impl Controller {
         let _ = self.make_request(Command::ClientDisconnected { client_id });
     }
 
-    pub async fn new_address(&self) -> Result<Address, Error> {
+    pub async fn new_address(&self, req: api::NewAddressReq) -> Result<api::NewAddressResp, Error> {
         let (res_sender, res_receiver) = oneshot::channel();
         self.make_request(Command::NewAddress {
+            req,
             res_sender: res_sender.into(),
         })?;
         let address = res_receiver.await??;

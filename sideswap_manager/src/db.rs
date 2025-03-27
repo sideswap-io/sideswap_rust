@@ -7,7 +7,7 @@ use sqlx::{
     SqlitePool,
 };
 
-use crate::models::{MonitoredTx, Peg};
+use crate::models::{self, MonitoredTx, Peg};
 
 pub struct Db {
     pool: SqlitePool,
@@ -85,6 +85,28 @@ impl Db {
         sqlx::query_as!(
             MonitoredTx,
             "select txid as 'txid!: Text<elements::Txid>', description, user_note from monitored_txs"
+        )
+        .fetch_all(&self.pool)
+        .await
+        .expect("must not fail")
+    }
+
+    pub async fn add_address(&self, addr: models::Address) {
+        sqlx::query!(
+            "insert into addresses (ind, address, user_note) values (?, ?, ?)",
+            addr.ind,
+            addr.address,
+            addr.user_note,
+        )
+        .execute(&self.pool)
+        .await
+        .expect("must not fail");
+    }
+
+    pub async fn load_addresses(&self) -> Vec<models::Address> {
+        sqlx::query_as!(
+            models::Address,
+            "select ind, address as 'address!: Text<elements::Address>', user_note from addresses"
         )
         .fetch_all(&self.pool)
         .await

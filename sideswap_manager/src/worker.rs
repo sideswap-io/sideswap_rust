@@ -42,9 +42,12 @@ use crate::{
     Settings,
 };
 
+const GAP_LIMIT: u32 = 20;
+
 pub enum Command {
     NewAddress {
-        res_sender: UncheckedOneshotSender<Result<elements::Address, Error>>,
+        req: api::NewAddressReq,
+        res_sender: UncheckedOneshotSender<Result<api::NewAddressResp, Error>>,
     },
     CreateTx {
         req: api::CreateTxReq,
@@ -137,6 +140,8 @@ struct Data {
     quotes: BTreeMap<QuoteId, Quote>,
 
     created_txs: BTreeMap<elements::Txid, CreatedTx>,
+
+    addresses: BTreeMap<u32, models::Address>,
 }
 
 fn encode_pset(pset: &PartiallySignedTransaction) -> String {
@@ -214,14 +219,48 @@ enum QuoteStatus {
     Quote(mkt::QuoteNotif),
 }
 
-async fn new_recv_address(data: &Data) -> Result<elements::Address, Error> {
+async fn get_new_address(
+    data: &Data,
+    change: bool,
+    index: Option<u32>,
+) -> Result<sideswap_lwk::NewAddrResp, Error> {
     let (res_sender, res_receiver) = tokio::sync::oneshot::channel();
     data.wallet_command_sender
         .send(sideswap_lwk::Command::NewAdddress {
+            req: sideswap_lwk::NewAddrReq { change, index },
             res_sender: res_sender.into(),
         })?;
-    let address = res_receiver.await?.map_err(Error::Wallet)?;
-    Ok(address)
+    let resp = res_receiver.await?.map_err(Error::Wallet)?;
+    Ok(resp)
+}
+
+async fn new_address(
+    data: &mut Data,
+    api::NewAddressReq { user_note }: api::NewAddressReq,
+) -> Result<api::NewAddressResp, Error> {
+    let first_unused_wallet = get_new_address(data, false, None).await?.index;
+    let first_unused_db = data
+        .addresses
+        .last_key_value()
+        .map(|(_key, value)| value.ind as u32 + 1)
+        .unwrap_or_default();
+    let new_index = u32::max(first_unused_wallet, first_unused_db);
+    verify!(new_index - first_unused_wallet < GAP_LIMIT, Error::GapLimit);
+
+    let new_address = get_new_address(data, false, Some(new_index)).await?;
+
+    let addr = models::Address {
+        ind: new_index.into(),
+        address: Text(new_address.address.clone()),
+        user_note,
+    };
+    data.db.add_address(addr.clone()).await;
+    data.addresses.insert(new_index, addr);
+
+    Ok(api::NewAddressResp {
+        index: new_index,
+        address: new_address.address,
+    })
 }
 
 async fn create_tx(
@@ -398,7 +437,7 @@ async fn get_quote(data: &mut Data, req: api::GetQuoteReq) -> Result<api::GetQuo
 
     // TODO: Reuse addresses
     let receive_address = req.receive_address;
-    let change_address = new_recv_address(&data).await?;
+    let change_address = get_new_address(&data, true, None).await?.address;
 
     let utxos = data
         .utxo_data
@@ -704,8 +743,8 @@ async fn get_monitored_txs(
 
 async fn process_command(data: &mut Data, command: Command) {
     match command {
-        Command::NewAddress { res_sender } => {
-            let res = new_recv_address(data).await;
+        Command::NewAddress { req, res_sender } => {
+            let res = new_address(data, req).await;
             res_sender.send(res);
         }
 
@@ -957,6 +996,13 @@ pub async fn run(
         .map(|monitored_tx| (monitored_tx.txid.0, monitored_tx))
         .collect::<BTreeMap<_, _>>();
 
+    let addresses = db
+        .load_addresses()
+        .await
+        .into_iter()
+        .map(|addr| (addr.ind as u32, addr))
+        .collect::<BTreeMap<_, _>>();
+
     let mut data = Data {
         _settings: settings,
         policy_asset,
@@ -973,6 +1019,7 @@ pub async fn run(
         monitored_txs,
         quotes: BTreeMap::new(),
         created_txs: BTreeMap::new(),
+        addresses,
     };
 
     let term_signal = sideswap_dealer::signals::TermSignal::new();

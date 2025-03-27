@@ -71,7 +71,10 @@ fn process_market_event(data: &mut Data, event: market::Event) {
                 .send(market::Command::SignedSwap { quote_id, pset });
         }
 
-        market::Event::NewAddress { res_sender } => {
+        market::Event::NewAddress {
+            change: _,
+            res_sender,
+        } => {
             let rpc_server = data.settings.rpc.clone();
             tokio::spawn(async move {
                 let res = rpc::make_rpc_call(&rpc_server, rpc::GetNewAddressCall {})

@@ -70,10 +70,13 @@ pub enum BroadcastStatus {
 // Requests
 
 #[derive(Deserialize)]
-pub struct NewAddressReq {}
+pub struct NewAddressReq {
+    pub user_note: Option<String>,
+}
 
 #[derive(Serialize)]
 pub struct NewAddressResp {
+    pub index: u32,
     pub address: elements::Address,
 }
 

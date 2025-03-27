@@ -51,6 +51,17 @@ pub struct Params {
     pub script_variant: ScriptVariant,
 }
 
+pub struct NewAddrReq {
+    pub change: bool,
+    pub index: Option<u32>,
+}
+
+pub struct NewAddrResp {
+    pub change: bool,
+    pub index: u32,
+    pub address: elements::Address,
+}
+
 pub struct GetTxsReq {
     pub txids: BTreeSet<elements::Txid>,
 }
@@ -69,7 +80,8 @@ pub struct CreateTxResp {
 
 pub enum Command {
     NewAdddress {
-        res_sender: UncheckedOneshotSender<Result<elements::Address, anyhow::Error>>,
+        req: NewAddrReq,
+        res_sender: UncheckedOneshotSender<Result<NewAddrResp, anyhow::Error>>,
     },
     CreateTx {
         req: CreateTxReq,
@@ -326,12 +338,21 @@ fn run(
             let res = command_receiver.recv_timeout(timeout);
             match res {
                 Ok(command) => match command {
-                    Command::NewAdddress { res_sender } => {
-                        // FIXME: This returns the same address, pass updated index
-                        let res = wallet
-                            .address(None)
-                            .map(|addr| addr.address().clone())
+                    Command::NewAdddress { req, res_sender } => {
+                        let res = if req.change {
+                            wallet.change(req.index)
+                        } else {
+                            wallet.address(req.index)
+                        };
+
+                        let res = res
+                            .map(|addr| NewAddrResp {
+                                index: addr.index(),
+                                address: addr.address().clone(),
+                                change: req.change,
+                            })
                             .map_err(|err| anyhow::anyhow!("address loading failed: {err}"));
+
                         res_sender.send(res);
                     }
 
