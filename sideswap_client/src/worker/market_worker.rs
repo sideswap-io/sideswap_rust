@@ -2162,7 +2162,7 @@ fn try_start_quotes(
         .market
         .wallet_utxos
         .iter()
-        .filter(|(account, _utxos)| swap_info.utxo_wallets.contains(*account))
+        .filter(|(account, _utxos)| swap_info.utxo_wallets.contains(*account) && !msg.skip_utxos)
         .flat_map(|(_account, utxos)| utxos.unspent_outputs.values())
         .flatten()
         .filter(|utxo| utxo.asset_id == swap_info.send_asset)
@@ -2353,6 +2353,7 @@ pub fn start_order(
                     asset_type: proto::AssetType::Base.into(),
                     amount: u64::MAX,
                     trade_dir: proto::TradeDir::from(private.trade_dir.inv()).into(),
+                    skip_utxos: false,
                 },
                 Some(order_id),
                 private_id,

@@ -387,6 +387,7 @@ fn make_swap(
         asset_type: asset_type.into(),
         amount,
         trade_dir: trade_dir.into(),
+        skip_utxos: false,
     }));
 
     swap_first_quote(data);
