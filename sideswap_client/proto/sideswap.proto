@@ -363,6 +363,8 @@ message To {
     // If true, the UTXOs list will not be sent to the server and will result in LowBalance quotes.
     // It can be used with the Instant Swaps page to show something there on initial load.
     required bool skip_utxos = 5;
+    // Optional client-generated ID that will later be returned with all received quotes
+    optional int64 client_sub_id = 6;
   }
 
   message StartOrder {
@@ -758,6 +760,8 @@ message From {
     required uint64 amount = 3;
     required TradeDir trade_dir = 4;
     optional uint64 order_id = 5;
+    // Client generated from the StartQuotes message
+    optional int64 client_sub_id = 6;
 
     oneof result {
       Success success = 10;

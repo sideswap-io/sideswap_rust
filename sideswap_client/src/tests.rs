@@ -388,6 +388,7 @@ fn make_swap(
         amount,
         trade_dir: trade_dir.into(),
         skip_utxos: false,
+        client_sub_id: None,
     }));
 
     swap_first_quote(data);

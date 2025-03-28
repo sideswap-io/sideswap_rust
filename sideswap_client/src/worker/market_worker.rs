@@ -76,6 +76,7 @@ struct StartedQuote {
     trade_dir: TradeDir,
     fee_asset: AssetType,
     order_id: Option<u64>,
+    client_sub_id: Option<i64>,
 
     utxos: Vec<gdk_json::UnspentOutput>,
     receive_address: gdk_json::AddressInfo,
@@ -859,6 +860,7 @@ fn process_ws_quote(worker: &mut super::Data, notif: mkt::QuoteNotif) {
         amount: started_quote.amount,
         trade_dir: proto::TradeDir::from(started_quote.trade_dir).into(),
         order_id: started_quote.order_id,
+        client_sub_id: started_quote.client_sub_id,
         result: Some(res),
     }));
 
@@ -2199,6 +2201,7 @@ fn try_start_quotes(
         receive_address,
         change_address,
         order_id,
+        client_sub_id: msg.client_sub_id,
     })
 }
 
@@ -2279,6 +2282,7 @@ pub fn start_quotes(
                 amount: msg.amount,
                 trade_dir: msg.trade_dir,
                 order_id,
+                client_sub_id: msg.client_sub_id,
                 result: Some(resp),
             }));
             return;
@@ -2305,6 +2309,7 @@ pub fn start_quotes(
                 amount: msg.amount,
                 trade_dir: msg.trade_dir,
                 order_id,
+                client_sub_id: msg.client_sub_id,
                 result: Some(proto::from::quote::Result::Error(err.to_string())),
             }));
         }
@@ -2354,6 +2359,7 @@ pub fn start_order(
                     amount: u64::MAX,
                     trade_dir: proto::TradeDir::from(private.trade_dir.inv()).into(),
                     skip_utxos: false,
+                    client_sub_id: None,
                 },
                 Some(order_id),
                 private_id,
