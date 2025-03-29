@@ -358,11 +358,12 @@ message To {
   message StartQuotes {
     required AssetPair asset_pair = 1;
     required AssetType asset_type = 2;
+    // Can be 0, if instant_swaps is true.
+    // 0 can be used to load indicative buy and sell prices (the best price from the order book).
     required uint64 amount = 3;
     required TradeDir trade_dir = 4;
-    // If true, the UTXOs list will not be sent to the server and will result in LowBalance quotes.
-    // It can be used with the Instant Swaps page to show something there on initial load.
-    required bool skip_utxos = 5;
+    // Set to true, if started from the Instant Swaps page
+    required bool instant_swaps = 5;
     // Optional client-generated ID that will later be returned with all received quotes
     optional int64 client_sub_id = 6;
   }
@@ -741,6 +742,8 @@ message From {
       required uint64 server_fee = 4;
       required uint64 fixed_fee = 5;
       required uint64 ttl_milliseconds = 6;
+      // The price that includes `server_fee` but excludes `fixed_fee`
+      required double price_taker = 7;
     }
 
     message LowBalance {
@@ -749,6 +752,13 @@ message From {
       required uint64 server_fee = 3;
       required uint64 fixed_fee = 4;
       required uint64 available = 5;
+      // The price that includes `server_fee` but excludes `fixed_fee`
+      required double price_taker = 6;
+    }
+
+    message IndPrice {
+      // The price that includes `server_fee` but excludes `fixed_fee` for some small amount
+      required double price_taker = 1;
     }
 
     message UnregisteredGaid {
@@ -768,6 +778,7 @@ message From {
       LowBalance low_balance = 11;
       string error = 12;
       UnregisteredGaid unregistered_gaid = 13;
+      IndPrice ind_price = 14;
     }
   }
 

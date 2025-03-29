@@ -77,6 +77,7 @@ struct StartedQuote {
     fee_asset: AssetType,
     order_id: Option<u64>,
     client_sub_id: Option<i64>,
+    ind_price: bool,
 
     utxos: Vec<gdk_json::UnspentOutput>,
     receive_address: gdk_json::AddressInfo,
@@ -293,8 +294,45 @@ impl From<HistoryOrder> for proto::HistoryOrder {
     }
 }
 
-fn send_market_req(worker: &mut super::Data, req: Request) {
+fn send_market_req(worker: &super::Data, req: Request) {
     worker.send_request_msg(api::Request::Market(req));
+}
+
+struct GetPriceTaker {
+    asset_pair: AssetPair,
+    fee_asset: AssetType,
+    base_trade_dir: TradeDir,
+    base_amount: u64,
+    quote_amount: u64,
+    server_fee: u64,
+}
+
+fn get_price_taker(
+    worker: &super::Data,
+    GetPriceTaker {
+        asset_pair,
+        fee_asset,
+        base_trade_dir,
+        base_amount,
+        quote_amount,
+        server_fee,
+    }: GetPriceTaker,
+) -> f64 {
+    let base = worker.assets.get(&asset_pair.base).expect("must be known");
+    let quote = worker.assets.get(&asset_pair.quote).expect("must be known");
+
+    let (base_amount_taker, quote_amount_taker) = match (base_trade_dir, fee_asset) {
+        (TradeDir::Sell, AssetType::Base) => (base_amount + server_fee, quote_amount),
+        (TradeDir::Sell, AssetType::Quote) => (base_amount, quote_amount - server_fee),
+        (TradeDir::Buy, AssetType::Base) => (base_amount - server_fee, quote_amount),
+        (TradeDir::Buy, AssetType::Quote) => (base_amount, quote_amount + server_fee),
+    };
+
+    let base_amount_taker = asset_float_amount_(base_amount_taker, base.precision);
+    let quote_amount_taker = asset_float_amount_(quote_amount_taker, quote.precision);
+    let price_taker = quote_amount_taker / base_amount_taker;
+
+    price_taker
 }
 
 fn market_list_subscribe(worker: &mut super::Data) {
@@ -809,6 +847,11 @@ fn process_ws_quote(worker: &mut super::Data, notif: mkt::QuoteNotif) {
         return;
     }
 
+    let base_trade_dir = match started_quote.asset_type {
+        AssetType::Base => started_quote.trade_dir,
+        AssetType::Quote => started_quote.trade_dir.inv(),
+    };
+
     let res = match notif.status {
         mkt::QuoteStatus::Success {
             quote_id,
@@ -829,6 +872,19 @@ fn process_ws_quote(worker: &mut super::Data, notif: mkt::QuoteNotif) {
                     expires_at: Instant::now() + ttl.duration(),
                 },
             );
+
+            let price_taker = get_price_taker(
+                worker,
+                GetPriceTaker {
+                    asset_pair: started_quote.asset_pair,
+                    fee_asset: started_quote.fee_asset,
+                    base_trade_dir,
+                    base_amount,
+                    quote_amount,
+                    server_fee,
+                },
+            );
+
             proto::from::quote::Result::Success(proto::from::quote::Success {
                 quote_id: quote_id.value(),
                 base_amount,
@@ -836,6 +892,7 @@ fn process_ws_quote(worker: &mut super::Data, notif: mkt::QuoteNotif) {
                 server_fee,
                 fixed_fee,
                 ttl_milliseconds: ttl.as_millis(),
+                price_taker,
             })
         }
         mkt::QuoteStatus::LowBalance {
@@ -844,13 +901,32 @@ fn process_ws_quote(worker: &mut super::Data, notif: mkt::QuoteNotif) {
             server_fee,
             fixed_fee,
             available,
-        } => proto::from::quote::Result::LowBalance(proto::from::quote::LowBalance {
-            base_amount,
-            quote_amount,
-            server_fee,
-            fixed_fee,
-            available,
-        }),
+        } => {
+            let price_taker = get_price_taker(
+                worker,
+                GetPriceTaker {
+                    asset_pair: started_quote.asset_pair,
+                    fee_asset: started_quote.fee_asset,
+                    base_trade_dir,
+                    base_amount,
+                    quote_amount,
+                    server_fee,
+                },
+            );
+
+            if started_quote.ind_price {
+                proto::from::quote::Result::IndPrice(proto::from::quote::IndPrice { price_taker })
+            } else {
+                proto::from::quote::Result::LowBalance(proto::from::quote::LowBalance {
+                    base_amount,
+                    quote_amount,
+                    server_fee,
+                    fixed_fee,
+                    available,
+                    price_taker,
+                })
+            }
+        }
         mkt::QuoteStatus::Error { error_msg } => proto::from::quote::Result::Error(error_msg),
     };
 
@@ -2150,21 +2226,74 @@ pub fn order_cancel(worker: &mut super::Data, msg: proto::to::OrderCancel) {
 
 fn try_start_quotes(
     worker: &mut super::Data,
-    msg: &proto::to::StartQuotes,
+    msg: proto::to::StartQuotes,
     swap_info: SwapInfo,
     receive_address: gdk_json::AddressInfo,
     order_id: Option<u64>,
     private_id: Option<String>,
 ) -> Result<StartedQuote, anyhow::Error> {
     let asset_pair = AssetPair::from(&msg.asset_pair);
-    let asset_type = AssetType::from(msg.asset_type());
-    let trade_dir = TradeDir::from(msg.trade_dir());
+
+    let ind_price = msg.instant_swaps && msg.amount == 0;
+
+    let (asset_type, trade_dir, amount) = if ind_price {
+        // Start quotes with some small amount to get the best order book price.
+        // It's used to show something to users when they just open the instant swaps page.
+        let min_order_amounts = worker
+            .market
+            .min_order_amounts
+            .as_ref()
+            .ok_or_else(|| anyhow!("min_order_amounts is not known"))?;
+        let known_assets = &worker.env.nd().known_assets;
+
+        let selected_assets = [
+            (worker.policy_asset, min_order_amounts.lbtc),
+            (known_assets.USDt.asset_id(), min_order_amounts.usdt),
+            (known_assets.EURx.asset_id(), min_order_amounts.eurx),
+        ];
+
+        let (selected_asset, min_amount) = selected_assets
+            .iter()
+            .find(|(asset_id, _min_amount)| {
+                *asset_id == asset_pair.base || *asset_id == asset_pair.quote
+            })
+            .ok_or_else(|| anyhow!("can't find asset in min_order_amounts"))?;
+
+        let orig_asset_type = AssetType::from(msg.asset_type());
+        let orig_trade_dir = TradeDir::from(msg.trade_dir());
+        let base_trade_dir = match orig_asset_type {
+            AssetType::Base => orig_trade_dir,
+            AssetType::Quote => orig_trade_dir.inv(),
+        };
+
+        let asset_type = if *selected_asset == asset_pair.base {
+            AssetType::Base
+        } else {
+            AssetType::Quote
+        };
+
+        let trade_dir = match asset_type {
+            AssetType::Base => base_trade_dir,
+            AssetType::Quote => base_trade_dir.inv(),
+        };
+
+        (asset_type, trade_dir, *min_amount)
+    } else {
+        (
+            AssetType::from(msg.asset_type()),
+            TradeDir::from(msg.trade_dir()),
+            msg.amount,
+        )
+    };
+
+    let client_sub_id = msg.client_sub_id;
+    drop(msg);
 
     let utxos = worker
         .market
         .wallet_utxos
         .iter()
-        .filter(|(account, _utxos)| swap_info.utxo_wallets.contains(*account) && !msg.skip_utxos)
+        .filter(|(account, _utxos)| swap_info.utxo_wallets.contains(*account) && !ind_price)
         .flat_map(|(_account, utxos)| utxos.unspent_outputs.values())
         .flatten()
         .filter(|utxo| utxo.asset_id == swap_info.send_asset)
@@ -2179,7 +2308,7 @@ fn try_start_quotes(
         mkt::StartQuotesRequest {
             asset_pair,
             asset_type,
-            amount: msg.amount,
+            amount,
             trade_dir,
             utxos: utxos.iter().cloned().map(convert_to_swap_utxo).collect(),
             receive_address: receive_address.address.clone(),
@@ -2194,14 +2323,15 @@ fn try_start_quotes(
         quote_sub_id: resp.quote_sub_id,
         asset_pair,
         asset_type,
-        amount: msg.amount,
+        amount,
         trade_dir,
         fee_asset: resp.fee_asset,
+        ind_price,
         utxos,
         receive_address,
         change_address,
         order_id,
-        client_sub_id: msg.client_sub_id,
+        client_sub_id,
     })
 }
 
@@ -2291,7 +2421,7 @@ pub fn start_quotes(
 
     let res = try_start_quotes(
         worker,
-        &msg,
+        msg.clone(),
         swap_info,
         receive_address,
         order_id,
@@ -2358,7 +2488,7 @@ pub fn start_order(
                     asset_type: proto::AssetType::Base.into(),
                     amount: u64::MAX,
                     trade_dir: proto::TradeDir::from(private.trade_dir.inv()).into(),
-                    skip_utxos: false,
+                    instant_swaps: false,
                     client_sub_id: None,
                 },
                 Some(order_id),

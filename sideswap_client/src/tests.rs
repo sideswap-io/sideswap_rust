@@ -308,6 +308,9 @@ fn swap_first_quote(data: &mut Data) {
                 proto::from::quote::Result::UnregisteredGaid(_) => {
                     panic!("unexpected UnregisteredGaid response");
                 }
+                proto::from::quote::Result::IndPrice(_) => {
+                    panic!("unexpected IndPrice response");
+                }
             }
         }
     };
@@ -387,7 +390,7 @@ fn make_swap(
         asset_type: asset_type.into(),
         amount,
         trade_dir: trade_dir.into(),
-        skip_utxos: false,
+        instant_swaps: false,
         client_sub_id: None,
     }));
 
@@ -760,4 +763,46 @@ fn send_pegin_wallet_balance() {
     {
         data1.recv();
     }
+}
+
+#[ignore]
+#[test]
+fn instant_swaps_ind_price() {
+    let mut data = start_wallet_1();
+
+    data.send(proto::to::Msg::StartQuotes(proto::to::StartQuotes {
+        asset_pair: proto::AssetPair {
+            base: LBTC.to_owned(),
+            quote: USDT.to_owned(),
+        },
+        asset_type: proto::AssetType::Base.into(),
+        amount: 0,
+        trade_dir: proto::TradeDir::Sell.into(),
+        instant_swaps: true,
+        client_sub_id: None,
+    }));
+
+    let ind_price = loop {
+        let msg = data.recv();
+        if let proto::from::Msg::Quote(msg) = msg {
+            match msg.result.unwrap() {
+                proto::from::quote::Result::Success(_) => {
+                    panic!("unexpected Success response");
+                }
+                proto::from::quote::Result::LowBalance(_) => {
+                    panic!("unexpected LowBalance response");
+                }
+                proto::from::quote::Result::Error(err) => {
+                    panic!("unexpected Error response: {err}");
+                }
+                proto::from::quote::Result::UnregisteredGaid(_) => {
+                    panic!("unexpected UnregisteredGaid response");
+                }
+                proto::from::quote::Result::IndPrice(ind_price) => {
+                    break ind_price;
+                }
+            }
+        }
+    };
+    panic!("ind_price: {ind_price:#?}");
 }

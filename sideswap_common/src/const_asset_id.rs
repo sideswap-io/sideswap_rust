@@ -1,4 +1,5 @@
 /// Workaround for missing elements::AssetId const constructor
+// TODO: Remove when the elements crate is updated
 #[derive(Copy, Clone)]
 pub struct ConstAssetId([u8; 32]);
 
