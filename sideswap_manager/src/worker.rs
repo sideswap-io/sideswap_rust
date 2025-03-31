@@ -657,7 +657,7 @@ async fn get_monitored_txs(
     let txids = data.monitored_txs.keys().copied().collect::<BTreeSet<_>>();
     data.wallet_command_sender
         .send(sideswap_lwk::Command::GetTxs {
-            req: sideswap_lwk::GetTxsReq { txids },
+            req: sideswap_lwk::GetTxsReq { txids: Some(txids) },
             res_sender: res_sender.into(),
         })?;
     let txs = res_receiver.await?.map_err(Error::Wallet)?;

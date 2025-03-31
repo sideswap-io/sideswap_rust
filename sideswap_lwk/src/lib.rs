@@ -63,7 +63,7 @@ pub struct NewAddrResp {
 }
 
 pub struct GetTxsReq {
-    pub txids: BTreeSet<elements::Txid>,
+    pub txids: Option<BTreeSet<elements::Txid>>,
 }
 
 pub struct GetTxsResp {
@@ -168,14 +168,25 @@ fn send_asset(
     Ok(SendAssetResp { txid })
 }
 
-fn get_txs(req: GetTxsReq, wallet: &lwk_wollet::Wollet) -> Result<GetTxsResp, anyhow::Error> {
-    let mut txs = Vec::new();
-    for txid in req.txids.iter() {
-        let tx = wallet.transaction(txid)?;
-        if let Some(tx) = tx {
-            txs.push(tx);
+fn get_txs(
+    GetTxsReq { txids }: GetTxsReq,
+    wallet: &lwk_wollet::Wollet,
+) -> Result<GetTxsResp, anyhow::Error> {
+    let txs = match txids {
+        Some(txids) => {
+            let mut txs = Vec::new();
+            for txid in txids.iter() {
+                let tx = wallet.transaction(txid)?;
+                if let Some(tx) = tx {
+                    txs.push(tx);
+                }
+            }
+            txs
         }
-    }
+
+        None => wallet.transactions()?,
+    };
+
     Ok(GetTxsResp { txs })
 }
 
