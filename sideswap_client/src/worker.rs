@@ -3612,8 +3612,7 @@ pub fn start_processing(
             }
         }
 
-        let stopped = std::time::Instant::now();
-        let processing_time = stopped.duration_since(started);
+        let processing_time = started.elapsed();
         if processing_time > std::time::Duration::from_millis(100) {
             warn!("processing time: {} seconds", processing_time.as_secs_f64());
         }
