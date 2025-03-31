@@ -45,6 +45,21 @@ use crate::{
 const GAP_LIMIT: u32 = 20;
 
 pub enum Command {
+    ClientConnected {
+        client_id: ClientId,
+        notif_sender: UncheckedUnboundedSender<api::Notif>,
+    },
+    ClientDisconnected {
+        client_id: ClientId,
+    },
+    NewPeg {
+        req: api::NewPegReq,
+        res_sender: UncheckedOneshotSender<Result<api::NewPegResp, Error>>,
+    },
+    DelPeg {
+        req: api::DelPegReq,
+        res_sender: UncheckedOneshotSender<Result<api::DelPegResp, Error>>,
+    },
     NewAddress {
         req: api::NewAddressReq,
         res_sender: UncheckedOneshotSender<Result<api::NewAddressResp, Error>>,
@@ -65,24 +80,13 @@ pub enum Command {
         req: api::AcceptQuoteReq,
         res_sender: UncheckedOneshotSender<Result<api::AcceptQuoteResp, Error>>,
     },
-    NewPeg {
-        req: api::NewPegReq,
-        res_sender: UncheckedOneshotSender<Result<api::NewPegResp, Error>>,
-    },
-    DelPeg {
-        req: api::DelPegReq,
-        res_sender: UncheckedOneshotSender<Result<api::DelPegResp, Error>>,
-    },
     GetMonitoredTxs {
         req: api::GetMonitoredTxsReq,
         res_sender: UncheckedOneshotSender<Result<api::GetMonitoredTxsResp, Error>>,
     },
-    ClientConnected {
-        client_id: ClientId,
-        notif_sender: UncheckedUnboundedSender<api::Notif>,
-    },
-    ClientDisconnected {
-        client_id: ClientId,
+    DelMonitoredTx {
+        req: api::DelMonitoredTxReq,
+        res_sender: UncheckedOneshotSender<Result<api::DelMonitoredTxResp, Error>>,
     },
 }
 
@@ -108,7 +112,7 @@ struct CreatedTx {
     note: String,
 }
 
-type MinitoredTxs = BTreeMap<elements::Txid, models::MonitoredTx>;
+type MonitoredTxs = BTreeMap<elements::Txid, models::MonitoredTx>;
 
 struct Data {
     _settings: Settings,
@@ -135,7 +139,7 @@ struct Data {
 
     peg_statuses: BTreeMap<OrderId, PegStatus>,
 
-    monitored_txs: MinitoredTxs,
+    monitored_txs: MonitoredTxs,
 
     quotes: BTreeMap<QuoteId, Quote>,
 
@@ -206,7 +210,7 @@ fn convert_balances(data: &Data, utxo_data: &UtxoData) -> api::Balances {
 
 async fn new_monitored_tx(
     db: &Db,
-    monitored_txs: &mut MinitoredTxs,
+    monitored_txs: &mut MonitoredTxs,
     monitored_tx: models::MonitoredTx,
 ) {
     db.add_monitored_tx(monitored_tx.clone()).await;
@@ -645,6 +649,58 @@ async fn accept_quote(
     })
 }
 
+async fn get_monitored_txs(
+    data: &mut Data,
+    api::GetMonitoredTxsReq {}: api::GetMonitoredTxsReq,
+) -> Result<api::GetMonitoredTxsResp, Error> {
+    let (res_sender, res_receiver) = tokio::sync::oneshot::channel();
+    let txids = data.monitored_txs.keys().copied().collect::<BTreeSet<_>>();
+    data.wallet_command_sender
+        .send(sideswap_lwk::Command::GetTxs {
+            req: sideswap_lwk::GetTxsReq { txids },
+            res_sender: res_sender.into(),
+        })?;
+    let txs = res_receiver.await?.map_err(Error::Wallet)?;
+
+    let monitored_txs = data
+        .monitored_txs
+        .values()
+        .map(|monitored_txid| {
+            let tx = txs.txs.iter().find(|tx| tx.txid == monitored_txid.txid.0);
+
+            let status = if let Some(tx) = tx {
+                if tx.height.is_some() {
+                    api::SwapStatus::Confirmed
+                } else {
+                    api::SwapStatus::Mempool
+                }
+            } else {
+                api::SwapStatus::NotFound
+            };
+
+            api::MonitoredTx {
+                txid: monitored_txid.txid.0,
+                status,
+                description: monitored_txid.description.clone().unwrap_or_default(),
+                user_note: monitored_txid.user_note.clone(),
+            }
+        })
+        .collect::<Vec<_>>();
+
+    Ok(api::GetMonitoredTxsResp { txs: monitored_txs })
+}
+
+async fn del_monitored_tx(
+    data: &mut Data,
+    api::DelMonitoredTxReq { txid }: api::DelMonitoredTxReq,
+) -> Result<api::DelMonitoredTxResp, Error> {
+    data.db.delete_monitored_tx(txid).await;
+
+    data.monitored_txs.remove(&txid);
+
+    Ok(api::DelMonitoredTxResp {})
+}
+
 async fn new_peg(
     data: &mut Data,
     api::NewPegReq {
@@ -700,49 +756,37 @@ async fn del_peg(
     Ok(api::DelPegResp {})
 }
 
-async fn get_monitored_txs(
-    data: &mut Data,
-    api::GetMonitoredTxsReq {}: api::GetMonitoredTxsReq,
-) -> Result<api::GetMonitoredTxsResp, Error> {
-    let (res_sender, res_receiver) = tokio::sync::oneshot::channel();
-    let txids = data.monitored_txs.keys().copied().collect::<BTreeSet<_>>();
-    data.wallet_command_sender
-        .send(sideswap_lwk::Command::GetTxs {
-            req: sideswap_lwk::GetTxsReq { txids },
-            res_sender: res_sender.into(),
-        })?;
-    let txs = res_receiver.await?.map_err(Error::Wallet)?;
-
-    let monitored_txs = data
-        .monitored_txs
-        .values()
-        .map(|monitored_txid| {
-            let tx = txs.txs.iter().find(|tx| tx.txid == monitored_txid.txid.0);
-
-            let status = if let Some(tx) = tx {
-                if tx.height.is_some() {
-                    api::SwapStatus::Confirmed
-                } else {
-                    api::SwapStatus::Mempool
-                }
-            } else {
-                api::SwapStatus::NotFound
-            };
-
-            api::MonitoredTx {
-                txid: monitored_txid.txid.0,
-                status,
-                description: monitored_txid.description.clone().unwrap_or_default(),
-                user_note: monitored_txid.user_note.clone(),
-            }
-        })
-        .collect::<Vec<_>>();
-
-    Ok(api::GetMonitoredTxsResp { txs: monitored_txs })
-}
-
 async fn process_command(data: &mut Data, command: Command) {
     match command {
+        Command::ClientConnected {
+            client_id,
+            notif_sender,
+        } => {
+            if let Some(balance) = &data.last_balances {
+                notif_sender.send(api::Notif::Balances(balance.clone()));
+            }
+
+            for status in data.peg_statuses.values() {
+                notif_sender.send(api::Notif::PegStatus(status.clone()));
+            }
+
+            data.clients.insert(client_id, ClientData { notif_sender });
+        }
+
+        Command::ClientDisconnected { client_id } => {
+            data.clients.remove(&client_id).expect("must not fail");
+        }
+
+        Command::NewPeg { req, res_sender } => {
+            let res = new_peg(data, req).await;
+            res_sender.send(res);
+        }
+
+        Command::DelPeg { req, res_sender } => {
+            let res = del_peg(data, req).await;
+            res_sender.send(res);
+        }
+
         Command::NewAddress { req, res_sender } => {
             let res = new_address(data, req).await;
             res_sender.send(res);
@@ -768,38 +812,14 @@ async fn process_command(data: &mut Data, command: Command) {
             res_sender.send(res);
         }
 
-        Command::NewPeg { req, res_sender } => {
-            let res = new_peg(data, req).await;
-            res_sender.send(res);
-        }
-
-        Command::DelPeg { req, res_sender } => {
-            let res = del_peg(data, req).await;
-            res_sender.send(res);
-        }
-
         Command::GetMonitoredTxs { req, res_sender } => {
             let res = get_monitored_txs(data, req).await;
             res_sender.send(res);
         }
 
-        Command::ClientConnected {
-            client_id,
-            notif_sender,
-        } => {
-            if let Some(balance) = &data.last_balances {
-                notif_sender.send(api::Notif::Balances(balance.clone()));
-            }
-
-            for status in data.peg_statuses.values() {
-                notif_sender.send(api::Notif::PegStatus(status.clone()));
-            }
-
-            data.clients.insert(client_id, ClientData { notif_sender });
-        }
-
-        Command::ClientDisconnected { client_id } => {
-            data.clients.remove(&client_id).expect("must not fail");
+        Command::DelMonitoredTx { req, res_sender } => {
+            let res = del_monitored_tx(data, req).await;
+            res_sender.send(res);
         }
     }
 }

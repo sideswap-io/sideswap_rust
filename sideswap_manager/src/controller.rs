@@ -66,6 +66,26 @@ impl Controller {
         let _ = self.make_request(Command::ClientDisconnected { client_id });
     }
 
+    pub async fn new_peg(&self, req: api::NewPegReq) -> Result<api::NewPegResp, Error> {
+        let (res_sender, res_receiver) = oneshot::channel();
+        self.make_request(Command::NewPeg {
+            req,
+            res_sender: res_sender.into(),
+        })?;
+        let resp = res_receiver.await??;
+        Ok(resp)
+    }
+
+    pub async fn del_peg(&self, req: api::DelPegReq) -> Result<api::DelPegResp, Error> {
+        let (res_sender, res_receiver) = oneshot::channel();
+        self.make_request(Command::DelPeg {
+            req,
+            res_sender: res_sender.into(),
+        })?;
+        let resp = res_receiver.await??;
+        Ok(resp)
+    }
+
     pub async fn new_address(&self, req: api::NewAddressReq) -> Result<api::NewAddressResp, Error> {
         let (res_sender, res_receiver) = oneshot::channel();
         self.make_request(Command::NewAddress {
@@ -117,32 +137,25 @@ impl Controller {
         Ok(resp)
     }
 
-    pub async fn new_peg(&self, req: api::NewPegReq) -> Result<api::NewPegResp, Error> {
-        let (res_sender, res_receiver) = oneshot::channel();
-        self.make_request(Command::NewPeg {
-            req,
-            res_sender: res_sender.into(),
-        })?;
-        let resp = res_receiver.await??;
-        Ok(resp)
-    }
-
-    pub async fn del_peg(&self, req: api::DelPegReq) -> Result<api::DelPegResp, Error> {
-        let (res_sender, res_receiver) = oneshot::channel();
-        self.make_request(Command::DelPeg {
-            req,
-            res_sender: res_sender.into(),
-        })?;
-        let resp = res_receiver.await??;
-        Ok(resp)
-    }
-
     pub async fn get_monitored_txs(
         &self,
         req: api::GetMonitoredTxsReq,
     ) -> Result<api::GetMonitoredTxsResp, Error> {
         let (res_sender, res_receiver) = oneshot::channel();
         self.make_request(Command::GetMonitoredTxs {
+            req,
+            res_sender: res_sender.into(),
+        })?;
+        let resp = res_receiver.await??;
+        Ok(resp)
+    }
+
+    pub async fn del_monitored_tx(
+        &self,
+        req: api::DelMonitoredTxReq,
+    ) -> Result<api::DelMonitoredTxResp, Error> {
+        let (res_sender, res_receiver) = oneshot::channel();
+        self.make_request(Command::DelMonitoredTx {
             req,
             res_sender: res_sender.into(),
         })?;

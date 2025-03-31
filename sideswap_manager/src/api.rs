@@ -159,6 +159,14 @@ pub struct GetMonitoredTxsResp {
     pub txs: Vec<MonitoredTx>,
 }
 
+#[derive(Deserialize)]
+pub struct DelMonitoredTxReq {
+    pub txid: elements::Txid,
+}
+
+#[derive(Serialize)]
+pub struct DelMonitoredTxResp {}
+
 // Notifications
 
 /// Wallet balances
@@ -177,6 +185,7 @@ pub enum Req {
     GetQuote(GetQuoteReq),
     AcceptQuote(AcceptQuoteReq),
     GetMonitoredTxs(GetMonitoredTxsReq),
+    DelMonitoredTx(DelMonitoredTxReq),
     NewPeg(NewPegReq),
     DelPeg(DelPegReq),
 }
@@ -189,6 +198,7 @@ pub enum Resp {
     GetQuote(GetQuoteResp),
     AcceptQuote(AcceptQuoteResp),
     GetMonitoredTxs(GetMonitoredTxsResp),
+    DelMonitoredTx(DelMonitoredTxResp),
     NewPeg(NewPegResp),
     DelPeg(DelPegResp),
 }

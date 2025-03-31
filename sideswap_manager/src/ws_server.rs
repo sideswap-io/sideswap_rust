@@ -68,6 +68,16 @@ async fn process_ws_req(data: &mut Data, req: api::Req) -> Result<api::Resp, Err
             Ok(api::Resp::AcceptQuote(resp))
         }
 
+        api::Req::GetMonitoredTxs(req) => {
+            let resp = data.controller.get_monitored_txs(req).await?;
+            Ok(api::Resp::GetMonitoredTxs(resp))
+        }
+
+        api::Req::DelMonitoredTx(req) => {
+            let resp = data.controller.del_monitored_tx(req).await?;
+            Ok(api::Resp::DelMonitoredTx(resp))
+        }
+
         api::Req::NewPeg(req) => {
             let resp = data.controller.new_peg(req).await?;
             Ok(api::Resp::NewPeg(resp))
@@ -76,11 +86,6 @@ async fn process_ws_req(data: &mut Data, req: api::Req) -> Result<api::Resp, Err
         api::Req::DelPeg(req) => {
             let resp = data.controller.del_peg(req).await?;
             Ok(api::Resp::DelPeg(resp))
-        }
-
-        api::Req::GetMonitoredTxs(req) => {
-            let resp = data.controller.get_monitored_txs(req).await?;
-            Ok(api::Resp::GetMonitoredTxs(resp))
         }
     }
 }
