@@ -77,6 +77,7 @@ struct StartedQuote {
     fee_asset: AssetType,
     order_id: Option<u64>,
     client_sub_id: Option<i64>,
+    instant_swaps: bool,
     ind_price: bool,
 
     utxos: Vec<gdk_json::UnspentOutput>,
@@ -333,6 +334,52 @@ fn get_price_taker(
     let price_taker = quote_amount_taker / base_amount_taker;
 
     price_taker
+}
+
+fn get_base_trade_dir(asset_type: AssetType, trade_dir: TradeDir) -> TradeDir {
+    match asset_type {
+        AssetType::Base => trade_dir,
+        AssetType::Quote => trade_dir.inv(),
+    }
+}
+
+struct GetSendRecvAmount {
+    fee_asset: AssetType,
+    base_trade_dir: TradeDir,
+    base_amount: u64,
+    quote_amount: u64,
+    server_fee: u64,
+    fixed_fee: u64,
+}
+
+struct SendRecvAmount {
+    send_amount: u64,
+    recv_amount: u64,
+}
+
+fn get_send_recv_amount(
+    GetSendRecvAmount {
+        fee_asset,
+        base_trade_dir,
+        base_amount,
+        quote_amount,
+        server_fee,
+        fixed_fee,
+    }: GetSendRecvAmount,
+) -> SendRecvAmount {
+    let total_fee = server_fee.saturating_add(fixed_fee);
+
+    let (send_amount, recv_amount) = match (base_trade_dir, fee_asset) {
+        (TradeDir::Sell, AssetType::Base) => (base_amount.saturating_add(total_fee), quote_amount),
+        (TradeDir::Sell, AssetType::Quote) => (base_amount, quote_amount.saturating_sub(total_fee)),
+        (TradeDir::Buy, AssetType::Base) => (quote_amount, base_amount.saturating_sub(total_fee)),
+        (TradeDir::Buy, AssetType::Quote) => (quote_amount.saturating_add(total_fee), base_amount),
+    };
+
+    SendRecvAmount {
+        send_amount,
+        recv_amount,
+    }
 }
 
 fn market_list_subscribe(worker: &mut super::Data) {
@@ -847,10 +894,7 @@ fn process_ws_quote(worker: &mut super::Data, notif: mkt::QuoteNotif) {
         return;
     }
 
-    let base_trade_dir = match started_quote.asset_type {
-        AssetType::Base => started_quote.trade_dir,
-        AssetType::Quote => started_quote.trade_dir.inv(),
-    };
+    let base_trade_dir = get_base_trade_dir(started_quote.asset_type, started_quote.trade_dir);
 
     let res = match notif.status {
         mkt::QuoteStatus::Success {
@@ -861,18 +905,6 @@ fn process_ws_quote(worker: &mut super::Data, notif: mkt::QuoteNotif) {
             fixed_fee,
             ttl,
         } => {
-            worker.market.received_quotes.insert(
-                quote_id,
-                ReceivedQuote {
-                    started_quote: Arc::clone(&started_quote),
-                    base_amount,
-                    quote_amount,
-                    server_fee,
-                    fixed_fee,
-                    expires_at: Instant::now() + ttl.duration(),
-                },
-            );
-
             let price_taker = get_price_taker(
                 worker,
                 GetPriceTaker {
@@ -885,15 +917,57 @@ fn process_ws_quote(worker: &mut super::Data, notif: mkt::QuoteNotif) {
                 },
             );
 
-            proto::from::quote::Result::Success(proto::from::quote::Success {
-                quote_id: quote_id.value(),
+            let SendRecvAmount {
+                send_amount,
+                recv_amount,
+            } = get_send_recv_amount(GetSendRecvAmount {
+                fee_asset: started_quote.fee_asset,
+                base_trade_dir,
                 base_amount,
                 quote_amount,
                 server_fee,
                 fixed_fee,
-                ttl_milliseconds: ttl.as_millis(),
-                price_taker,
-            })
+            });
+
+            let expected_amount = match started_quote.trade_dir {
+                TradeDir::Sell => send_amount,
+                TradeDir::Buy => recv_amount,
+            };
+
+            if started_quote.instant_swaps && started_quote.amount < expected_amount {
+                // The total order book is less than the requested amount.
+                // Show an error so that the user can enter lower amount.
+                proto::from::quote::Result::LowBalance(proto::from::quote::LowBalance {
+                    base_amount,
+                    quote_amount,
+                    server_fee,
+                    fixed_fee,
+                    price_taker,
+                    available: send_amount, // The user will need to limit how much they are going to sell
+                })
+            } else {
+                worker.market.received_quotes.insert(
+                    quote_id,
+                    ReceivedQuote {
+                        started_quote: Arc::clone(&started_quote),
+                        base_amount,
+                        quote_amount,
+                        server_fee,
+                        fixed_fee,
+                        expires_at: Instant::now() + ttl.duration(),
+                    },
+                );
+
+                proto::from::quote::Result::Success(proto::from::quote::Success {
+                    quote_id: quote_id.value(),
+                    base_amount,
+                    quote_amount,
+                    server_fee,
+                    fixed_fee,
+                    ttl_milliseconds: ttl.as_millis(),
+                    price_taker,
+                })
+            }
         }
         mkt::QuoteStatus::LowBalance {
             base_amount,
@@ -2234,7 +2308,8 @@ fn try_start_quotes(
 ) -> Result<StartedQuote, anyhow::Error> {
     let asset_pair = AssetPair::from(&msg.asset_pair);
 
-    let ind_price = msg.instant_swaps && msg.amount == 0;
+    let instant_swaps = msg.instant_swaps;
+    let ind_price = instant_swaps && msg.amount == 0;
 
     let (asset_type, trade_dir, amount) = if ind_price {
         // Start quotes with some small amount to get the best order book price.
@@ -2326,6 +2401,7 @@ fn try_start_quotes(
         amount,
         trade_dir,
         fee_asset: resp.fee_asset,
+        instant_swaps,
         ind_price,
         utxos,
         receive_address,
@@ -2538,14 +2614,7 @@ fn try_accept_quote(
 
     let pset = decode_pset(&resp.pset)?;
 
-    let base_trade_dir = match started_quote.asset_type {
-        AssetType::Base => started_quote.trade_dir,
-        AssetType::Quote => started_quote.trade_dir.inv(),
-    };
-
-    let total_fee = received_quote
-        .server_fee
-        .saturating_add(received_quote.fixed_fee);
+    let base_trade_dir = get_base_trade_dir(started_quote.asset_type, started_quote.trade_dir);
 
     let (send_asset, recv_asset) = match base_trade_dir {
         TradeDir::Sell => (
@@ -2558,24 +2627,17 @@ fn try_accept_quote(
         ),
     };
 
-    let (send_amount, recv_amount) = match (base_trade_dir, started_quote.fee_asset) {
-        (TradeDir::Sell, AssetType::Base) => (
-            received_quote.base_amount.saturating_add(total_fee),
-            received_quote.quote_amount,
-        ),
-        (TradeDir::Sell, AssetType::Quote) => (
-            received_quote.base_amount,
-            received_quote.quote_amount.saturating_sub(total_fee),
-        ),
-        (TradeDir::Buy, AssetType::Base) => (
-            received_quote.quote_amount,
-            received_quote.base_amount.saturating_sub(total_fee),
-        ),
-        (TradeDir::Buy, AssetType::Quote) => (
-            received_quote.quote_amount.saturating_add(total_fee),
-            received_quote.base_amount,
-        ),
-    };
+    let SendRecvAmount {
+        send_amount,
+        recv_amount,
+    } = get_send_recv_amount(GetSendRecvAmount {
+        fee_asset: started_quote.fee_asset,
+        base_trade_dir,
+        base_amount: received_quote.base_amount,
+        quote_amount: received_quote.quote_amount,
+        server_fee: received_quote.server_fee,
+        fixed_fee: received_quote.fixed_fee,
+    });
 
     let additional_info = sideswap_jade::models::ReqSignTxAdditionalInfo {
         is_partial: false,
