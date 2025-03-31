@@ -38,6 +38,12 @@ async fn main() {
         .expect("reading env failed");
     let settings: Settings = conf.try_into().expect("invalid config");
 
+    assert!(
+        !settings.work_dir.starts_with("/tmp"),
+        "invalid work_dir value: {:?}\nplease do not keep work dir in /tmp, the contents must be preserved",
+        settings.work_dir,
+    );
+
     sideswap_dealer::logs::init(&settings.work_dir);
 
     sideswap_common::panic_handler::install_panic_handler();
