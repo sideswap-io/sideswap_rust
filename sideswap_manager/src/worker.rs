@@ -122,6 +122,10 @@ struct CreatedTx {
 
 type MonitoredTxs = BTreeMap<elements::Txid, models::MonitoredTx>;
 
+struct PegData {
+    status: Option<PegStatus>,
+}
+
 struct Data {
     _settings: Settings,
 
@@ -143,9 +147,7 @@ struct Data {
 
     utxo_data: Option<UtxoData>,
 
-    pegs: BTreeSet<OrderId>,
-
-    peg_statuses: BTreeMap<OrderId, PegStatus>,
+    pegs: BTreeMap<OrderId, PegData>,
 
     monitored_txs: MonitoredTxs,
 
@@ -309,7 +311,7 @@ async fn new_peg(
         }
     )?;
 
-    process_peg_status(data, status);
+    log::debug!("new peg registered, order_id: {}", resp.order_id);
 
     data.db
         .add_peg(Peg {
@@ -317,7 +319,9 @@ async fn new_peg(
         })
         .await;
 
-    data.pegs.insert(resp.order_id);
+    data.pegs.insert(resp.order_id, PegData { status: None });
+
+    process_peg_status(data, status);
 
     Ok(api::NewPegResp {
         order_id: resp.order_id,
@@ -329,6 +333,10 @@ async fn del_peg(
     data: &mut Data,
     api::DelPegReq { order_id }: api::DelPegReq,
 ) -> Result<api::DelPegResp, Error> {
+    log::debug!("del peg, order_id: {}", order_id);
+
+    data.pegs.remove(&order_id);
+
     data.db.delete_peg(order_id).await;
 
     Ok(api::DelPegResp {})
@@ -860,7 +868,7 @@ async fn process_command(data: &mut Data, command: Command) {
                 notif_sender.send(api::Notif::Balances(balance.clone()));
             }
 
-            for status in data.peg_statuses.values() {
+            for status in data.pegs.values().filter_map(|peg| peg.status.as_ref()) {
                 notif_sender.send(api::Notif::PegStatus(status.clone()));
             }
 
@@ -934,7 +942,7 @@ fn process_ws_connected(data: &mut Data) {
             mkt::ListMarketsRequest {},
         )));
 
-    for order_id in data.pegs.iter() {
+    for order_id in data.pegs.keys() {
         data.ws.send_request(sideswap_api::Request::PegStatus(
             sideswap_api::PegStatusRequest {
                 order_id: *order_id,
@@ -980,10 +988,21 @@ fn process_market_resp(data: &mut Data, resp: mkt::Response) {
 }
 
 fn process_peg_status(data: &mut Data, status: PegStatus) {
-    if data.pegs.contains(&status.order_id) {
-        send_notifs(data, &api::Notif::PegStatus(status.clone()));
+    log::debug!(
+        "new peg status: {}",
+        serde_json::to_string(&status).expect("must not fail")
+    );
+
+    if let Some(peg) = data.pegs.get_mut(&status.order_id) {
+        log::debug!("send peg status update to connected clients",);
+        peg.status = Some(status.clone());
+        send_notifs(data, &api::Notif::PegStatus(status));
+    } else {
+        log::debug!(
+            "ignore unexpected peg status update, order_id: {}",
+            status.order_id
+        );
     }
-    data.peg_statuses.insert(status.order_id, status);
 }
 
 fn process_market_notif(data: &mut Data, notif: mkt::Notification) {
@@ -1110,7 +1129,7 @@ pub async fn run(
         .load_pegs()
         .await
         .iter()
-        .map(|peg| peg.order_id.0)
+        .map(|peg| (peg.order_id.0, PegData { status: None }))
         .collect();
 
     let monitored_txs = db
@@ -1139,7 +1158,6 @@ pub async fn run(
         last_balances: None,
         utxo_data: None,
         pegs,
-        peg_statuses: BTreeMap::new(),
         monitored_txs,
         quotes: BTreeMap::new(),
         created_txs: BTreeMap::new(),
