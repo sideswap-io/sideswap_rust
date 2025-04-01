@@ -15,7 +15,7 @@ use elements::{
 use lwk_common::{singlesig_desc, Signer};
 use lwk_wollet::{
     blocking::BlockchainBackend, elements_miniscript, secp256k1::SECP256K1, ElementsNetwork,
-    WalletTx, WolletDescriptor,
+    WolletDescriptor,
 };
 use sideswap_common::{
     channel_helpers::{UncheckedOneshotSender, UncheckedUnboundedSender},
@@ -28,6 +28,8 @@ use sideswap_dealer::{
     utxo_data::{self, UtxoData, UtxoWithKey},
 };
 use tokio::sync::mpsc::UnboundedSender;
+
+pub use lwk_wollet::WalletTx;
 
 #[derive(Debug, Copy, Clone)]
 pub struct ScriptVariant(lwk_common::Singlesig);

@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use sideswap_api::{mkt::QuoteId, OrderId};
 use sideswap_common::dealer_ticker::DealerTicker;
-use sideswap_types::duration_ms::DurationMs;
+use sideswap_types::{duration_ms::DurationMs, timestamp_ms::TimestampMs};
 
 #[derive(Debug, Serialize)]
 pub enum ErrorCode {
@@ -39,7 +39,7 @@ pub type ReqId = i64;
 pub type Balances = BTreeMap<DealerTicker, f64>;
 
 #[derive(Serialize)]
-pub enum SwapStatus {
+pub enum TxStatus {
     Mempool,
     Confirmed,
     NotFound,
@@ -48,7 +48,7 @@ pub enum SwapStatus {
 #[derive(Serialize)]
 pub struct MonitoredTx {
     pub txid: elements::Txid,
-    pub status: SwapStatus,
+    pub status: TxStatus,
     pub description: String,
     pub user_note: Option<String>,
 }
@@ -65,6 +65,25 @@ pub struct Recipient {
 pub enum BroadcastStatus {
     Success {},
     Error { error_msg: String },
+}
+
+#[derive(Serialize)]
+pub enum TxType {
+    Incoming,
+    Outgoing,
+    Redeposit,
+    Swap,
+    Unknown,
+}
+
+#[derive(Serialize)]
+pub struct WalletTx {
+    pub txid: elements::Txid,
+    pub height: Option<u32>,
+    pub balance: BTreeMap<DealerTicker, f64>,
+    pub network_fee: u64,
+    pub timestamp: Option<TimestampMs>,
+    pub tx_type: TxType,
 }
 
 // Requests
@@ -167,6 +186,14 @@ pub struct DelMonitoredTxReq {
 #[derive(Serialize)]
 pub struct DelMonitoredTxResp {}
 
+#[derive(Deserialize)]
+pub struct GetWalletTxsReq {}
+
+#[derive(Serialize)]
+pub struct GetWalletTxsResp {
+    pub txs: Vec<WalletTx>,
+}
+
 // Notifications
 
 /// Wallet balances
@@ -179,6 +206,8 @@ pub struct BalancesNotif {
 
 #[derive(Deserialize)]
 pub enum Req {
+    NewPeg(NewPegReq),
+    DelPeg(DelPegReq),
     NewAddress(NewAddressReq),
     CreateTx(CreateTxReq),
     SendTx(SendTxReq),
@@ -186,12 +215,13 @@ pub enum Req {
     AcceptQuote(AcceptQuoteReq),
     GetMonitoredTxs(GetMonitoredTxsReq),
     DelMonitoredTx(DelMonitoredTxReq),
-    NewPeg(NewPegReq),
-    DelPeg(DelPegReq),
+    GetWalletTxs(GetWalletTxsReq),
 }
 
 #[derive(Serialize)]
 pub enum Resp {
+    NewPeg(NewPegResp),
+    DelPeg(DelPegResp),
     NewAddress(NewAddressResp),
     CreateTx(CreateTxResp),
     SendTx(SendTxResp),
@@ -199,8 +229,7 @@ pub enum Resp {
     AcceptQuote(AcceptQuoteResp),
     GetMonitoredTxs(GetMonitoredTxsResp),
     DelMonitoredTx(DelMonitoredTxResp),
-    NewPeg(NewPegResp),
-    DelPeg(DelPegResp),
+    GetWalletTxs(GetWalletTxsResp),
 }
 
 #[derive(Serialize, Clone)]

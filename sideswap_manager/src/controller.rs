@@ -162,4 +162,17 @@ impl Controller {
         let resp = res_receiver.await??;
         Ok(resp)
     }
+
+    pub async fn get_wallet_txs(
+        &self,
+        req: api::GetWalletTxsReq,
+    ) -> Result<api::GetWalletTxsResp, Error> {
+        let (res_sender, res_receiver) = oneshot::channel();
+        self.make_request(Command::GetWalletTxs {
+            req,
+            res_sender: res_sender.into(),
+        })?;
+        let resp = res_receiver.await??;
+        Ok(resp)
+    }
 }

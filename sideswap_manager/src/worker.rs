@@ -17,7 +17,7 @@ use sideswap_common::{
     channel_helpers::{UncheckedOneshotSender, UncheckedUnboundedSender},
     dealer_ticker::{DealerTicker, TickerLoader},
     make_market_request, make_request,
-    types::{asset_float_amount_, asset_int_amount_},
+    types::{asset_float_amount, asset_float_amount_, asset_int_amount_},
     verify,
     ws::{
         auto::{WrappedRequest, WrappedResponse},
@@ -25,8 +25,8 @@ use sideswap_common::{
     },
 };
 use sideswap_dealer::utxo_data::UtxoData;
-use sideswap_types::asset_precision::AssetPrecision;
 use sideswap_types::utxo_ext::UtxoExt;
+use sideswap_types::{asset_precision::AssetPrecision, timestamp_ms::TimestampMs};
 use sqlx::types::Text;
 use tokio::{
     sync::mpsc::{unbounded_channel, UnboundedReceiver},
@@ -88,6 +88,10 @@ pub enum Command {
         req: api::DelMonitoredTxReq,
         res_sender: UncheckedOneshotSender<Result<api::DelMonitoredTxResp, Error>>,
     },
+    GetWalletTxs {
+        req: api::GetWalletTxsReq,
+        res_sender: UncheckedOneshotSender<Result<api::GetWalletTxsResp, Error>>,
+    },
 }
 
 struct ClientData {
@@ -148,6 +152,17 @@ struct Data {
     addresses: BTreeMap<u32, models::Address>,
 }
 
+struct Asset {
+    asset_id: AssetId,
+    precision: AssetPrecision,
+}
+
+enum QuoteStatus {
+    Disconnected,
+    Timeout(tokio::time::error::Elapsed),
+    Quote(mkt::QuoteNotif),
+}
+
 fn encode_pset(pset: &PartiallySignedTransaction) -> String {
     let pset = elements::encode::serialize(pset);
     b64::encode(&pset)
@@ -163,11 +178,6 @@ fn send_notifs(data: &Data, notif: &api::Notif) {
     for client in data.clients.values() {
         client.notif_sender.send(notif.clone());
     }
-}
-
-struct Asset {
-    asset_id: AssetId,
-    precision: AssetPrecision,
 }
 
 fn try_get_asset(ticker_loader: &TickerLoader, ticker: DealerTicker) -> Result<Asset, Error> {
@@ -208,6 +218,54 @@ fn convert_balances(data: &Data, utxo_data: &UtxoData) -> api::Balances {
         .collect()
 }
 
+fn get_tx_type(
+    balance: &BTreeMap<AssetId, i64>,
+    policy_asset: &AssetId,
+    network_fee: u64,
+) -> api::TxType {
+    let any_pos = balance.values().any(|amount| *amount > 0);
+    let any_neg = balance.values().any(|amount| *amount < 0);
+    if balance.len() == 2 && any_pos && any_neg {
+        api::TxType::Swap
+    } else if balance.len() == 1
+        && -balance.get(policy_asset).copied().unwrap_or_default() == network_fee as i64
+    {
+        api::TxType::Redeposit
+    } else if any_pos && !any_neg {
+        api::TxType::Incoming
+    } else if any_neg && !any_pos {
+        api::TxType::Outgoing
+    } else {
+        api::TxType::Unknown
+    }
+}
+
+fn convert_wallet_tx(
+    ticker_loader: &TickerLoader,
+    tx: &sideswap_lwk::WalletTx,
+    policy_asset: &AssetId,
+) -> api::WalletTx {
+    api::WalletTx {
+        txid: tx.txid,
+        height: tx.height,
+        balance: tx
+            .balance
+            .iter()
+            .filter_map(|(asset_id, amount)| {
+                let ticker = ticker_loader.ticker(asset_id)?;
+                let precision = ticker_loader.precision(ticker);
+                let amount = asset_float_amount(*amount, precision);
+                Some((ticker, amount))
+            })
+            .collect(),
+        network_fee: tx.fee,
+        timestamp: tx
+            .timestamp
+            .map(|value| TimestampMs::from_millis(u64::from(value) * 1000)),
+        tx_type: get_tx_type(&tx.balance, policy_asset, tx.fee),
+    }
+}
+
 async fn new_monitored_tx(
     db: &Db,
     monitored_txs: &mut MonitoredTxs,
@@ -217,10 +275,59 @@ async fn new_monitored_tx(
     monitored_txs.insert(monitored_tx.txid.0, monitored_tx);
 }
 
-enum QuoteStatus {
-    Disconnected,
-    Timeout(tokio::time::error::Elapsed),
-    Quote(mkt::QuoteNotif),
+async fn new_peg(
+    data: &mut Data,
+    api::NewPegReq {
+        recv_addr,
+        peg_in,
+        blocks,
+    }: api::NewPegReq,
+) -> Result<api::NewPegResp, Error> {
+    let resp = make_request!(
+        data.ws,
+        Peg,
+        sideswap_api::PegRequest {
+            recv_addr,
+            send_amount: None,
+            peg_in,
+            device_key: None,
+            blocks,
+            peg_out_amounts: None,
+        }
+    )?;
+
+    let status = make_request!(
+        data.ws,
+        PegStatus,
+        sideswap_api::PegStatusRequest {
+            order_id: resp.order_id,
+            peg_in: None,
+        }
+    )?;
+
+    process_peg_status(data, status);
+
+    data.db
+        .add_peg(Peg {
+            order_id: Text(resp.order_id),
+        })
+        .await;
+
+    data.pegs.insert(resp.order_id);
+
+    Ok(api::NewPegResp {
+        order_id: resp.order_id,
+        peg_addr: resp.peg_addr,
+    })
+}
+
+async fn del_peg(
+    data: &mut Data,
+    api::DelPegReq { order_id }: api::DelPegReq,
+) -> Result<api::DelPegResp, Error> {
+    data.db.delete_peg(order_id).await;
+
+    Ok(api::DelPegResp {})
 }
 
 async fn get_new_address(
@@ -670,12 +777,12 @@ async fn get_monitored_txs(
 
             let status = if let Some(tx) = tx {
                 if tx.height.is_some() {
-                    api::SwapStatus::Confirmed
+                    api::TxStatus::Confirmed
                 } else {
-                    api::SwapStatus::Mempool
+                    api::TxStatus::Mempool
                 }
             } else {
-                api::SwapStatus::NotFound
+                api::TxStatus::NotFound
             };
 
             api::MonitoredTx {
@@ -701,59 +808,25 @@ async fn del_monitored_tx(
     Ok(api::DelMonitoredTxResp {})
 }
 
-async fn new_peg(
+async fn get_wallet_txs(
     data: &mut Data,
-    api::NewPegReq {
-        recv_addr,
-        peg_in,
-        blocks,
-    }: api::NewPegReq,
-) -> Result<api::NewPegResp, Error> {
-    let resp = make_request!(
-        data.ws,
-        Peg,
-        sideswap_api::PegRequest {
-            recv_addr,
-            send_amount: None,
-            peg_in,
-            device_key: None,
-            blocks,
-            peg_out_amounts: None,
-        }
-    )?;
+    api::GetWalletTxsReq {}: api::GetWalletTxsReq,
+) -> Result<api::GetWalletTxsResp, Error> {
+    let (res_sender, res_receiver) = tokio::sync::oneshot::channel();
+    data.wallet_command_sender
+        .send(sideswap_lwk::Command::GetTxs {
+            req: sideswap_lwk::GetTxsReq { txids: None },
+            res_sender: res_sender.into(),
+        })?;
+    let resp = res_receiver.await?.map_err(Error::Wallet)?;
 
-    let status = make_request!(
-        data.ws,
-        PegStatus,
-        sideswap_api::PegStatusRequest {
-            order_id: resp.order_id,
-            peg_in: None,
-        }
-    )?;
+    let txs = resp
+        .txs
+        .into_iter()
+        .map(|tx| convert_wallet_tx(&data.ticker_loader, &tx, &data.policy_asset))
+        .collect();
 
-    process_peg_status(data, status);
-
-    data.db
-        .add_peg(Peg {
-            order_id: Text(resp.order_id),
-        })
-        .await;
-
-    data.pegs.insert(resp.order_id);
-
-    Ok(api::NewPegResp {
-        order_id: resp.order_id,
-        peg_addr: resp.peg_addr,
-    })
-}
-
-async fn del_peg(
-    data: &mut Data,
-    api::DelPegReq { order_id }: api::DelPegReq,
-) -> Result<api::DelPegResp, Error> {
-    data.db.delete_peg(order_id).await;
-
-    Ok(api::DelPegResp {})
+    Ok(api::GetWalletTxsResp { txs })
 }
 
 async fn process_command(data: &mut Data, command: Command) {
@@ -819,6 +892,11 @@ async fn process_command(data: &mut Data, command: Command) {
 
         Command::DelMonitoredTx { req, res_sender } => {
             let res = del_monitored_tx(data, req).await;
+            res_sender.send(res);
+        }
+
+        Command::GetWalletTxs { req, res_sender } => {
+            let res = get_wallet_txs(data, req).await;
             res_sender.send(res);
         }
     }

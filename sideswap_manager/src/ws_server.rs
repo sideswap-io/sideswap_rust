@@ -43,6 +43,16 @@ async fn send_notif(data: &mut Data, notif: api::Notif) {
 
 async fn process_ws_req(data: &mut Data, req: api::Req) -> Result<api::Resp, Error> {
     match req {
+        api::Req::NewPeg(req) => {
+            let resp = data.controller.new_peg(req).await?;
+            Ok(api::Resp::NewPeg(resp))
+        }
+
+        api::Req::DelPeg(req) => {
+            let resp = data.controller.del_peg(req).await?;
+            Ok(api::Resp::DelPeg(resp))
+        }
+
         api::Req::NewAddress(req) => {
             let resp = data.controller.new_address(req).await?;
             Ok(api::Resp::NewAddress(resp))
@@ -78,14 +88,9 @@ async fn process_ws_req(data: &mut Data, req: api::Req) -> Result<api::Resp, Err
             Ok(api::Resp::DelMonitoredTx(resp))
         }
 
-        api::Req::NewPeg(req) => {
-            let resp = data.controller.new_peg(req).await?;
-            Ok(api::Resp::NewPeg(resp))
-        }
-
-        api::Req::DelPeg(req) => {
-            let resp = data.controller.del_peg(req).await?;
-            Ok(api::Resp::DelPeg(resp))
+        api::Req::GetWalletTxs(req) => {
+            let resp = data.controller.get_wallet_txs(req).await?;
+            Ok(api::Resp::GetWalletTxs(resp))
         }
     }
 }
