@@ -86,6 +86,13 @@ pub struct WalletTx {
     pub tx_type: TxType,
 }
 
+#[derive(Serialize)]
+pub struct Address {
+    pub index: u32,
+    pub address: elements::Address,
+    pub user_note: Option<String>,
+}
+
 // Requests
 
 #[derive(Deserialize)]
@@ -97,6 +104,14 @@ pub struct NewAddressReq {
 pub struct NewAddressResp {
     pub index: u32,
     pub address: elements::Address,
+}
+
+#[derive(Deserialize)]
+pub struct ListAddressesReq {}
+
+#[derive(Serialize)]
+pub struct ListAddressesResp {
+    pub addresses: Vec<Address>,
 }
 
 #[derive(Deserialize)]
@@ -209,6 +224,7 @@ pub enum Req {
     NewPeg(NewPegReq),
     DelPeg(DelPegReq),
     NewAddress(NewAddressReq),
+    ListAddresses(ListAddressesReq),
     CreateTx(CreateTxReq),
     SendTx(SendTxReq),
     GetQuote(GetQuoteReq),
@@ -223,6 +239,7 @@ pub enum Resp {
     NewPeg(NewPegResp),
     DelPeg(DelPegResp),
     NewAddress(NewAddressResp),
+    ListAddresses(ListAddressesResp),
     CreateTx(CreateTxResp),
     SendTx(SendTxResp),
     GetQuote(GetQuoteResp),

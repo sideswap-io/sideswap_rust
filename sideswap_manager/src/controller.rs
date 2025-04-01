@@ -96,6 +96,19 @@ impl Controller {
         Ok(address)
     }
 
+    pub async fn list_addresses(
+        &self,
+        req: api::ListAddressesReq,
+    ) -> Result<api::ListAddressesResp, Error> {
+        let (res_sender, res_receiver) = oneshot::channel();
+        self.make_request(Command::ListAddresses {
+            req,
+            res_sender: res_sender.into(),
+        })?;
+        let address = res_receiver.await??;
+        Ok(address)
+    }
+
     pub async fn create_tx(&self, req: api::CreateTxReq) -> Result<api::CreateTxResp, Error> {
         let (res_sender, res_receiver) = oneshot::channel();
         self.make_request(Command::CreateTx {

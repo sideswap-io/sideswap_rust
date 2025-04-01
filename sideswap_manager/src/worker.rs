@@ -64,6 +64,10 @@ pub enum Command {
         req: api::NewAddressReq,
         res_sender: UncheckedOneshotSender<Result<api::NewAddressResp, Error>>,
     },
+    ListAddresses {
+        req: api::ListAddressesReq,
+        res_sender: UncheckedOneshotSender<Result<api::ListAddressesResp, Error>>,
+    },
     CreateTx {
         req: api::CreateTxReq,
         res_sender: UncheckedOneshotSender<Result<api::CreateTxResp, Error>>,
@@ -372,6 +376,23 @@ async fn new_address(
         index: new_index,
         address: new_address.address,
     })
+}
+
+async fn list_addresses(
+    data: &mut Data,
+    api::ListAddressesReq {}: api::ListAddressesReq,
+) -> Result<api::ListAddressesResp, Error> {
+    let addresses = data
+        .addresses
+        .values()
+        .map(|address| api::Address {
+            index: address.ind as u32,
+            address: address.address.0.clone(),
+            user_note: address.user_note.clone(),
+        })
+        .collect();
+
+    Ok(api::ListAddressesResp { addresses })
 }
 
 async fn create_tx(
@@ -862,6 +883,11 @@ async fn process_command(data: &mut Data, command: Command) {
 
         Command::NewAddress { req, res_sender } => {
             let res = new_address(data, req).await;
+            res_sender.send(res);
+        }
+
+        Command::ListAddresses { req, res_sender } => {
+            let res = list_addresses(data, req).await;
             res_sender.send(res);
         }
 
