@@ -12,45 +12,45 @@ use crate::api;
 pub enum Error {
     #[error(transparent)]
     InvalidTicker(#[from] InvalidTickerError),
-    #[error("Unknown ticker: {0}")]
+    #[error("unknown ticker: {0}")]
     UnknownTicker(DealerTicker),
-    #[error("Channel closed, please report bug")]
+    #[error("channel closed, please report bug")]
     ChannelClosed,
-    #[error("Wallet error: {0}")]
-    Wallet(anyhow::Error),
-    #[error("WS error: {0}")]
+    #[error("lwk error: {0}")]
+    Lwk(#[from] sideswap_lwk::Error),
+    #[error("wS error: {0}")]
     WsError(#[from] ws_req_sender::Error),
-    #[error("Invalid asset amount: {0} (asset_precison: {1})")]
+    #[error("invalid asset amount: {0} (asset_precison: {1})")]
     InvalidAssetAmount(f64, AssetPrecision),
-    #[error("Can't find market")]
+    #[error("can't find market")]
     NoMarket,
     #[error(
-        "Not enough amount for asset {asset_id}, required: {required}, available: {available}"
+        "not enough amount for asset {asset_id}, required: {required}, available: {available}"
     )]
     NotEnoughAmount {
         asset_id: AssetId,
         required: u64,
         available: u64,
     },
-    #[error("Quote error: {0}")]
+    #[error("quote error: {0}")]
     QuoteError(String),
-    #[error("Base64 error: {0}")]
+    #[error("base64 error: {0}")]
     Base64(#[from] b64::Error),
-    #[error("Encode error: {0}")]
+    #[error("encode error: {0}")]
     EncodeError(#[from] elements::encode::Error),
     #[error("PSET error: {0}")]
     PsetError(#[from] elements::pset::Error),
-    #[error("No UTXOs")]
+    #[error("no UTXOs")]
     NoUtxos,
-    #[error("Quote expired")]
+    #[error("quote expired")]
     QuoteExpired,
-    #[error("No quote")]
+    #[error("no quote")]
     NoQuote,
-    #[error("No stored tx with this txid, please try again")]
+    #[error("no stored tx with this txid, please try again")]
     NoCreatedTx,
     #[error("UTXO check failed: {0}, please retry")]
     UtxoCheckFailed(String),
-    #[error("Gap limit reached")]
+    #[error("gap limit reached")]
     GapLimit,
 }
 
@@ -77,7 +77,7 @@ impl Error {
         match self {
             Error::InvalidTicker(_)
             | Error::UnknownTicker(_)
-            | Error::Wallet(_)
+            | Error::Lwk(_)
             | Error::InvalidAssetAmount(_, _)
             | Error::NoMarket
             | Error::NotEnoughAmount { .. }
