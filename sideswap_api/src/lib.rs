@@ -5,6 +5,7 @@ pub mod market;
 pub mod mkt;
 pub mod pegx;
 
+use elements::hashes::Hash;
 pub use elements::{
     confidential::{AssetBlindingFactor, ValueBlindingFactor},
     Address, Txid,
@@ -352,7 +353,7 @@ pub fn peg_tx_state_code(state: PegTxState) -> i32 {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct TxStatus {
-    pub tx_hash: String,
+    pub tx_hash: Hash32,
     pub vout: i32,
     pub status: String,
     pub amount: i64,
@@ -1239,3 +1240,30 @@ pub enum ResponseMessage {
     Response(Option<RequestId>, Result<Response, Error>),
     Notification(Notification),
 }
+
+impl From<elements::Txid> for Hash32 {
+    fn from(value: elements::Txid) -> Self {
+        HashN(*value.as_byte_array())
+    }
+}
+
+impl From<elements::bitcoin::Txid> for Hash32 {
+    fn from(value: elements::bitcoin::Txid) -> Self {
+        HashN(*value.as_byte_array())
+    }
+}
+
+impl From<Hash32> for elements::Txid {
+    fn from(value: Hash32) -> Self {
+        elements::Txid::from_byte_array(value.0)
+    }
+}
+
+impl From<Hash32> for elements::bitcoin::Txid {
+    fn from(value: Hash32) -> Self {
+        elements::bitcoin::Txid::from_byte_array(value.0)
+    }
+}
+
+#[cfg(test)]
+mod tests;

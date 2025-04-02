@@ -20,10 +20,10 @@ pub struct FcmMessageTx {
 pub struct FcmMessagePeg {
     pub order_id: OrderId,
     pub peg_in: bool,
-    pub tx_hash: String,
+    pub tx_hash: Hash32,
     pub vout: i32,
     pub created_at: Timestamp,
-    pub payout_txid: Option<String>,
+    pub payout_txid: Option<Hash32>,
     pub payout: i64,
 }
 

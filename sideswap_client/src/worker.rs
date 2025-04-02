@@ -37,7 +37,7 @@ use sideswap_types::asset_precision::AssetPrecision;
 use sideswap_types::fee_rate::FeeRateSats;
 use tokio::sync::mpsc::UnboundedSender;
 
-use sideswap_api::{self as api, fcm_models, MarketType, OrderId};
+use sideswap_api::{self as api, fcm_models, Hash32, MarketType, OrderId};
 use sideswap_common::ws::manual as ws;
 
 pub struct StartParams {
@@ -341,7 +341,7 @@ fn tx_txitem_id(account_id: AccountId, txid: &elements::Txid) -> String {
     format!("{}/{}", account_id, txid)
 }
 
-fn peg_txitem_id(send_txid: &str, send_vout: i32) -> String {
+fn peg_txitem_id(send_txid: &Hash32, send_vout: i32) -> String {
     format!("{}/{}", send_txid, send_vout)
 }
 
@@ -352,7 +352,7 @@ fn get_peg_item(peg: &api::PegStatus, tx: &api::TxStatus) -> proto::TransItem {
         amount_recv: tx.payout.unwrap_or_default(),
         addr_send: peg.addr.clone(),
         addr_recv: peg.addr_recv.clone(),
-        txid_send: tx.tx_hash.clone(),
+        txid_send: tx.tx_hash.to_string(),
         txid_recv: tx.payout_txid.map(|hash| hash.to_string()),
     };
     let confs = tx.detected_confs.and_then(|count| {
