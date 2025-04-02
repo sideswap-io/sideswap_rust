@@ -4383,6 +4383,7 @@ dependencies = [
  "sideswap_api",
  "sideswap_common",
  "sideswap_dealer",
+ "thiserror 1.0.68",
  "tokio",
 ]
 

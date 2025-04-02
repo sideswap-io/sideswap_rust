@@ -313,7 +313,7 @@ async fn get_new_address(
             req: sideswap_lwk::NewAddrReq { change, index },
             res_sender: res_sender.into(),
         })?;
-    let resp = res_receiver.await?.map_err(Error::Wallet)?;
+    let resp = res_receiver.await??;
     Ok(resp)
 }
 
@@ -404,7 +404,7 @@ async fn create_tx(
             req: sideswap_lwk::CreateTxReq { recipients },
             res_sender: res_sender.into(),
         })?;
-    let resp = res_receiver.await?.map_err(Error::Wallet)?;
+    let resp = res_receiver.await??;
 
     let txid = resp.tx.txid();
     let network_fee = resp.tx.fee_in(data.policy_asset);
@@ -756,7 +756,7 @@ async fn get_monitored_txs(
             req: sideswap_lwk::GetTxsReq { txids: Some(txids) },
             res_sender: res_sender.into(),
         })?;
-    let txs = res_receiver.await?.map_err(Error::Wallet)?;
+    let txs = res_receiver.await??;
 
     let monitored_txs = data
         .monitored_txs
@@ -807,7 +807,7 @@ async fn get_wallet_txs(
             req: sideswap_lwk::GetTxsReq { txids: None },
             res_sender: res_sender.into(),
         })?;
-    let resp = res_receiver.await?.map_err(Error::Wallet)?;
+    let resp = res_receiver.await??;
 
     let txs = resp
         .txs

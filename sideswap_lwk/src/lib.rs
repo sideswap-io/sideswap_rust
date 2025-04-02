@@ -6,7 +6,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-use anyhow::ensure;
 use elements::{
     bitcoin::bip32,
     confidential::{AssetBlindingFactor, ValueBlindingFactor},
@@ -83,15 +82,15 @@ pub struct CreateTxResp {
 pub enum Command {
     NewAdddress {
         req: NewAddrReq,
-        res_sender: UncheckedOneshotSender<Result<NewAddrResp, anyhow::Error>>,
+        res_sender: UncheckedOneshotSender<Result<NewAddrResp, Error>>,
     },
     CreateTx {
         req: CreateTxReq,
-        res_sender: UncheckedOneshotSender<Result<CreateTxResp, anyhow::Error>>,
+        res_sender: UncheckedOneshotSender<Result<CreateTxResp, Error>>,
     },
     BroadcastTx {
         tx: String,
-        res_sender: Option<UncheckedOneshotSender<Result<elements::Txid, anyhow::Error>>>,
+        res_sender: Option<UncheckedOneshotSender<Result<elements::Txid, Error>>>,
     },
     SendAsset {
         req: SendAssetReq,
@@ -99,7 +98,7 @@ pub enum Command {
     },
     GetTxs {
         req: GetTxsReq,
-        res_sender: UncheckedOneshotSender<Result<GetTxsResp, anyhow::Error>>,
+        res_sender: UncheckedOneshotSender<Result<GetTxsResp, Error>>,
     },
 }
 
@@ -107,35 +106,32 @@ pub enum Event {
     Utxos { utxo_data: UtxoData },
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    #[error("invalid argument: {0}")]
+    InvalidArg(&'static str),
+    #[error("wollet error: {0}")]
+    WolletError(#[from] lwk_wollet::Error),
+    #[error("signer error: {0}")]
+    SignerError(#[from] lwk_signer::SignError),
+    #[error("hex error: {0}")]
+    Hex(#[from] hex::FromHexError),
+    #[error("decode error: {0}")]
+    Decode(#[from] elements::encode::Error),
+}
+
 fn create_tx(
-    network: Network,
     req: CreateTxReq,
     wallet: &lwk_wollet::Wollet,
     signer: &lwk_signer::SwSigner,
-) -> Result<CreateTxResp, anyhow::Error> {
+) -> Result<CreateTxResp, Error> {
     let mut tx_builder = wallet.tx_builder().enable_ct_discount();
-    ensure!(!req.recipients.is_empty(), "recipients list can't be empty");
-
-    let network_params = network.d().elements_params;
-
     for recipient in req.recipients {
-        let blinding_pubkey = recipient.address.blinding_pubkey;
-        ensure!(
-            blinding_pubkey.is_some(),
-            "address must be confidential: {}",
-            recipient.address
-        );
-        ensure!(
-            recipient.address.params == network_params,
-            "address is from a different network: {}",
-            recipient.address
-        );
-        tx_builder = tx_builder.add_validated_recipient(lwk_wollet::Recipient {
+        tx_builder = tx_builder.add_unvalidated_recipient(&lwk_wollet::UnvalidatedRecipient {
             satoshi: recipient.amount,
-            script_pubkey: recipient.address.script_pubkey(),
-            blinding_pubkey,
-            asset: recipient.asset_id,
-        });
+            address: recipient.address.to_string(),
+            asset: recipient.asset_id.to_string(),
+        })?;
     }
     let mut pset = tx_builder.finish()?;
     signer.sign(&mut pset)?;
@@ -143,10 +139,7 @@ fn create_tx(
     Ok(CreateTxResp { tx })
 }
 
-fn broadcast_tx(
-    electrum_client: &lwk_wollet::ElectrumClient,
-    tx: &str,
-) -> Result<Txid, anyhow::Error> {
+fn broadcast_tx(electrum_client: &lwk_wollet::ElectrumClient, tx: &str) -> Result<Txid, Error> {
     let tx = hex::decode(&tx)?;
     let tx = elements::encode::deserialize::<elements::Transaction>(&tx)?;
     let txid = electrum_client.broadcast(&tx)?;
@@ -158,7 +151,7 @@ fn send_asset(
     wallet: &lwk_wollet::Wollet,
     signer: &lwk_signer::SwSigner,
     electrum_client: &lwk_wollet::ElectrumClient,
-) -> Result<SendAssetResp, anyhow::Error> {
+) -> Result<SendAssetResp, Error> {
     let mut pset = wallet
         .tx_builder()
         .enable_ct_discount()
@@ -173,7 +166,7 @@ fn send_asset(
 fn get_txs(
     GetTxsReq { txids }: GetTxsReq,
     wallet: &lwk_wollet::Wollet,
-) -> Result<GetTxsResp, anyhow::Error> {
+) -> Result<GetTxsResp, Error> {
     let txs = match txids {
         Some(txids) => {
             let mut txs = Vec::new();
@@ -364,13 +357,13 @@ fn run(
                                 address: addr.address().clone(),
                                 change: req.change,
                             })
-                            .map_err(|err| anyhow::anyhow!("address loading failed: {err}"));
+                            .map_err(Error::WolletError);
 
                         res_sender.send(res);
                     }
 
                     Command::CreateTx { req, res_sender } => {
-                        let res = create_tx(network, req, &wallet, &signer);
+                        let res = create_tx(req, &wallet, &signer);
                         res_sender.send(res);
                     }
 
@@ -387,7 +380,8 @@ fn run(
                     }
 
                     Command::SendAsset { req, res_sender } => {
-                        let res = send_asset(req, &wallet, &signer, &electrum_client);
+                        let res =
+                            send_asset(req, &wallet, &signer, &electrum_client).map_err(Into::into);
                         res_sender.send(res);
                     }
 

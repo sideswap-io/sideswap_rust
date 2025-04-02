@@ -19,4 +19,5 @@ lwk_common.workspace = true
 lwk_signer.workspace = true
 lwk_wollet.workspace = true
 serde.workspace = true
+thiserror.workspace = true
 tokio.workspace = true
