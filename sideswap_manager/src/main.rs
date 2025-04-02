@@ -4,7 +4,6 @@ use serde::Deserialize;
 use sideswap_common::dealer_ticker::{TickerLoader, WhitelistedAssets};
 
 mod api;
-mod controller;
 mod db;
 mod error;
 mod models;
@@ -63,13 +62,7 @@ async fn main() {
 
     let (command_sender, command_receiver) = tokio::sync::mpsc::unbounded_channel();
 
-    let controller = controller::Controller::new(
-        settings.env.d().network,
-        Arc::clone(&ticker_loader),
-        command_sender,
-    );
-
-    ws_server::start(settings.ws_server.clone(), controller);
+    ws_server::start(settings.ws_server.clone(), command_sender);
 
     worker::run(settings, command_receiver, ticker_loader, db).await;
 }

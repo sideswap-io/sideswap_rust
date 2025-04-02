@@ -52,49 +52,9 @@ pub enum Command {
     ClientDisconnected {
         client_id: ClientId,
     },
-    NewPeg {
-        req: api::NewPegReq,
-        res_sender: UncheckedOneshotSender<Result<api::NewPegResp, Error>>,
-    },
-    DelPeg {
-        req: api::DelPegReq,
-        res_sender: UncheckedOneshotSender<Result<api::DelPegResp, Error>>,
-    },
-    NewAddress {
-        req: api::NewAddressReq,
-        res_sender: UncheckedOneshotSender<Result<api::NewAddressResp, Error>>,
-    },
-    ListAddresses {
-        req: api::ListAddressesReq,
-        res_sender: UncheckedOneshotSender<Result<api::ListAddressesResp, Error>>,
-    },
-    CreateTx {
-        req: api::CreateTxReq,
-        res_sender: UncheckedOneshotSender<Result<api::CreateTxResp, Error>>,
-    },
-    SendTx {
-        req: api::SendTxReq,
-        res_sender: UncheckedOneshotSender<Result<api::SendTxResp, Error>>,
-    },
-    GetQuote {
-        req: api::GetQuoteReq,
-        res_sender: UncheckedOneshotSender<Result<api::GetQuoteResp, Error>>,
-    },
-    AcceptQuote {
-        req: api::AcceptQuoteReq,
-        res_sender: UncheckedOneshotSender<Result<api::AcceptQuoteResp, Error>>,
-    },
-    GetMonitoredTxs {
-        req: api::GetMonitoredTxsReq,
-        res_sender: UncheckedOneshotSender<Result<api::GetMonitoredTxsResp, Error>>,
-    },
-    DelMonitoredTx {
-        req: api::DelMonitoredTxReq,
-        res_sender: UncheckedOneshotSender<Result<api::DelMonitoredTxResp, Error>>,
-    },
-    GetWalletTxs {
-        req: api::GetWalletTxsReq,
-        res_sender: UncheckedOneshotSender<Result<api::GetWalletTxsResp, Error>>,
+    Request {
+        req: api::Req,
+        res_sender: UncheckedOneshotSender<Result<api::Resp, Error>>,
     },
 }
 
@@ -858,6 +818,28 @@ async fn get_wallet_txs(
     Ok(api::GetWalletTxsResp { txs })
 }
 
+async fn process_request(data: &mut Data, req: api::Req) -> Result<api::Resp, Error> {
+    match req {
+        api::Req::NewPeg(req) => new_peg(data, req).await.map(api::Resp::NewPeg),
+        api::Req::DelPeg(req) => del_peg(data, req).await.map(api::Resp::DelPeg),
+        api::Req::NewAddress(req) => new_address(data, req).await.map(api::Resp::NewAddress),
+        api::Req::ListAddresses(req) => list_addresses(data, req)
+            .await
+            .map(api::Resp::ListAddresses),
+        api::Req::CreateTx(req) => create_tx(data, req).await.map(api::Resp::CreateTx),
+        api::Req::SendTx(req) => send_tx(data, req).await.map(api::Resp::SendTx),
+        api::Req::GetQuote(req) => get_quote(data, req).await.map(api::Resp::GetQuote),
+        api::Req::AcceptQuote(req) => accept_quote(data, req).await.map(api::Resp::AcceptQuote),
+        api::Req::GetMonitoredTxs(req) => get_monitored_txs(data, req)
+            .await
+            .map(api::Resp::GetMonitoredTxs),
+        api::Req::DelMonitoredTx(req) => del_monitored_tx(data, req)
+            .await
+            .map(api::Resp::DelMonitoredTx),
+        api::Req::GetWalletTxs(req) => get_wallet_txs(data, req).await.map(api::Resp::GetWalletTxs),
+    }
+}
+
 async fn process_command(data: &mut Data, command: Command) {
     match command {
         Command::ClientConnected {
@@ -879,58 +861,8 @@ async fn process_command(data: &mut Data, command: Command) {
             data.clients.remove(&client_id).expect("must not fail");
         }
 
-        Command::NewPeg { req, res_sender } => {
-            let res = new_peg(data, req).await;
-            res_sender.send(res);
-        }
-
-        Command::DelPeg { req, res_sender } => {
-            let res = del_peg(data, req).await;
-            res_sender.send(res);
-        }
-
-        Command::NewAddress { req, res_sender } => {
-            let res = new_address(data, req).await;
-            res_sender.send(res);
-        }
-
-        Command::ListAddresses { req, res_sender } => {
-            let res = list_addresses(data, req).await;
-            res_sender.send(res);
-        }
-
-        Command::CreateTx { req, res_sender } => {
-            let res = create_tx(data, req).await;
-            res_sender.send(res);
-        }
-
-        Command::SendTx { req, res_sender } => {
-            let res = send_tx(data, req).await;
-            res_sender.send(res);
-        }
-
-        Command::GetQuote { req, res_sender } => {
-            let res = get_quote(data, req).await;
-            res_sender.send(res);
-        }
-
-        Command::AcceptQuote { req, res_sender } => {
-            let res = accept_quote(data, req).await;
-            res_sender.send(res);
-        }
-
-        Command::GetMonitoredTxs { req, res_sender } => {
-            let res = get_monitored_txs(data, req).await;
-            res_sender.send(res);
-        }
-
-        Command::DelMonitoredTx { req, res_sender } => {
-            let res = del_monitored_tx(data, req).await;
-            res_sender.send(res);
-        }
-
-        Command::GetWalletTxs { req, res_sender } => {
-            let res = get_wallet_txs(data, req).await;
+        Command::Request { req, res_sender } => {
+            let res = process_request(data, req).await;
             res_sender.send(res);
         }
     }

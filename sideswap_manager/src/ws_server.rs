@@ -4,13 +4,16 @@ use futures::{SinkExt, StreamExt};
 use serde::Deserialize;
 use tokio::{
     net::{TcpListener, TcpStream},
-    sync::mpsc::{unbounded_channel, UnboundedReceiver},
+    sync::{
+        mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
+        oneshot,
+    },
 };
 use tokio_tungstenite::{tungstenite::Message, WebSocketStream};
 
-use crate::error::Error;
+use crate::{error::Error, worker::Command};
 
-use super::{api, controller::Controller};
+use super::api;
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ClientId(u64);
@@ -21,7 +24,7 @@ pub struct Config {
 }
 
 struct Data {
-    controller: Controller,
+    command_sender: UnboundedSender<Command>,
     ws_stream: WebSocketStream<TcpStream>,
 }
 
@@ -42,62 +45,13 @@ async fn send_notif(data: &mut Data, notif: api::Notif) {
 }
 
 async fn process_ws_req(data: &mut Data, req: api::Req) -> Result<api::Resp, Error> {
-    match req {
-        api::Req::NewPeg(req) => {
-            let resp = data.controller.new_peg(req).await?;
-            Ok(api::Resp::NewPeg(resp))
-        }
-
-        api::Req::DelPeg(req) => {
-            let resp = data.controller.del_peg(req).await?;
-            Ok(api::Resp::DelPeg(resp))
-        }
-
-        api::Req::NewAddress(req) => {
-            let resp = data.controller.new_address(req).await?;
-            Ok(api::Resp::NewAddress(resp))
-        }
-
-        api::Req::ListAddresses(req) => {
-            let resp = data.controller.list_addresses(req).await?;
-            Ok(api::Resp::ListAddresses(resp))
-        }
-
-        api::Req::CreateTx(req) => {
-            let resp = data.controller.create_tx(req).await?;
-            Ok(api::Resp::CreateTx(resp))
-        }
-
-        api::Req::SendTx(req) => {
-            let resp = data.controller.send_tx(req).await?;
-            Ok(api::Resp::SendTx(resp))
-        }
-
-        api::Req::GetQuote(req) => {
-            let resp = data.controller.get_quote(req).await?;
-            Ok(api::Resp::GetQuote(resp))
-        }
-
-        api::Req::AcceptQuote(req) => {
-            let resp = data.controller.accept_quote(req).await?;
-            Ok(api::Resp::AcceptQuote(resp))
-        }
-
-        api::Req::GetMonitoredTxs(req) => {
-            let resp = data.controller.get_monitored_txs(req).await?;
-            Ok(api::Resp::GetMonitoredTxs(resp))
-        }
-
-        api::Req::DelMonitoredTx(req) => {
-            let resp = data.controller.del_monitored_tx(req).await?;
-            Ok(api::Resp::DelMonitoredTx(resp))
-        }
-
-        api::Req::GetWalletTxs(req) => {
-            let resp = data.controller.get_wallet_txs(req).await?;
-            Ok(api::Resp::GetWalletTxs(resp))
-        }
-    }
+    let (res_sender, res_receiver) = oneshot::channel();
+    data.command_sender.send(Command::Request {
+        req,
+        res_sender: res_sender.into(),
+    })?;
+    let resp = res_receiver.await??;
+    Ok(resp)
 }
 
 async fn process_to_msg(data: &mut Data, to: api::To) {
@@ -208,7 +162,11 @@ async fn client_loop(
     Ok(())
 }
 
-async fn client_run(controller: Controller, client_id: ClientId, tcp_stream: TcpStream) {
+async fn client_run(
+    command_sender: UnboundedSender<Command>,
+    client_id: ClientId,
+    tcp_stream: TcpStream,
+) {
     let ws_stream = match tokio_tungstenite::accept_async(tcp_stream).await {
         Ok(ws_stream) => ws_stream,
         Err(err) => {
@@ -218,14 +176,16 @@ async fn client_run(controller: Controller, client_id: ClientId, tcp_stream: Tcp
     };
 
     let mut data = Data {
-        controller,
+        command_sender,
         ws_stream,
     };
 
     let (event_sender, event_receiver) = unbounded_channel();
 
-    data.controller
-        .client_connected(client_id, event_sender.into());
+    let _ = data.command_sender.send(Command::ClientConnected {
+        client_id,
+        notif_sender: event_sender.into(),
+    });
 
     let result = client_loop(&mut data, event_receiver).await;
 
@@ -233,10 +193,12 @@ async fn client_run(controller: Controller, client_id: ClientId, tcp_stream: Tcp
         log::debug!("ws connection stopped: {err}");
     }
 
-    data.controller.client_disconnected(client_id);
+    let _ = data
+        .command_sender
+        .send(Command::ClientDisconnected { client_id });
 }
 
-async fn run(config: Config, controller: Controller) {
+async fn run(config: Config, command_sender: UnboundedSender<Command>) {
     log::info!("start WS server on {}...", config.listen_on);
     let listener = TcpListener::bind(&config.listen_on)
         .await
@@ -249,10 +211,10 @@ async fn run(config: Config, controller: Controller) {
         last_id += 1;
         let client_id = ClientId(last_id);
 
-        tokio::spawn(client_run(controller.clone(), client_id, tcp_stream));
+        tokio::spawn(client_run(command_sender.clone(), client_id, tcp_stream));
     }
 }
 
-pub fn start(config: Config, controller: Controller) {
-    tokio::task::spawn(run(config, controller));
+pub fn start(config: Config, command_sender: UnboundedSender<Command>) {
+    tokio::task::spawn(run(config, command_sender));
 }

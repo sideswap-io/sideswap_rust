@@ -10,8 +10,6 @@ use crate::api;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("Invalid address: {0}: {1}")]
-    InvalidAddress(String, anyhow::Error),
     #[error(transparent)]
     InvalidTicker(#[from] InvalidTickerError),
     #[error("Unknown ticker: {0}")]
@@ -77,8 +75,7 @@ impl<T> From<std::sync::mpsc::SendError<T>> for Error {
 impl Error {
     pub fn error_code(&self) -> api::ErrorCode {
         match self {
-            Error::InvalidAddress(_, _)
-            | Error::InvalidTicker(_)
+            Error::InvalidTicker(_)
             | Error::UnknownTicker(_)
             | Error::Wallet(_)
             | Error::InvalidAssetAmount(_, _)
