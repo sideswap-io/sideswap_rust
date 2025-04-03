@@ -93,6 +93,62 @@ pub struct Address {
     pub user_note: Option<String>,
 }
 
+#[derive(Debug, Copy, Clone, Serialize)]
+pub enum PegTxState {
+    /// Peg amount is less than the minimum and will not be processed
+    InsufficientAmount,
+    /// The peg transaction has been detected and the server is waiting for the transaction to be confirmed
+    Detected,
+    /// The server is processing the transaction
+    Processing,
+    /// The server has made the payment
+    Done,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PegTxStatus {
+    /// Txid of the user's payment.
+    pub tx_hash: sideswap_api::Hash32,
+    /// Output index of the user's payment.
+    pub vout: u32,
+    /// How much the user has paid (in bitcoins)
+    pub peg_amount: f64,
+    /// How much will be paid or has been paid (in bitcoins).
+    /// Will be empty if `tx_state` is InsufficientAmount.
+    pub payout_amount: Option<f64>,
+    /// Peg state
+    pub tx_state: PegTxState,
+    /// How many confirmations are required before a payment is initiated.
+    /// Set if and only if `tx_state` is `Detected`.
+    pub detected_confs: Option<u32>,
+    /// Set if and only if `tx_state` is `Detected`.
+    pub total_confs: Option<u32>,
+    /// Timestamp of when the peg transaction was detected
+    pub created_at: TimestampMs,
+    /// Payout txid (Liquid Bitcoin for peg-ins and Bitcoin for peg-outs).
+    /// Set if and only if `tx_state` is `Done`.
+    pub payout_txid: Option<sideswap_api::Hash32>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PegStatus {
+    /// Peg id
+    pub order_id: OrderId,
+    /// true for peg-ins, false for peg-outs
+    pub peg_in: bool,
+    /// Server address to send funds (bitcoin for peg-ins, liquid bitcoin for peg-outs)
+    pub addr: String,
+    /// User's address to receive funds (liquid bitcoin for peg-ins, bitcoin for peg-outs).
+    pub addr_recv: String,
+    /// List of detected user transactions (can have more than one transaction).
+    /// Will be empty for new peg requests.
+    pub list: Vec<PegTxStatus>,
+    /// Timestamp of when the order was created
+    pub created_at: TimestampMs,
+    /// Optional user-submitted return address used for `InsufficientAmount` peg-outs
+    pub return_address: Option<String>,
+}
+
 // Requests
 
 #[derive(Deserialize)]
@@ -252,7 +308,7 @@ pub enum Resp {
 #[derive(Serialize, Clone)]
 pub enum Notif {
     Balances(BalancesNotif),
-    PegStatus(sideswap_api::PegStatus),
+    PegStatus(PegStatus),
 }
 
 #[derive(Deserialize)]

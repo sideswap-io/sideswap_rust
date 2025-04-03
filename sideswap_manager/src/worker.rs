@@ -10,7 +10,7 @@ use std::{
 use elements::{pset::PartiallySignedTransaction, AssetId};
 use sideswap_api::{
     mkt::{self, AssetType, QuoteId, TradeDir},
-    OrderId, PegStatus, ResponseMessage,
+    OrderId, ResponseMessage,
 };
 use sideswap_common::{
     abort, b64,
@@ -83,7 +83,7 @@ struct CreatedTx {
 type MonitoredTxs = BTreeMap<elements::Txid, models::MonitoredTx>;
 
 struct PegData {
-    status: Option<PegStatus>,
+    status: Option<api::PegStatus>,
 }
 
 struct Data {
@@ -182,6 +182,41 @@ fn convert_balances(data: &Data, utxo_data: &UtxoData) -> api::Balances {
             Some((ticker, amount))
         })
         .collect()
+}
+
+fn convert_peg_status(status: sideswap_api::PegStatus) -> api::PegStatus {
+    let list = status
+        .list
+        .into_iter()
+        .map(|item| api::PegTxStatus {
+            tx_hash: item.tx_hash,
+            vout: item.vout as u32,
+            peg_amount: asset_float_amount(item.amount, AssetPrecision::BITCOIN_PRECISION),
+            payout_amount: item
+                .payout
+                .map(|amount| asset_float_amount(amount, AssetPrecision::BITCOIN_PRECISION)),
+            tx_state: match item.tx_state {
+                sideswap_api::PegTxState::InsufficientAmount => api::PegTxState::InsufficientAmount,
+                sideswap_api::PegTxState::Detected => api::PegTxState::Detected,
+                sideswap_api::PegTxState::Processing => api::PegTxState::Processing,
+                sideswap_api::PegTxState::Done => api::PegTxState::Done,
+            },
+            detected_confs: item.detected_confs.map(|value| value as u32),
+            total_confs: item.total_confs.map(|value| value as u32),
+            created_at: TimestampMs::from_millis(item.created_at as u64),
+            payout_txid: item.payout_txid,
+        })
+        .collect();
+
+    api::PegStatus {
+        order_id: status.order_id,
+        peg_in: status.peg_in,
+        addr: status.addr,
+        addr_recv: status.addr_recv,
+        list,
+        created_at: TimestampMs::from_millis(status.created_at as u64),
+        return_address: status.return_address.clone(),
+    }
 }
 
 fn get_tx_type(
@@ -919,14 +954,16 @@ fn process_market_resp(data: &mut Data, resp: mkt::Response) {
     }
 }
 
-fn process_peg_status(data: &mut Data, status: PegStatus) {
+fn process_peg_status(data: &mut Data, status: sideswap_api::PegStatus) {
     log::debug!(
         "new peg status: {}",
         serde_json::to_string(&status).expect("must not fail")
     );
 
+    let status = convert_peg_status(status);
+
     if let Some(peg) = data.pegs.get_mut(&status.order_id) {
-        log::debug!("send peg status update to connected clients",);
+        log::debug!("send peg status update to connected clients");
         peg.status = Some(status.clone());
         send_notifs(data, &api::Notif::PegStatus(status));
     } else {
