@@ -211,7 +211,7 @@ fn convert_peg_status(status: sideswap_api::PegStatus) -> api::PegStatus {
     api::PegStatus {
         order_id: status.order_id,
         peg_in: status.peg_in,
-        addr: status.addr,
+        addr_server: status.addr,
         addr_recv: status.addr_recv,
         list,
         created_at: TimestampMs::from_millis(status.created_at as u64),
@@ -279,9 +279,8 @@ async fn new_monitored_tx(
 async fn new_peg(
     data: &mut Data,
     api::NewPegReq {
-        recv_addr,
+        addr_recv: recv_addr,
         peg_in,
-        blocks,
     }: api::NewPegReq,
 ) -> Result<api::NewPegResp, Error> {
     let resp = make_request!(
@@ -292,7 +291,7 @@ async fn new_peg(
             send_amount: None,
             peg_in,
             device_key: None,
-            blocks,
+            blocks: None,
             peg_out_amounts: None,
         }
     )?;
@@ -316,11 +315,10 @@ async fn new_peg(
 
     data.pegs.insert(resp.order_id, PegData { status: None });
 
-    process_peg_status(data, status);
+    process_peg_status(data, status.clone());
 
     Ok(api::NewPegResp {
-        order_id: resp.order_id,
-        peg_addr: resp.peg_addr,
+        peg: convert_peg_status(status),
     })
 }
 
@@ -450,8 +448,15 @@ async fn create_tx(
     Ok(api::CreateTxResp { txid, network_fee })
 }
 
-async fn send_tx(data: &mut Data, req: api::SendTxReq) -> Result<api::SendTxResp, Error> {
-    let created = data.created_txs.get(&req.txid).ok_or(Error::NoCreatedTx)?;
+async fn send_tx(
+    data: &mut Data,
+    api::SendTxReq {
+        txid,
+        user_note,
+        wallet_only,
+    }: api::SendTxReq,
+) -> Result<api::SendTxResp, Error> {
+    let created = data.created_txs.get(&txid).ok_or(Error::NoCreatedTx)?;
 
     let outpoints = created
         .tx
@@ -475,58 +480,67 @@ async fn send_tx(data: &mut Data, req: api::SendTxReq) -> Result<api::SendTxResp
         );
     }
 
-    // Verify that UTXOs are not spent and known on the server
-    let _verify_resp = make_market_request!(
-        data.ws,
-        CheckOutpoints,
-        mkt::CheckOutpointsRequest { outpoints }
-    )
-    .map_err(|err| Error::UtxoCheckFailed(err.to_string()))?;
+    if !wallet_only {
+        // Verify that UTXOs are not spent and known on the server
+        let _verify_resp = make_market_request!(
+            data.ws,
+            CheckOutpoints,
+            mkt::CheckOutpointsRequest { outpoints }
+        )
+        .map_err(|err| Error::UtxoCheckFailed(err.to_string()))?;
+    }
 
     new_monitored_tx(
         &data.db,
         &mut data.monitored_txs,
         MonitoredTx {
-            txid: Text(req.txid),
+            txid: Text(txid),
             description: Some(created.note.clone()),
-            user_note: req.user_note,
+            user_note,
         },
     )
     .await;
 
     let tx = elements::encode::serialize_hex(&created.tx);
 
-    let res_server = make_market_request!(
-        data.ws,
-        BroadcastTx,
-        mkt::BroadcastTxRequest {
-            tx: created.tx.clone().into()
-        }
-    );
+    let res_server = if wallet_only {
+        None
+    } else {
+        let res = make_market_request!(
+            data.ws,
+            BroadcastTx,
+            mkt::BroadcastTxRequest {
+                tx: created.tx.clone().into()
+            }
+        );
 
-    let (res_sender, res_receiver) = tokio::sync::oneshot::channel();
-    data.wallet_command_sender
-        .send(sideswap_lwk::Command::BroadcastTx {
-            tx,
-            res_sender: Some(res_sender.into()),
-        })?;
-    let res_wallet = res_receiver.await.expect("must not fail");
+        match res {
+            Ok(_txid) => Some(api::BroadcastStatus::Success {}),
+            Err(err) => Some(api::BroadcastStatus::Error {
+                error_msg: err.to_string(),
+            }),
+        }
+    };
+
+    let res_wallet = {
+        let (res_sender, res_receiver) = tokio::sync::oneshot::channel();
+        data.wallet_command_sender
+            .send(sideswap_lwk::Command::BroadcastTx {
+                tx,
+                res_sender: Some(res_sender.into()),
+            })
+            .expect("must not fail");
+        let res_wallet = res_receiver.await.expect("must not fail");
+
+        match res_wallet {
+            Ok(_txid) => api::BroadcastStatus::Success {},
+            Err(err) => api::BroadcastStatus::Error {
+                error_msg: err.to_string(),
+            },
+        }
+    };
 
     data.created_txs.clear();
-
-    let res_wallet = match res_wallet {
-        Ok(_txid) => api::BroadcastStatus::Success {},
-        Err(err) => api::BroadcastStatus::Error {
-            error_msg: err.to_string(),
-        },
-    };
-
-    let res_server = match res_server {
-        Ok(_txid) => api::BroadcastStatus::Success {},
-        Err(err) => api::BroadcastStatus::Error {
-            error_msg: err.to_string(),
-        },
-    };
 
     Ok(api::SendTxResp {
         res_wallet,
@@ -886,7 +900,9 @@ async fn process_command(data: &mut Data, command: Command) {
             }
 
             for status in data.pegs.values().filter_map(|peg| peg.status.as_ref()) {
-                notif_sender.send(api::Notif::PegStatus(status.clone()));
+                notif_sender.send(api::Notif::PegStatus(api::PegStatusNotif {
+                    peg: status.clone(),
+                }));
             }
 
             data.clients.insert(client_id, ClientData { notif_sender });
@@ -965,7 +981,10 @@ fn process_peg_status(data: &mut Data, status: sideswap_api::PegStatus) {
     if let Some(peg) = data.pegs.get_mut(&status.order_id) {
         log::debug!("send peg status update to connected clients");
         peg.status = Some(status.clone());
-        send_notifs(data, &api::Notif::PegStatus(status));
+        send_notifs(
+            data,
+            &api::Notif::PegStatus(api::PegStatusNotif { peg: status }),
+        );
     } else {
         log::debug!(
             "ignore unexpected peg status update, order_id: {}",

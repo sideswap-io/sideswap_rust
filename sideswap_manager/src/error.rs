@@ -89,8 +89,16 @@ impl Error {
             | Error::NoQuote
             | Error::NoCreatedTx
             | Error::GapLimit => api::ErrorCode::InvalidRequest,
+
             Error::ChannelClosed | Error::NoUtxos => api::ErrorCode::ServerError,
-            Error::WsError(_) => api::ErrorCode::NetworkError,
+
+            Error::WsError(error) => match error {
+                ws_req_sender::Error::Disconnected => api::ErrorCode::NetworkError,
+                ws_req_sender::Error::BackendError(_, _error_code) => api::ErrorCode::ServerError,
+                ws_req_sender::Error::Timeout(_elapsed) => api::ErrorCode::ServerError,
+                ws_req_sender::Error::UnexpectedResponse => api::ErrorCode::ServerError,
+            },
+
             Error::UtxoCheckFailed(_) => api::ErrorCode::UtxoCheckFailed,
         }
     }
