@@ -15,7 +15,7 @@ impl FeeRateBitcoin {
 }
 
 /// Fee rate in sat/byte
-#[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, PartialOrd)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq)]
 pub struct FeeRateSats(f64);
 
 impl FeeRateSats {
@@ -42,6 +42,12 @@ impl FeeRateSats {
 }
 
 impl Eq for FeeRateSats {}
+
+impl PartialOrd for FeeRateSats {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
 
 impl Ord for FeeRateSats {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
