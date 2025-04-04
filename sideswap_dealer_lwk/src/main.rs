@@ -41,6 +41,8 @@ fn process_wallet_event(data: &mut Data, event: sideswap_lwk::Event) {
             });
             data.utxo_data = utxo_data;
         }
+
+        sideswap_lwk::Event::Updated => {}
     }
 }
 

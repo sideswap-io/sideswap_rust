@@ -28,7 +28,7 @@ use sideswap_dealer::{
 };
 use tokio::sync::mpsc::UnboundedSender;
 
-pub use lwk_wollet::WalletTx;
+pub use lwk_wollet::{WalletTx, WalletTxOut};
 
 #[derive(Debug, Copy, Clone)]
 pub struct ScriptVariant(lwk_common::Singlesig);
@@ -71,6 +71,12 @@ pub struct GetTxsResp {
     pub txs: Vec<WalletTx>,
 }
 
+pub struct GetUtxosReq {}
+
+pub struct GetUtxosResp {
+    pub utxos: Vec<WalletTxOut>,
+}
+
 pub struct CreateTxReq {
     pub recipients: Vec<Recipient>,
 }
@@ -100,10 +106,19 @@ pub enum Command {
         req: GetTxsReq,
         res_sender: UncheckedOneshotSender<Result<GetTxsResp, Error>>,
     },
+    GetUtxos {
+        req: GetUtxosReq,
+        res_sender: UncheckedOneshotSender<Result<GetUtxosResp, Error>>,
+    },
 }
 
 pub enum Event {
-    Utxos { utxo_data: UtxoData },
+    Utxos {
+        utxo_data: UtxoData,
+    },
+
+    /// Reported if any changes were found during scanning
+    Updated,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -183,6 +198,14 @@ fn get_txs(
     };
 
     Ok(GetTxsResp { txs })
+}
+
+fn get_utxos(
+    GetUtxosReq {}: GetUtxosReq,
+    wallet: &lwk_wollet::Wollet,
+) -> Result<GetUtxosResp, Error> {
+    let utxos = wallet.utxos()?;
+    Ok(GetUtxosResp { utxos })
 }
 
 fn run(
@@ -335,6 +358,8 @@ fn run(
             event_sender.send(Event::Utxos {
                 utxo_data: utxo_data.clone(),
             });
+
+            event_sender.send(Event::Updated {});
         }
 
         let deadline = Instant::now() + Duration::from_secs(1);
@@ -387,6 +412,11 @@ fn run(
 
                     Command::GetTxs { req, res_sender } => {
                         let res = get_txs(req, &wallet);
+                        res_sender.send(res);
+                    }
+
+                    Command::GetUtxos { req, res_sender } => {
+                        let res = get_utxos(req, &wallet);
                         res_sender.send(res);
                     }
                 },

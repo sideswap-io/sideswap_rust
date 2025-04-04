@@ -167,23 +167,6 @@ fn try_convert_asset_amount(amount: f64, asset_precision: AssetPrecision) -> Res
     Ok(int_amount)
 }
 
-fn convert_balances(data: &Data, utxo_data: &UtxoData) -> api::Balances {
-    let mut totals = BTreeMap::<elements::AssetId, u64>::new();
-    for utxo in utxo_data.utxos() {
-        *totals.entry(utxo.asset).or_default() += utxo.value;
-    }
-
-    totals
-        .iter()
-        .filter_map(|(asset_id, amount)| {
-            let ticker = data.ticker_loader.ticker(asset_id)?;
-            let precision = data.ticker_loader.precision(ticker);
-            let amount = asset_float_amount_(*amount, precision);
-            Some((ticker, amount))
-        })
-        .collect()
-}
-
 fn convert_peg_status(status: sideswap_api::PegStatus) -> api::PegStatus {
     let list = status
         .list
@@ -1062,21 +1045,61 @@ async fn process_ws_event(data: &mut Data, event: WrappedResponse) {
     }
 }
 
-fn process_wallet_event(data: &mut Data, event: sideswap_lwk::Event) {
+async fn reload_balances(data: &mut Data) {
+    let (res_sender, res_receiver) = tokio::sync::oneshot::channel();
+    data.wallet_command_sender
+        .send(sideswap_lwk::Command::GetUtxos {
+            req: sideswap_lwk::GetUtxosReq {},
+            res_sender: res_sender.into(),
+        })
+        .expect("must not fail");
+    let resp = res_receiver
+        .await
+        .expect("must not fail")
+        .expect("must not fail");
+
+    type BalancesSat = BTreeMap<elements::AssetId, u64>;
+    let mut confirmed = BalancesSat::new();
+    let mut balances = BalancesSat::new();
+    for utxo in resp.utxos {
+        if utxo.height.is_some() {
+            *confirmed.entry(utxo.unblinded.asset).or_default() += utxo.unblinded.value;
+        }
+        *balances.entry(utxo.unblinded.asset).or_default() += utxo.unblinded.value;
+    }
+
+    let convert_balances = |balances: &BalancesSat| -> api::Balances {
+        balances
+            .iter()
+            .filter_map(|(asset_id, amount)| {
+                let ticker = data.ticker_loader.ticker(asset_id)?;
+                let precision = data.ticker_loader.precision(ticker);
+                let amount = asset_float_amount_(*amount, precision);
+                Some((ticker, amount))
+            })
+            .collect()
+    };
+
+    let new_balances = api::BalancesNotif {
+        balances: convert_balances(&balances),
+        confirmed: convert_balances(&confirmed),
+    };
+
+    if data.last_balances.as_ref() != Some(&new_balances) {
+        log::debug!("wallet balances updated: {new_balances:?}");
+        send_notifs(data, &api::Notif::Balances(new_balances.clone()));
+        data.last_balances = Some(new_balances);
+    }
+}
+
+async fn process_wallet_event(data: &mut Data, event: sideswap_lwk::Event) {
     match event {
         sideswap_lwk::Event::Utxos { utxo_data } => {
-            let new_balances = api::BalancesNotif {
-                balances: convert_balances(data, &utxo_data),
-            };
-
             data.utxo_data = Some(utxo_data);
+        }
 
-            if data.last_balances.as_ref() != Some(&new_balances) {
-                // TODO: Send updated balances to the clients
-                log::debug!("wallet balances updated: {new_balances:?}");
-                send_notifs(data, &api::Notif::Balances(new_balances.clone()));
-                data.last_balances = Some(new_balances);
-            }
+        sideswap_lwk::Event::Updated => {
+            reload_balances(data).await;
         }
     }
 }
@@ -1158,7 +1181,7 @@ pub async fn run(
         tokio::select! {
             event = wallet_event_receiver.recv() => {
                 let event = event.expect("must be open");
-                process_wallet_event(&mut data, event);
+                process_wallet_event(&mut data, event).await;
             },
 
             command = command_receiver.recv() => {

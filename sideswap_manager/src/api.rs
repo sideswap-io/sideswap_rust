@@ -333,7 +333,6 @@ pub struct GetQuoteReq {
     /// The asset the user wants to buy.
     pub recv_asset: Ticker,
     /// The exact amount of `send_asset` the user will provide.
-    /// The quote ensures the user receives at least the corresponding `recv_amount`.
     pub send_amount: f64,
     /// The Liquid confidential address that will receive the `recv_asset`.
     /// This address does *not* need to belong to the user's wallet.
@@ -482,8 +481,10 @@ pub struct GetWalletTxsResp {
 /// - The wallet balance for any whitelisted asset changes (due to incoming/outgoing txs, swaps).
 #[derive(Debug, Serialize, PartialEq, Clone)]
 pub struct BalancesNotif {
-    /// Current wallet balances for all whitelisted assets.
+    /// Current wallet balances for all whitelisted assets (UTXOs on the blockchain and in the mempool)
     pub balances: Balances,
+    /// Current wallet balances for all whitelisted assets (only UTXOs on the blockchain)
+    pub confirmed: Balances,
 }
 
 /// Peg status notification
