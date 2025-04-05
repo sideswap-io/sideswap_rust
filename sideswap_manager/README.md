@@ -1,6 +1,6 @@
 # SideSwap Manager
 
-A self-hosted Rust application for managing Liquid-based cryptocurrency trading via [SideSwap](https://sideswap.io/) infrastructure.
+A self-hosted program for managing liquid bitcoin assets and accessing the [SideSwap](https://sideswap.io/) API.
 
 This manager:
 
