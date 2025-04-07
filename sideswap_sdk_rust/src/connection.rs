@@ -170,9 +170,9 @@ async fn ws_resp(data: &mut Data) -> WrappedResponse {
     }
 }
 
-fn process_market_resp(data: &mut Data, resp: mkt::Response) {
+fn process_market_resp(_data: &mut Data, resp: mkt::Response) {
     match resp {
-        mkt::Response::ListMarkets(resp) => {}
+        mkt::Response::ListMarkets(_resp) => {}
         _ => {}
     }
 }
@@ -184,7 +184,7 @@ fn process_ws_resp(data: &mut Data, resp: sideswap_api::Response) {
     }
 }
 
-fn process_market_notif(data: &mut Data, notif: mkt::Notification) {
+fn process_market_notif(_data: &mut Data, notif: mkt::Notification) {
     match notif {
         // mkt::Notification::MarketAdded(_notif) => {}
         // mkt::Notification::MarketRemoved(_notif) => {}

@@ -16,9 +16,11 @@ use crate::{gdk_ses_jade, models, swaps};
 use anyhow::{anyhow, ensure};
 use bitcoin::bip32;
 use bitcoin::hashes::Hash;
+use bitcoin::hex::FromHex;
 use bitcoin::secp256k1::global::SECP256K1;
 use elements::bitcoin::bip32::ChildNumber;
 use elements::AssetId;
+use elements_miniscript::slip77::MasterBlindingKey;
 use log::{debug, error, info, warn};
 use market_worker::REGISTER_PATH;
 use rand::Rng;
@@ -140,6 +142,7 @@ pub struct XPubInfo {
     single_sig_account: bip32::Xpub,
     multi_sig_service_xpub: bip32::Xpub,
     multi_sig_user_xpub: bip32::Xpub,
+    master_blinding_key: MasterBlindingKey,
 }
 
 #[derive(Clone)]
@@ -180,6 +183,38 @@ struct LastPegOutAmount {
     recv_amount: i64,
     is_send_entered: bool,
     fee_rate: FeeRateSats,
+}
+
+#[derive(PartialEq, Eq)]
+struct WalletAddress {
+    address: elements::Address,
+    pointer: u32,
+    is_internal: bool,
+}
+
+impl From<&AddressInfo> for WalletAddress {
+    fn from(value: &AddressInfo) -> Self {
+        WalletAddress {
+            address: value.address.clone(),
+            pointer: value.pointer,
+            is_internal: value.is_internal.unwrap_or_default(),
+        }
+    }
+}
+
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+struct AddressPointer {
+    is_internal: bool,
+    pointer: u32,
+}
+
+impl From<&WalletAddress> for AddressPointer {
+    fn from(value: &WalletAddress) -> Self {
+        AddressPointer {
+            is_internal: value.is_internal,
+            pointer: value.pointer,
+        }
+    }
 }
 
 pub struct Data {
@@ -411,6 +446,7 @@ fn derive_multi_sig_address(
     multi_sig_user_xpub: &bip32::Xpub,
     network: Network,
     pointer: u32,
+    master_blinding_key: Option<&MasterBlindingKey>,
 ) -> elements::Address {
     let pub_key_green = multi_sig_service_xpub
         .derive_pub(SECP256K1, &[ChildNumber::from_normal_idx(pointer).unwrap()])
@@ -436,10 +472,21 @@ fn derive_multi_sig_address(
 
     let script_hash = elements::ScriptHash::hash(script.as_bytes());
 
-    elements::Address {
+    let payload = elements::address::Payload::ScriptHash(script_hash);
+
+    let address = elements::Address {
         params: network.d().elements_params,
-        payload: elements::address::Payload::ScriptHash(script_hash),
+        payload,
         blinding_pubkey: None,
+    };
+
+    match master_blinding_key {
+        Some(master_blinding_key) => {
+            let blinding_pubkey =
+                master_blinding_key.blinding_key(SECP256K1, &address.script_pubkey());
+            address.to_confidential(blinding_pubkey)
+        }
+        None => address,
     }
 }
 
@@ -1899,11 +1946,14 @@ impl Data {
             bip32::Xpub::from_str(&reg_info.multi_sig_service_xpub).expect("must be valid");
         let multi_sig_user_path = reg_info.multi_sig_user_path.clone();
 
-        let (single_sig_account, multi_sig_user_xpub) =
+        let (single_sig_account, multi_sig_user_xpub, master_blinding_key) =
             if let Some(watch_only) = reg_info.jade_watch_only.as_ref() {
+                let master_blinding_key =
+                    MasterBlindingKey::from_hex(&watch_only.master_blinding_key)?;
                 (
                     watch_only.single_sig_account_xpub,
                     watch_only.multi_sig_user_xpub,
+                    master_blinding_key,
                 )
             } else {
                 let mnemonic = wallet_info.mnemonic().expect("mnemonic must be set");
@@ -1911,6 +1961,7 @@ impl Data {
                 let seed = mnemonic.to_seed("");
                 let bitcoin_network = self.env.d().network.d().bitcoin_network;
                 let master_key = bip32::Xpriv::new_master(bitcoin_network, &seed).unwrap();
+                let master_blinding_key = MasterBlindingKey::from_seed(&seed);
 
                 let register_priv = master_key
                     .derive_priv(
@@ -1968,6 +2019,7 @@ impl Data {
                 (
                     bip32::Xpub::from_priv(SECP256K1, &single_sig_xpriv),
                     bip32::Xpub::from_priv(SECP256K1, &multi_sig_xpriv),
+                    master_blinding_key,
                 )
             };
 
@@ -1975,6 +2027,7 @@ impl Data {
             single_sig_account,
             multi_sig_service_xpub,
             multi_sig_user_xpub,
+            master_blinding_key,
         };
 
         let (command_sender, command_receiver) = mpsc::channel();
@@ -2311,27 +2364,48 @@ impl Data {
     fn try_load_all_addresses(
         &mut self,
         account: &proto::Account,
-    ) -> Result<Vec<AddressInfo>, anyhow::Error> {
+    ) -> Result<Vec<WalletAddress>, anyhow::Error> {
         if account.id == ACCOUNT_ID_AMP {
-            self.refresh_amp_addresses()?;
+            let wallet = self.get_wallet(account.id)?;
+            let latest = wallet::call_wallet(wallet, move |data| {
+                data.ses.get_previous_addresses(None, false)
+            })?;
 
-            // Loading multi-sig addresses is slow, use locally cached list
-            let addresses = self
-                .settings
-                .amp_prev_addrs_v2
-                .as_ref()
-                .map(|data| data.list.clone())
-                .unwrap_or_default();
+            let end_index = latest
+                .list
+                .iter()
+                .map(|item| item.pointer)
+                .max()
+                .ok_or_else(|| anyhow!("get_previous_addresses is empty"))?;
 
-            Ok(addresses)
+            let list = (0..=end_index)
+                .rev()
+                .map(|pointer| {
+                    let address = derive_multi_sig_address(
+                        &wallet.xpubs.multi_sig_service_xpub,
+                        &wallet.xpubs.multi_sig_user_xpub,
+                        self.env.d().network,
+                        pointer,
+                        Some(&wallet.xpubs.master_blinding_key),
+                    );
+                    WalletAddress {
+                        address,
+                        pointer,
+                        is_internal: false,
+                    }
+                })
+                .collect::<Vec<_>>();
+            Ok(list)
         } else {
             let wallet = self.get_wallet(account.id)?;
-
             // Loading single-sig addresses is fast, load them from GDK
-            let mut list = load_all_addresses(wallet, false, None)?.1;
-            let mut internal = load_all_addresses(wallet, true, None)?.1;
-            list.append(&mut internal);
-
+            let external = load_all_addresses(wallet, false, None)?.1;
+            let internal = load_all_addresses(wallet, true, None)?.1;
+            let list = external
+                .iter()
+                .chain(internal.iter())
+                .map(WalletAddress::from)
+                .collect();
             Ok(list)
         }
     }
@@ -2349,23 +2423,9 @@ impl Data {
 
         let addresses = self.try_load_all_addresses(account)?;
 
-        #[derive(PartialEq, Eq, PartialOrd, Ord)]
-        struct AddressPointer {
-            pointer: u32,
-            is_internal: bool,
-        }
-
         let addresses = addresses
             .into_iter()
-            .map(|address| {
-                (
-                    AddressPointer {
-                        pointer: address.pointer,
-                        is_internal: address.is_internal.unwrap_or_default(),
-                    },
-                    address,
-                )
-            })
+            .map(|address| (AddressPointer::from(&address), address))
             .collect::<BTreeMap<_, _>>();
 
         let mut utxos = Vec::new();
@@ -2420,9 +2480,9 @@ impl Data {
             .into_iter()
             .map(|addr| proto::from::load_addresses::Address {
                 address: addr.address.to_string(),
-                unconfidential_address: addr.unconfidential_address.to_string(),
+                unconfidential_address: addr.address.to_unconfidential().to_string(),
                 index: addr.pointer,
-                is_internal: addr.is_internal.unwrap_or_default(),
+                is_internal: addr.is_internal,
             })
             .collect();
 
@@ -3272,6 +3332,7 @@ impl Data {
                         &wallet.xpubs.multi_sig_user_xpub,
                         self.env.d().network,
                         pointer,
+                        None,
                     )
                     .to_string()
                 })
