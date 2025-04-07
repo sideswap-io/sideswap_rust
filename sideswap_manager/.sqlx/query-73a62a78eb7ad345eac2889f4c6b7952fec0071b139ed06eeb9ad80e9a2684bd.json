@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "delete from settings where key = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "73a62a78eb7ad345eac2889f4c6b7952fec0071b139ed06eeb9ad80e9a2684bd"
+}

@@ -2,7 +2,7 @@ use std::{
     collections::BTreeSet,
     path::PathBuf,
     str::FromStr,
-    sync::mpsc::{Receiver, RecvTimeoutError},
+    sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender},
     time::{Duration, Instant},
 };
 
@@ -26,7 +26,7 @@ use sideswap_dealer::{
     market::{SendAssetReq, SendAssetResp},
     utxo_data::{self, UtxoData, UtxoWithKey},
 };
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 
 pub use lwk_wollet::{WalletTx, WalletTxOut};
 
@@ -50,6 +50,15 @@ pub struct Params {
     pub work_dir: PathBuf,
     pub mnemonic: bip39::Mnemonic,
     pub script_variant: ScriptVariant,
+}
+
+pub struct Wallet {
+    network: Network,
+    script_variant: ScriptVariant,
+    descriptor: lwk_wollet::WolletDescriptor,
+    master_key: bip32::Xpriv,
+    wallet: lwk_wollet::Wollet,
+    signer: lwk_signer::SwSigner,
 }
 
 pub struct NewAddrReq {
@@ -209,51 +218,17 @@ fn get_utxos(
 }
 
 fn run(
-    Params {
+    Wallet {
         network,
-        work_dir: _work_dir,
-        mnemonic,
         script_variant,
-    }: Params,
+        descriptor,
+        master_key,
+        mut wallet,
+        signer,
+    }: Wallet,
     command_receiver: Receiver<Command>,
     event_sender: UncheckedUnboundedSender<Event>,
 ) {
-    let is_mainnet = match network {
-        Network::Liquid => true,
-        Network::LiquidTestnet | Network::Regtest => false,
-    };
-
-    let seed = mnemonic.to_seed("");
-    let bitcoin_network = network.d().bitcoin_network;
-    let master_key = bip32::Xpriv::new_master(bitcoin_network, &seed).unwrap();
-
-    let signer =
-        lwk_signer::SwSigner::new(&mnemonic.to_string(), is_mainnet).expect("must not fail");
-
-    let descriptor = singlesig_desc(
-        &signer,
-        script_variant.0,
-        lwk_common::DescriptorBlindingKey::Slip77,
-        is_mainnet,
-    )
-    .expect("must not fail");
-
-    let descriptor = descriptor
-        .parse::<WolletDescriptor>()
-        .expect("must not fail");
-
-    let lwk_network = match network {
-        Network::Liquid => ElementsNetwork::Liquid,
-        Network::LiquidTestnet => ElementsNetwork::LiquidTestnet,
-        Network::Regtest => todo!(),
-    };
-
-    let mut wallet = lwk_wollet::Wollet::without_persist(lwk_network, descriptor.clone())
-        .expect("must not fail");
-    // let mut wallet =
-    //     lwk_wollet::Wollet::with_fs_persist(lwk_network, descriptor.clone(), &work_dir)
-    //         .expect("must not fail");
-
     let electrum_url = match network {
         Network::Liquid => "electrs.sideswap.io:12001",
         Network::LiquidTestnet => "electrs.sideswap.io:12002",
@@ -435,10 +410,77 @@ fn run(
     }
 }
 
-pub fn start(
-    params: Params,
-    command_receiver: Receiver<Command>,
-    event_sender: UnboundedSender<Event>,
-) {
-    std::thread::spawn(move || run(params, command_receiver, event_sender.into()));
+impl Wallet {
+    pub fn new(params: Params) -> Wallet {
+        let Params {
+            network,
+            work_dir: _,
+            mnemonic,
+            script_variant,
+        } = params;
+
+        let is_mainnet = match network {
+            Network::Liquid => true,
+            Network::LiquidTestnet | Network::Regtest => false,
+        };
+
+        let seed = mnemonic.to_seed("");
+        let bitcoin_network = network.d().bitcoin_network;
+        let master_key = bip32::Xpriv::new_master(bitcoin_network, &seed).unwrap();
+
+        let signer =
+            lwk_signer::SwSigner::new(&mnemonic.to_string(), is_mainnet).expect("must not fail");
+
+        let descriptor = singlesig_desc(
+            &signer,
+            script_variant.0,
+            lwk_common::DescriptorBlindingKey::Slip77,
+            is_mainnet,
+        )
+        .expect("must not fail");
+
+        let descriptor = descriptor
+            .parse::<WolletDescriptor>()
+            .expect("must not fail");
+
+        let lwk_network = match network {
+            Network::Liquid => ElementsNetwork::Liquid,
+            Network::LiquidTestnet => ElementsNetwork::LiquidTestnet,
+            Network::Regtest => todo!(),
+        };
+
+        let wallet = lwk_wollet::Wollet::without_persist(lwk_network, descriptor.clone())
+            .expect("must not fail");
+        // let mut wallet =
+        //     lwk_wollet::Wollet::with_fs_persist(lwk_network, descriptor.clone(), &work_dir)
+        //         .expect("must not fail");
+
+        Wallet {
+            network,
+            script_variant,
+            descriptor,
+            master_key,
+            wallet,
+            signer,
+        }
+    }
+
+    pub fn descriptor(&self) -> &lwk_wollet::WolletDescriptor {
+        &self.descriptor
+    }
+
+    pub fn wallet_id(&self) -> String {
+        use elements::bitcoin::hashes::Hash;
+        sideswap_common::wallet_id::WalletIdHash::hash(self.descriptor().to_string().as_bytes())
+            .to_string()
+    }
+
+    pub fn start(self) -> (Sender<Command>, UnboundedReceiver<Event>) {
+        let (command_sender, command_receiver) = channel::<Command>();
+        let (event_sender, event_receiver) = unbounded_channel::<Event>();
+
+        std::thread::spawn(move || run(self, command_receiver, event_sender.into()));
+
+        (command_sender, event_receiver)
+    }
 }

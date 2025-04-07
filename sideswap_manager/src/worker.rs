@@ -1,9 +1,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
-    sync::{
-        mpsc::{self, channel},
-        Arc,
-    },
+    sync::{mpsc, Arc},
     time::Duration,
 };
 
@@ -1104,6 +1101,33 @@ async fn process_wallet_event(data: &mut Data, event: sideswap_lwk::Event) {
     }
 }
 
+pub async fn check_wallet_id(wallet: &sideswap_lwk::Wallet, db: &Db) {
+    let expected_wallet_id = wallet.wallet_id();
+    log::debug!("check wallet_id, expected: {expected_wallet_id}");
+
+    let wallet_id_key = "wallet_id";
+
+    let stored_wallet_id = db.get_setting::<String>(wallet_id_key).await;
+
+    match stored_wallet_id {
+        Some(stored_wallet_id) => {
+            assert!(
+                stored_wallet_id == expected_wallet_id,
+                "The working directory has already been used with a different mnemonic. Please revert to the old mnemonic and script variant or use a new working directory. Old wallet id: {}, new wallet id: {}",
+                stored_wallet_id,
+                expected_wallet_id,
+
+            );
+            log::debug!("valid wallet_id stored in the DB");
+        }
+        None => {
+            log::debug!("no wallet_id stored in the DB, saving it");
+            db.set_setting::<String>(wallet_id_key, &expected_wallet_id)
+                .await
+        }
+    }
+}
+
 pub async fn run(
     settings: Settings,
     mut command_receiver: UnboundedReceiver<Command>,
@@ -1125,16 +1149,14 @@ pub async fn run(
 
     let network = settings.env.d().network;
 
-    let (wallet_command_sender, wallet_command_receiver) = channel::<sideswap_lwk::Command>();
-    let (wallet_event_sender, mut wallet_event_receiver) =
-        unbounded_channel::<sideswap_lwk::Event>();
-    let wallet_params = sideswap_lwk::Params {
+    let wallet = sideswap_lwk::Wallet::new(sideswap_lwk::Params {
         network,
         work_dir: settings.work_dir.clone(),
         mnemonic: settings.mnemonic.clone(),
         script_variant: settings.script_variant,
-    };
-    sideswap_lwk::start(wallet_params, wallet_command_receiver, wallet_event_sender);
+    });
+    check_wallet_id(&wallet, &db).await;
+    let (wallet_command_sender, mut wallet_event_receiver) = wallet.start();
 
     let pegs = db
         .load_pegs()

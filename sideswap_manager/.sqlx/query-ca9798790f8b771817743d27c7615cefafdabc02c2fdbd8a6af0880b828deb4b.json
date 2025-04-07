@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "insert into settings (key, value) values (?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "ca9798790f8b771817743d27c7615cefafdabc02c2fdbd8a6af0880b828deb4b"
+}

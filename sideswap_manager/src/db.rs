@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{path::Path, str::FromStr};
 
 use sideswap_api::OrderId;
 use sqlx::{
@@ -111,6 +111,41 @@ impl Db {
         .fetch_all(&self.pool)
         .await
         .expect("must not fail")
+    }
+
+    pub async fn set_setting<T: ToString>(&self, key: &str, value: &T) {
+        let value = value.to_string();
+
+        sqlx::query!("delete from settings where key = ?", key)
+            .execute(&self.pool)
+            .await
+            .expect("must not fail");
+
+        sqlx::query!(
+            "insert into settings (key, value) values (?, ?)",
+            key,
+            value,
+        )
+        .execute(&self.pool)
+        .await
+        .expect("must not fail");
+    }
+
+    pub async fn get_setting<T>(&self, key: &str) -> Option<T>
+    where
+        T: FromStr,
+        <T as FromStr>::Err: std::fmt::Display,
+    {
+        let value = sqlx::query_scalar!("select value from settings where key = ?", key)
+            .fetch_optional(&self.pool)
+            .await
+            .expect("must not fail");
+
+        value.map(|value| {
+            T::from_str(&value).unwrap_or_else(|err| {
+                panic!("invalid setting value, key: {key}, value: {value}: {err}")
+            })
+        })
     }
 
     pub async fn close(self) {

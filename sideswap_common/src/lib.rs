@@ -31,6 +31,7 @@ pub mod send_tx;
 pub mod target_os;
 pub mod tx_type;
 pub mod types;
+pub mod wallet_id;
 pub mod web_notif;
 pub mod ws;
 

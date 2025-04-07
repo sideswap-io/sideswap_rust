@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use std::sync::mpsc::{channel, Sender};
+use std::sync::mpsc::Sender;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -8,7 +8,6 @@ use sideswap_common::channel_helpers::{UncheckedOneshotSender, UncheckedUnbounde
 use sideswap_common::dealer_ticker::{TickerLoader, WhitelistedAssets};
 use sideswap_dealer::utxo_data::UtxoData;
 use sideswap_dealer::{market, price_stream, utxo_data};
-use tokio::sync::mpsc::unbounded_channel;
 use tokio::sync::oneshot;
 
 #[derive(Debug, serde::Deserialize)]
@@ -169,16 +168,13 @@ async fn main() -> Result<(), anyhow::Error> {
     };
     let (market_command_sender, mut market_event_receiver) = market::start(market_params);
 
-    let (wallet_command_sender, wallet_command_receiver) = channel::<sideswap_lwk::Command>();
-    let (wallet_event_sender, mut wallet_event_receiver) =
-        unbounded_channel::<sideswap_lwk::Event>();
-    let wallet_params = sideswap_lwk::Params {
+    let wallet = sideswap_lwk::Wallet::new(sideswap_lwk::Params {
         network,
         work_dir: settings.work_dir.clone(),
         mnemonic: settings.mnemonic.clone(),
         script_variant: settings.script_variant,
-    };
-    sideswap_lwk::start(wallet_params, wallet_command_receiver, wallet_event_sender);
+    });
+    let (wallet_command_sender, mut wallet_event_receiver) = wallet.start();
 
     let price_stream = price_stream::Data::new(
         settings.env,
