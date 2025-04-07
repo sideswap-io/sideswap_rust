@@ -70,6 +70,13 @@ listen_on = "127.0.0.1:3102"
 - `script_variant`: either `wpkh` (native segwit) or `shwpkh` (nested segwit).
 - `[ws_server].listen_on`: IP and port on which the manager will open its WebSocket server.
 
+See [Settings](https://sideswap.io/docs/rust/sideswap_manager/struct.Settings.html) API reference for details.
+
+Fields can be set using environment variables. For example, to set the mnemonic, use the `APP_MNEMONIC` environment variable. In this case, the mnemonic can be removed from the config.
+
+Using different mnemonic/script variants with the same working directory is not supported.
+The program stores the current wallet ID in the DB in the working directory and checks it on startup.
+
 When started, the manager creates a format file in the work directory.
 Edit `log_config.toml` if you want to adjust the logging.
 For example, to redirect output to stdout instead of a file, change the `[root]` section:
@@ -165,6 +172,7 @@ Below is a step-by-step example of using the manager to receive assets.
 
 ### Sending assets
 
+In addition to the sending assets, the wallet must have some L-BTC to pay the network fee (about 25-50 L-sats per transaction).
 Below is a step-by-step example of sending assets (using Liquid Testnet).
 
 1. **Create a transaction**
@@ -185,7 +193,7 @@ Below is a step-by-step example of sending assets (using Liquid Testnet).
    {"Resp":{"id":1,"resp":{"SendTx":{"res_wallet":{"success":{}},"res_server":{"success":{}}}}}}
    ```
    *Warning*: If the request fails, it is generally not safe to assume the transaction didn’t get broadcast.
-   See [`SendTx` in `api.rs`](src/api.rs) for details.
+   See [SendTx](https://sideswap.io/docs/rust/sideswap_manager/api/struct.SendTxReq.html) documentation for details.
 
 1. **List monitored transactions***
 
@@ -231,7 +239,7 @@ Below is a short example of making a swap.
    {"Resp":{"id":3,"resp":{"AcceptQuote":{"txid":"d3b6119bd965eca580c8d0f5c1230b215c252b57400f204395892f992f4720a9"}}}}
    ```
    *Warning*: If the request fails, it is generally not safe to assume that the swap failed.
-   See [`AcceptQuote` in `api.rs`](src/api.rs) for details.
+   See [AcceptQuote](https://sideswap.io/docs/rust/sideswap_manager/api/struct.AcceptQuoteReq.html) documentation for details.
 
 1. **Monitor the transaction**
 
@@ -338,4 +346,4 @@ Below is an example of converting L-BTC to BTC.
 
 ## API reference
 
-Reference [`api.rs`](src/api.rs) for detailed request/response structures, error codes, etc.
+[API Reference](https://sideswap.io/docs/rust/sideswap_manager/api/) for detailed request/response structures, error codes, etc.
