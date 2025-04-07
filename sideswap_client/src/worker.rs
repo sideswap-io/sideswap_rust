@@ -166,12 +166,14 @@ enum TimerEvent {
 
 pub struct WalletData {
     reconnect_delay: RetryDelay,
+    multi_sig_address_cache: BTreeMap<u32, AddressInfo>,
 }
 
 impl WalletData {
     fn new() -> WalletData {
         WalletData {
             reconnect_delay: RetryDelay::default(),
+            multi_sig_address_cache: BTreeMap::new(),
         }
     }
 }
@@ -2512,49 +2514,61 @@ impl Data {
         self.update_push_token();
     }
 
-    fn find_own_address_info(
+    fn find_own_amp_address_info(
         &mut self,
         addr: &elements::Address,
     ) -> Result<AddressInfo, anyhow::Error> {
-        let addr_info = self
-            .settings
-            .amp_prev_addrs_v2
-            .as_ref()
-            .and_then(|data| data.list.iter().find(|info| info.address == *addr))
-            .cloned();
-        if let Some(addr_info) = addr_info {
-            return Ok(addr_info);
+        let wallet = self.get_wallet(ACCOUNT_ID_AMP)?;
+
+        let registered = self.settings.multi_sig_registered;
+        let max_pointer = registered + 1000; // Some big value just in case
+
+        // The address is probably somewhere in the range [registered - 100, registered).
+        // This will iterate all addresses in the range [0..max_pointer), but starting at the most likely position.
+        let pointer = (0..registered)
+            .rev()
+            .chain(registered..max_pointer)
+            .find(|pointer| {
+                let address = derive_multi_sig_address(
+                    &wallet.xpubs.multi_sig_service_xpub,
+                    &wallet.xpubs.multi_sig_user_xpub,
+                    self.env.d().network,
+                    *pointer,
+                    Some(&wallet.xpubs.master_blinding_key),
+                );
+                address == *addr
+            })
+            .ok_or_else(|| {
+                anyhow!("can't find own AMP address {addr}, max_pointer: {max_pointer}")
+            })?;
+
+        if let Some(address_info) = self.wallet_data.multi_sig_address_cache.get(&pointer) {
+            assert!(address_info.address == *addr);
+            return Ok(address_info.clone());
         }
 
-        self.refresh_amp_addresses()?;
+        // GDK will return 10 results in one call
+        const GDK_RESP_SIZE: u32 = 10;
+        // This will return addresses in the range [pointer, pointer + GDK_RESP_SIZE).
+        // Load the next addresses so we can cache them.
+        let list = wallet::call_wallet(wallet, move |data| {
+            data.ses
+                .get_previous_addresses(Some(pointer + GDK_RESP_SIZE), false)
+        })?;
 
-        let addr_info = self
-            .settings
-            .amp_prev_addrs_v2
-            .as_ref()
-            .and_then(|data| data.list.iter().find(|info| info.address == *addr))
-            .cloned();
+        for item in list.list {
+            self.wallet_data
+                .multi_sig_address_cache
+                .insert(item.pointer, item);
+        }
 
-        addr_info.ok_or_else(|| anyhow!("Not found"))
-    }
-
-    fn refresh_amp_addresses(&mut self) -> Result<(), anyhow::Error> {
-        let last_old_pointer = self
-            .settings
-            .amp_prev_addrs_v2
-            .as_ref()
-            .map(|v| v.last_pointer);
-        let wallet = self.get_wallet(ACCOUNT_ID_AMP)?;
-        let (last_new_pointer, new_list) = load_all_addresses(wallet, false, last_old_pointer)?;
-
-        let amp_prev_addrs = self
-            .settings
-            .amp_prev_addrs_v2
-            .get_or_insert_with(Default::default);
-        amp_prev_addrs.last_pointer = last_new_pointer;
-        amp_prev_addrs.list.extend(new_list);
-        self.save_settings();
-        Ok(())
+        let address_info = self
+            .wallet_data
+            .multi_sig_address_cache
+            .get(&pointer)
+            .expect("the address must exist in multi_sig_address_cache");
+        assert!(address_info.address == *addr);
+        Ok(address_info.clone())
     }
 
     fn process_asset_details(&mut self, req: proto::AssetId) {

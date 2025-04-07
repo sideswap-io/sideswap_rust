@@ -2132,7 +2132,7 @@ fn resolve_recv_address(
 
         match res {
             Ok(resp) => Ok({
-                let address_info = worker.find_own_address_info(&resp.address)?;
+                let address_info = worker.find_own_amp_address_info(&resp.address)?;
                 ResolveRes::Success { address_info }
             }),
             Err(CallError::Backend(err))

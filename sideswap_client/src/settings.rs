@@ -57,7 +57,6 @@ pub struct Settings {
     pub multi_sig_registered: u32,
 
     pub session_id: Option<SessionId>,
-    pub amp_prev_addrs_v2: Option<AmpPrevAddrs>,
     pub master_pub_key: Option<bip32::Xpub>,
 
     pub reg_info_v3: Option<RegInfo>,
