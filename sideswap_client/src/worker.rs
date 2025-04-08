@@ -167,6 +167,7 @@ enum TimerEvent {
 pub struct WalletData {
     reconnect_delay: RetryDelay,
     multi_sig_address_cache: BTreeMap<u32, AddressInfo>,
+    address_registration_active: bool,
 }
 
 impl WalletData {
@@ -174,6 +175,7 @@ impl WalletData {
         WalletData {
             reconnect_delay: RetryDelay::default(),
             multi_sig_address_cache: BTreeMap::new(),
+            address_registration_active: false,
         }
     }
 }
@@ -2520,7 +2522,10 @@ impl Data {
     ) -> Result<AddressInfo, anyhow::Error> {
         let wallet = self.get_wallet(ACCOUNT_ID_AMP)?;
 
-        let registered = self.settings.multi_sig_registered;
+        let registered = u32::max(
+            self.settings.multi_sig_registered,
+            self.used_addresses.multi_sig,
+        );
         let max_pointer = registered + 1000; // Some big value just in case
 
         // The address is probably somewhere in the range [registered - 100, registered).
@@ -3289,16 +3294,24 @@ impl Data {
     }
 
     fn update_address_registrations(&mut self) {
-        let count = 100;
+        if self.wallet_data.address_registration_active || !self.ws_connected {
+            return;
+        }
+
+        let device_key = match self.settings.device_key.as_ref() {
+            Some(device_key) => device_key.clone(),
+            None => return,
+        };
+
+        let count_in_advance = 100;
+        let limit_one_request = 100;
 
         for is_internal in [false, true] {
-            if let (true, Some(device_key), Some(wallet)) = (
-                self.ws_connected,
-                &self.settings.device_key,
-                self.wallets.get(&ACCOUNT_ID_REG),
-            ) {
+            if let Some(wallet) = self.wallets.get(&ACCOUNT_ID_REG) {
                 let first = self.settings.single_sig_registered[is_internal as usize];
-                let last = self.used_addresses.single_sig[is_internal as usize] + count;
+                let last_max =
+                    self.used_addresses.single_sig[is_internal as usize] + count_in_advance;
+                let last = u32::min(first + limit_one_request, last_max);
 
                 let addresses = (first..last)
                     .map(|pointer| {
@@ -3312,32 +3325,47 @@ impl Data {
                     })
                     .collect::<Vec<_>>();
 
-                self.make_async_request(
-                    api::Request::RegisterAddresses(api::RegisterAddressesRequest {
-                        device_key: device_key.clone(),
-                        addresses,
-                    }),
-                    move |data, res| match res {
-                        Ok(_) => {
-                            data.settings.single_sig_registered.as_mut()[is_internal as usize] =
-                                last;
-                            data.save_settings();
-                        }
-                        Err(err) => {
-                            error!("addresses registration failed: {}", err.message);
-                        }
-                    },
-                );
+                if !addresses.is_empty() {
+                    log::debug!(
+                        "register single-sig addresses, is_internal: {}, first: {}, last: {}, count: {}...",
+                        is_internal,
+                        first,
+                        last,
+                        addresses.len(),
+                    );
+
+                    self.wallet_data.address_registration_active = true;
+                    self.make_async_request(
+                        api::Request::RegisterAddresses(api::RegisterAddressesRequest {
+                            device_key,
+                            addresses,
+                        }),
+                        move |data, res| {
+                            data.wallet_data.address_registration_active = false;
+                            match res {
+                                Ok(_) => {
+                                    log::debug!("address registration succeed");
+                                    data.settings.single_sig_registered.as_mut()
+                                        [is_internal as usize] = last;
+                                    data.save_settings();
+                                    data.update_address_registrations();
+                                }
+
+                                Err(err) => {
+                                    error!("addresses registration failed: {}", err.message);
+                                }
+                            }
+                        },
+                    );
+                    return;
+                }
             }
         }
 
-        if let (true, Some(device_key), Some(wallet)) = (
-            self.ws_connected,
-            &self.settings.device_key,
-            self.wallets.get(&ACCOUNT_ID_AMP),
-        ) {
+        if let Some(wallet) = self.wallets.get(&ACCOUNT_ID_AMP) {
             let first = self.settings.multi_sig_registered;
-            let last = self.used_addresses.multi_sig + count;
+            let last_max = self.used_addresses.multi_sig + count_in_advance;
+            let last = u32::min(first + limit_one_request, last_max);
 
             let addresses = (first..last)
                 .map(|pointer| {
@@ -3352,22 +3380,41 @@ impl Data {
                 })
                 .collect::<Vec<_>>();
 
-            self.make_async_request(
-                api::Request::RegisterAddresses(api::RegisterAddressesRequest {
-                    device_key: device_key.clone(),
-                    addresses,
-                }),
-                move |data, res| match res {
-                    Ok(_) => {
-                        data.settings.multi_sig_registered = last;
-                        data.save_settings();
-                    }
-                    Err(err) => {
-                        error!("addresses registration failed: {}", err.message);
-                    }
-                },
-            );
+            if !addresses.is_empty() {
+                log::debug!(
+                    "register multi-sig addresses, first: {}, last: {}, count: {}...",
+                    first,
+                    last,
+                    addresses.len(),
+                );
+
+                self.wallet_data.address_registration_active = true;
+                self.make_async_request(
+                    api::Request::RegisterAddresses(api::RegisterAddressesRequest {
+                        device_key,
+                        addresses,
+                    }),
+                    move |data, res| {
+                        data.wallet_data.address_registration_active = false;
+                        match res {
+                            Ok(_) => {
+                                log::debug!("address registration succeed");
+                                data.settings.multi_sig_registered = last;
+                                data.save_settings();
+                                data.update_address_registrations();
+                            }
+
+                            Err(err) => {
+                                error!("addresses registration failed: {}", err.message);
+                            }
+                        }
+                    },
+                );
+                return;
+            }
         }
+
+        log::debug!("no need to register new addresses");
     }
 
     fn save_settings(&self) {
