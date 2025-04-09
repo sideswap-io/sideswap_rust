@@ -82,6 +82,18 @@ pub async fn run(
                                 }
                             }
                         }
+
+                        Message::Close(frame) => {
+                            match frame {
+                                Some(frame) => {
+                                    log::info!("close message received: {}, code: {}", frame.reason, frame.code);
+                                },
+                                None => {
+                                    log::info!("close message received (without payload)");
+                                },
+                            }
+                        }
+
                         _ => {}
                     }
                 }
