@@ -688,7 +688,23 @@ fn buy_lbtc_for_usdt_offline_jade() {
 
 #[ignore]
 #[test]
-fn send_payjoin_wallet1() {
+fn send_payjoin_wallet1_normal() {
+    let mut data1 = start_wallet_1();
+
+    send_tx(
+        &mut data1,
+        ACCOUNT_ID_REG,
+        USDT,
+        100000000,
+        "vjU5WU5sQZVpuvY1GDHmjufQcBdRTS2yZKrCAQuBhBjxqVcKhHKN82YtBUiznTX9WQ5MSUUZaRBdG9Du",
+        Some(USDT),
+        None,
+    );
+}
+
+#[ignore]
+#[test]
+fn send_payjoin_wallet1_deduct_fee() {
     let mut data1 = start_wallet_1();
 
     send_tx(
@@ -699,6 +715,38 @@ fn send_payjoin_wallet1() {
         "vjU5WU5sQZVpuvY1GDHmjufQcBdRTS2yZKrCAQuBhBjxqVcKhHKN82YtBUiznTX9WQ5MSUUZaRBdG9Du",
         Some(USDT),
         Some(0),
+    );
+}
+
+#[ignore]
+#[test]
+fn send_normal_wallet1_p2wsh() {
+    let mut data1 = start_wallet_1();
+
+    send_tx(
+        &mut data1,
+        ACCOUNT_ID_REG,
+        USDT,
+        1,
+        "tlq1qqgqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqrcasc3pf3lquzjd0haxgn9hmjfp84eq7geymjdx2f9verdu99wz4fpuwuw86sas9",
+        None,
+        None,
+    );
+}
+
+#[ignore]
+#[test]
+fn send_payjoin_wallet1_p2wsh() {
+    let mut data1 = start_wallet_1();
+
+    send_tx(
+        &mut data1,
+        ACCOUNT_ID_REG,
+        USDT,
+        1,
+        "tlq1qqgqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqrcasc3pf3lquzjd0haxgn9hmjfp84eq7geymjdx2f9verdu99wz4fpuwuw86sas9",
+        Some(USDT),
+        None,
     );
 }
 

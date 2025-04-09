@@ -83,7 +83,6 @@ macro_rules! send_market_request {
 }
 
 mod assets_registry;
-mod coin_select;
 mod market_worker;
 mod wallet;
 
@@ -1334,6 +1333,7 @@ impl Data {
             .ok_or(anyhow!("server_status is not known"))?;
 
         let amount = if req.is_send_entered {
+            // TODO: Replace this
             let coin_select = send_tx::coin_select::normal_tx::try_coin_select(
                 send_tx::coin_select::normal_tx::Args {
                     multisig_wallet: !wallet.login_info.single_sig,

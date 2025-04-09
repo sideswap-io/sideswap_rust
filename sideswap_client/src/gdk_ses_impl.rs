@@ -16,14 +16,8 @@ use secp256k1::SecretKey;
 use serde_bytes::ByteBuf;
 use sideswap_api::Asset;
 use sideswap_common::{
-    b64,
-    env::Env,
-    green_backend::GREEN_DUMMY_SIG,
-    network::Network,
-    pset::p2pkh_script,
-    pset_blind::get_blinding_nonces,
-    recipient::Recipient,
-    send_tx::{self, coin_select::InOut},
+    b64, env::Env, green_backend::GREEN_DUMMY_SIG, network::Network, pset::p2pkh_script,
+    pset_blind::get_blinding_nonces, recipient::Recipient, send_tx, utxo_select,
 };
 use sideswap_jade::{
     jade_mng::{self, JadeStatus},
@@ -1253,6 +1247,7 @@ unsafe fn try_create_tx(
     req: ffi::proto::CreateTx,
 ) -> Result<ffi::proto::CreatedTx, anyhow::Error> {
     let utxos = try_get_unspent_outputs(data)?.unspent_outputs;
+
     let utxos = if req.utxos.is_empty() {
         utxos
             .into_values()
@@ -1278,11 +1273,12 @@ unsafe fn try_create_tx(
     let recipients = req
         .addressees
         .iter()
-        .map(|addresse| -> Result<Recipient, anyhow::Error> {
-            let asset_id = AssetId::from_str(&addresse.asset_id)?;
-            let address = elements::Address::from_str(&addresse.address)?;
-            let amount = u64::try_from(addresse.amount)?;
-            Ok(Recipient {
+        .map(|item| -> Result<utxo_select::Recipient, anyhow::Error> {
+            let asset_id = AssetId::from_str(&item.asset_id)?;
+            let address = elements::Address::from_str(&item.address)?;
+            let address = utxo_select::RecipientAddress::Known(address);
+            let amount = u64::try_from(item.amount)?;
+            Ok(utxo_select::Recipient {
                 address,
                 amount,
                 asset_id,
@@ -1291,47 +1287,52 @@ unsafe fn try_create_tx(
         .collect::<Result<Vec<_>, _>>()?;
     ensure!(!recipients.is_empty());
 
-    let send_tx::coin_select::normal_tx::Res {
-        asset_inputs,
-        bitcoin_inputs,
-        user_outputs,
-        change_outputs,
-        fee_change,
+    let wallet = if data.login_info.single_sig {
+        utxo_select::WalletType::Nested
+    } else {
+        utxo_select::WalletType::AMP
+    };
+
+    let use_all_utxos = !req.utxos.is_empty();
+
+    let utxo_select::Res {
+        inputs,
+        updated_recipients,
+        change,
         network_fee,
-    } = send_tx::coin_select::normal_tx::try_coin_select(send_tx::coin_select::normal_tx::Args {
-        multisig_wallet: !data.login_info.single_sig,
+    } = utxo_select::select(utxo_select::Args {
         policy_asset: data.policy_asset,
-        use_all_utxos: !req.utxos.is_empty(),
-        wallet_utxos: utxos
+        utxos: utxos
             .iter()
-            .map(|utxo| InOut {
+            .map(|utxo| utxo_select::Utxo {
+                wallet,
+                txid: utxo.txhash,
+                vout: utxo.vout,
                 asset_id: utxo.asset_id,
                 value: utxo.satoshi,
             })
             .collect(),
-        user_outputs: recipients
-            .iter()
-            .map(|recipient| InOut {
-                asset_id: recipient.asset_id,
-                value: recipient.amount,
-            })
-            .collect(),
+        recipients,
         deduct_fee,
+        force_change_wallets: BTreeMap::new(),
+        use_all_utxos,
     })?;
 
-    let used_utxos = take_utxos(utxos, asset_inputs.iter().chain(bitcoin_inputs.iter()));
-
     let mut outputs = Vec::new();
-    for (output, recipient) in user_outputs.iter().zip(recipients.into_iter()) {
-        // Use corrected amount if deduct_fee was set
+    // This will use corrected amount if deduct_fee was set
+    for recipient in updated_recipients.iter() {
         outputs.push(send_tx::pset::PsetOutput {
-            asset_id: output.asset_id,
-            amount: output.value,
-            address: recipient.address,
+            asset_id: recipient.asset_id,
+            amount: recipient.amount,
+            address: recipient
+                .address
+                .known()
+                .expect("only known addresses used here")
+                .clone(),
         });
     }
 
-    for output in change_outputs.iter().chain(fee_change.iter()) {
+    for output in change.iter() {
         let address = data.change_address()?;
         outputs.push(send_tx::pset::PsetOutput {
             asset_id: output.asset_id,
@@ -1340,9 +1341,14 @@ unsafe fn try_create_tx(
         });
     }
 
-    let inputs = used_utxos
-        .iter()
-        .map(|utxo| {
+    let inputs = inputs
+        .into_iter()
+        .map(|input| {
+            let utxo = utxos
+                .iter()
+                .find(|utxo| utxo.txhash == input.txid && utxo.vout == input.vout)
+                .expect("must exist");
+
             let script_pub_key = utxo
                 .script
                 .clone()
@@ -1364,7 +1370,6 @@ unsafe fn try_create_tx(
         })
         .collect::<Vec<_>>();
 
-    let network_fee = network_fee.value;
     let send_tx::pset::ConstructedPset {
         blinded_pset: pset,
         blinded_outputs,
@@ -1388,7 +1393,7 @@ unsafe fn try_create_tx(
         discount_vsize,
         network_fee,
         fee_per_byte,
-    } = get_tx_size(tx, &data.policy_asset, &used_utxos);
+    } = get_tx_size(tx, &data.policy_asset, &utxos);
 
     cache.created_txs.insert(
         id.clone(),
@@ -1399,9 +1404,9 @@ unsafe fn try_create_tx(
     );
 
     let mut addressees = req.addressees.clone();
-    assert!(addressees.len() == user_outputs.len());
+    assert!(addressees.len() == updated_recipients.len());
     if let Some(index) = deduct_fee {
-        addressees[index].amount = user_outputs[index].value as i64;
+        addressees[index].amount = updated_recipients[index].amount as i64;
     }
 
     Ok(ffi::proto::CreatedTx {
@@ -2229,22 +2234,6 @@ pub fn start_processing(
     notif_callback: Option<NotifCallback>,
 ) -> Result<Box<dyn gdk_ses::GdkSes + Send>, anyhow::Error> {
     unsafe { start_processing_impl(info, notif_callback) }
-}
-
-fn take_utxos<'a>(
-    mut utxos: Vec<gdk_json::UnspentOutput>,
-    required: impl Iterator<Item = &'a InOut>,
-) -> Vec<gdk_json::UnspentOutput> {
-    let mut selected = Vec::new();
-    for required in required {
-        let index = utxos
-            .iter()
-            .position(|utxo| utxo.asset_id == required.asset_id && utxo.satoshi == required.value)
-            .expect("must exists");
-        let utxo = utxos.remove(index);
-        selected.push(utxo);
-    }
-    selected
 }
 
 pub fn get_redeem_script(utxo: &gdk_json::UnspentOutput) -> elements::Script {

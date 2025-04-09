@@ -2,7 +2,6 @@ use elements::AssetId;
 
 pub mod asset_outputs;
 pub mod normal_tx;
-pub mod payjoin;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct InOut {

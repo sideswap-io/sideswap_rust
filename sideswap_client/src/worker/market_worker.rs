@@ -31,12 +31,10 @@ use sideswap_common::{
     green_backend::GREEN_DUMMY_SIG,
     pset::p2pkh_script,
     pset_blind::get_blinding_nonces,
-    send_tx::{
-        coin_select::InOut,
-        pset::{construct_pset, ConstructPsetArgs, ConstructedPset, PsetInput, PsetOutput},
-    },
+    send_tx::pset::{construct_pset, ConstructPsetArgs, ConstructedPset, PsetInput, PsetOutput},
     target_os::TargetOs,
     types::{asset_float_amount_, asset_int_amount_, asset_scale},
+    utxo_select,
 };
 use sideswap_jade::{
     byte_array::{ByteArray, ByteArray32},
@@ -55,7 +53,7 @@ use crate::{
         decode_pset, encode_pset, get_jade_asset_info, get_jade_network, get_redeem_script,
         get_witness, unlock_hw,
     },
-    worker::{self, coin_select, convert_to_swap_utxo, wallet},
+    worker::{self, convert_to_swap_utxo, wallet},
 };
 
 use super::{
@@ -379,6 +377,21 @@ fn get_send_recv_amount(
     SendRecvAmount {
         send_amount,
         recv_amount,
+    }
+}
+
+fn get_address_wallet(address: gdk_json::AddressType) -> utxo_select::WalletType {
+    match address {
+        gdk_json::AddressType::P2shP2wpkh => utxo_select::WalletType::Nested,
+        gdk_json::AddressType::P2wsh => utxo_select::WalletType::AMP,
+    }
+}
+
+fn get_wallet_account(wallet: utxo_select::WalletType) -> AccountId {
+    match wallet {
+        utxo_select::WalletType::Native => unreachable!("we don't support native segwit yet"),
+        utxo_select::WalletType::Nested => ACCOUNT_ID_REG,
+        utxo_select::WalletType::AMP => ACCOUNT_ID_AMP,
     }
 }
 
@@ -1599,8 +1612,7 @@ fn try_create_funding_tx(
 
     let bitcoin_total = utxos
         .iter()
-        .filter(|utxo| utxo.asset_id == worker.policy_asset)
-        .map(|utxo| utxo.satoshi)
+        .filter_map(|utxo| (utxo.asset_id == worker.policy_asset).then_some(utxo.satoshi))
         .sum::<u64>();
 
     let deduct_fee = if *asset_id == worker.policy_asset && bitcoin_total == target {
@@ -1609,32 +1621,50 @@ fn try_create_funding_tx(
         None
     };
 
-    let coin_select::Res {
-        inputs,
-        user_outputs,
-        change_outputs,
-        network_fee,
-    } = coin_select::coin_select_amount(coin_select::Args {
+    let wallet_type = if worker.amp_assets.contains(&asset_id) {
+        utxo_select::WalletType::AMP
+    } else {
+        utxo_select::WalletType::Nested
+    };
+
+    // It's not really necessary, but we prefer to receive non-AMP change to the nested Segwit wallet
+    let force_change_wallets = worker
+        .assets
+        .values()
+        .filter_map(|asset| {
+            (asset.market_type != Some(MarketType::Amp))
+                .then_some((asset.asset_id, utxo_select::WalletType::Nested))
+        })
+        .collect::<BTreeMap<_, _>>();
+
+    let utxo_select_res = utxo_select::select(utxo_select::Args {
         policy_asset: worker.policy_asset,
         utxos: utxos
             .iter()
-            .map(|utxo| coin_select::Utxo {
+            .map(|utxo| utxo_select::Utxo {
+                wallet: get_address_wallet(utxo.address_type),
                 txid: utxo.txhash,
                 vout: utxo.vout,
                 asset_id: utxo.asset_id,
                 value: utxo.satoshi,
-                type_: match utxo.address_type {
-                    gdk_json::AddressType::P2shP2wpkh => coin_select::UtxoType::SingleSig,
-                    gdk_json::AddressType::P2wsh => coin_select::UtxoType::MultiSig,
-                },
             })
-            .collect::<Vec<_>>(),
-        user_outputs: vec![InOut {
+            .collect(),
+        recipients: vec![utxo_select::Recipient {
+            address: utxo_select::RecipientAddress::Unknown(wallet_type),
             asset_id: *asset_id,
-            value: target,
+            amount: target,
         }],
         deduct_fee,
+        force_change_wallets,
+        use_all_utxos: false,
     })?;
+
+    let utxo_select::Res {
+        inputs,
+        updated_recipients,
+        change,
+        network_fee,
+    } = utxo_select_res;
 
     let selected_utxos = inputs
         .iter()
@@ -1667,27 +1697,18 @@ fn try_create_funding_tx(
         .collect::<Vec<_>>();
 
     let mut outputs = Vec::<PsetOutput>::new();
-
-    let user_output = user_outputs[0];
-    let account = if worker.amp_assets.contains(&user_output.asset_id) {
-        ACCOUNT_ID_AMP
-    } else {
-        ACCOUNT_ID_REG
-    };
+    let updated_recipient = &updated_recipients[0];
+    let account = get_wallet_account(wallet_type);
     let receive_address = get_receive_address(worker, account)?;
     outputs.push(PsetOutput {
         address: receive_address.address.clone(),
-        asset_id: user_output.asset_id,
-        amount: user_output.value,
+        asset_id: updated_recipient.asset_id,
+        amount: updated_recipient.amount,
     });
 
     let mut change_addresses = Vec::new();
-    for output in change_outputs {
-        let account = if worker.amp_assets.contains(&output.asset_id) {
-            ACCOUNT_ID_AMP
-        } else {
-            ACCOUNT_ID_REG
-        };
+    for output in change {
+        let account = get_wallet_account(output.wallet);
         let change_address = get_change_address(worker, account)?;
         outputs.push(PsetOutput {
             address: change_address.address.clone(),
@@ -1771,8 +1792,8 @@ fn try_create_funding_tx(
         txhash: tx.txid(),
         pointer: receive_address.pointer,
         vout: vout as u32,
-        asset_id: user_output.asset_id,
-        satoshi: user_output.value,
+        asset_id: updated_recipient.asset_id,
+        satoshi: updated_recipient.amount,
         amountblinder: blinded_output.vbf,
         assetblinder: blinded_output.abf,
         subaccount: receive_address.subaccount,

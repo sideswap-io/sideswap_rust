@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{collections::BTreeMap, time::Duration};
 
 use anyhow::{bail, ensure};
 use base64::Engine;
@@ -7,10 +7,8 @@ use sideswap_common::{
     network::Network,
     pset_blind::get_blinding_nonces,
     recipient::Recipient,
-    send_tx::{
-        coin_select::{self, InOut},
-        pset::{construct_pset, ConstructPsetArgs, ConstructedPset, PsetInput, PsetOutput},
-    },
+    send_tx::pset::{construct_pset, ConstructPsetArgs, ConstructedPset, PsetInput, PsetOutput},
+    utxo_select,
 };
 
 use crate::server_api::{SignResponse, StartResponse};
@@ -143,48 +141,60 @@ pub fn create_payjoin(
     ensure!(server_change_address.is_blinded());
     ensure!(!server_utxos.is_empty());
 
+    let wallet_type = if multisig_wallet {
+        utxo_select::WalletType::AMP
+    } else {
+        utxo_select::WalletType::Nested
+    };
+
     let policy_asset = network.d().policy_asset.asset_id();
-    let coin_select::payjoin::Res {
-        user_inputs,
-        client_inputs,
-        server_inputs,
-        user_outputs,
-        change_outputs,
-        server_fee,
-        server_change,
-        fee_change,
-        network_fee,
-        cost: _,
-    } = coin_select::payjoin::try_coin_select(coin_select::payjoin::Args {
-        multisig_wallet,
+    let args = utxo_select::payjoin::Args {
         policy_asset,
         fee_asset,
         price,
         fixed_fee,
         use_all_utxos,
-        wallet_utxos: client_utxos
+        utxos: client_utxos
             .iter()
-            .map(|utxo| InOut {
+            .map(|utxo| utxo_select::Utxo {
                 asset_id: utxo.asset_id,
                 value: utxo.value,
+                wallet: wallet_type,
+                txid: utxo.txid,
+                vout: utxo.vout,
             })
             .collect(),
         server_utxos: server_utxos
             .iter()
-            .map(|utxo| InOut {
+            .map(|utxo| utxo_select::Utxo {
+                wallet: utxo_select::WalletType::Native,
+                txid: utxo.txid,
+                vout: utxo.vout,
                 asset_id: utxo.asset_id,
                 value: utxo.value,
             })
             .collect(),
-        user_outputs: recipients
+        recipients: recipients
             .iter()
-            .map(|r| InOut {
+            .map(|r| utxo_select::Recipient {
+                address: utxo_select::RecipientAddress::Known(r.address.clone()),
                 asset_id: r.asset_id,
-                value: r.amount,
+                amount: r.amount,
             })
             .collect(),
         deduct_fee,
-    })?;
+        force_change_wallets: BTreeMap::new(),
+    };
+    let res = utxo_select::payjoin::select(args)?;
+    let utxo_select::payjoin::Res {
+        inputs: selected_utxos,
+        updated_recipients,
+        change,
+        server_inputs,
+        server_change,
+        network_fee,
+        server_fee,
+    } = res;
 
     let mut inputs = Vec::new();
     let mut outputs = Vec::new();
@@ -202,22 +212,19 @@ pub fn create_payjoin(
         })
         .collect::<Vec<_>>();
 
-    inputs.append(&mut take_utxos(
-        client_utxos,
-        user_inputs.iter().chain(client_inputs.iter()),
-    ));
+    inputs.append(&mut take_utxos(client_utxos, selected_utxos.iter()));
     inputs.append(&mut take_utxos(server_utxos, server_inputs.iter()));
 
-    for (output, recipient) in user_outputs.iter().zip(recipients.into_iter()) {
+    for recipient in updated_recipients {
         // Use corrected amount if deduct_fee was set
         outputs.push(PsetOutput {
-            asset_id: output.asset_id,
-            amount: output.value,
-            address: recipient.address,
+            asset_id: recipient.asset_id,
+            amount: recipient.amount,
+            address: recipient.address.known().expect("must be known").clone(),
         });
     }
 
-    for output in change_outputs.iter().chain(fee_change.iter()) {
+    for output in change.iter() {
         let address = wallet.change_address()?;
         outputs.push(PsetOutput {
             asset_id: output.asset_id,
@@ -227,8 +234,8 @@ pub fn create_payjoin(
     }
 
     outputs.push(PsetOutput {
-        asset_id: server_fee.asset_id,
-        amount: server_fee.value,
+        asset_id: fee_asset,
+        amount: server_fee,
         address: server_fee_address,
     });
 
@@ -248,7 +255,7 @@ pub fn create_payjoin(
         offlines: Vec::new(),
         inputs,
         outputs,
-        network_fee: network_fee.value,
+        network_fee,
     })?;
 
     let mut server_pset = blinded_pset.clone();
@@ -275,14 +282,14 @@ pub fn create_payjoin(
     Ok(CreatedPayjoin {
         pset,
         blinding_nonces: get_blinding_nonces(&blinded_outputs),
-        asset_fee: server_fee.value,
-        network_fee: network_fee.value,
+        asset_fee: server_fee,
+        network_fee: network_fee,
     })
 }
 
 fn take_utxos<'a>(
     mut utxos: Vec<Utxo>,
-    required: impl Iterator<Item = &'a InOut>,
+    required: impl Iterator<Item = &'a utxo_select::Utxo>,
 ) -> Vec<PsetInput> {
     let mut selected = Vec::new();
     for required in required {
