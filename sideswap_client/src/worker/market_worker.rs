@@ -1002,8 +1002,36 @@ fn process_ws_quote(worker: &mut super::Data, notif: mkt::QuoteNotif) {
                 },
             );
 
+            let SendRecvAmount {
+                send_amount,
+                recv_amount,
+            } = get_send_recv_amount(GetSendRecvAmount {
+                fee_asset: started_quote.fee_asset,
+                base_trade_dir,
+                base_amount,
+                quote_amount,
+                server_fee,
+                fixed_fee,
+            });
+
+            let expected_amount = match started_quote.trade_dir {
+                TradeDir::Sell => send_amount,
+                TradeDir::Buy => recv_amount,
+            };
+
             if started_quote.ind_price {
                 proto::from::quote::Result::IndPrice(proto::from::quote::IndPrice { price_taker })
+            } else if started_quote.instant_swaps && started_quote.amount != expected_amount {
+                // The total order book is less than the requested amount.
+                // Show an error so that the user can enter lower amount.
+                // The user will need to limit how much they are going to sell
+                let send_asset = match base_trade_dir {
+                    TradeDir::Sell => started_quote.asset_pair.base,
+                    TradeDir::Buy => started_quote.asset_pair.quote,
+                };
+                let send_asset = worker.assets.get(&send_asset).expect("must be known");
+                let send_amount = asset_float_amount_(send_amount, send_asset.precision);
+                proto::from::quote::Result::Error(format!("Max: {send_amount}"))
             } else {
                 proto::from::quote::Result::LowBalance(proto::from::quote::LowBalance {
                     base_amount,
@@ -2418,6 +2446,7 @@ fn try_start_quotes(
 
     let instant_swaps = msg.instant_swaps;
     let ind_price = instant_swaps && msg.amount == 0;
+    let msg_amount = msg.amount;
 
     let (asset_type, trade_dir, amount) = if ind_price {
         // Start quotes with some small amount to get the best order book price.
@@ -2511,7 +2540,7 @@ fn try_start_quotes(
         quote_sub_id: resp.quote_sub_id,
         asset_pair,
         asset_type,
-        amount,
+        amount: msg_amount,
         trade_dir,
         fee_asset: resp.fee_asset,
         instant_swaps,
