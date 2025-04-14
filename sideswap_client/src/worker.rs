@@ -49,14 +49,33 @@ pub struct StartParams {
 
 #[derive(thiserror::Error, Debug)]
 pub enum CallError {
-    #[error("Backend error: {0}")]
-    Backend(sideswap_api::Error),
+    #[error("Server error: {0}")]
+    Backend(String),
+    #[error("{0}")]
+    UnregisteredGaid(String),
     #[error("Request timeout")]
     Timeout,
     #[error("Unexpected response")]
     UnexpectedResponse,
     #[error("Disconnected")]
     Disconnected,
+}
+
+impl From<sideswap_api::Error> for CallError {
+    fn from(value: sideswap_api::Error) -> Self {
+        match value.code {
+            sideswap_api::ErrorCode::UnregisteredGaid => CallError::UnregisteredGaid(value.message),
+
+            sideswap_api::ErrorCode::ParseError
+            | sideswap_api::ErrorCode::InvalidRequest
+            | sideswap_api::ErrorCode::MethodNotFound
+            | sideswap_api::ErrorCode::InvalidParams
+            | sideswap_api::ErrorCode::InternalError
+            | sideswap_api::ErrorCode::ServerError
+            | sideswap_api::ErrorCode::UnknownToken
+            | sideswap_api::ErrorCode::Unknown => CallError::Backend(value.message),
+        }
+    }
 }
 
 macro_rules! send_request {
@@ -2800,7 +2819,7 @@ impl Data {
                         warn!("discard old response: {:?}", result);
                         continue;
                     }
-                    return result.map_err(CallError::Backend);
+                    return result.map_err(Into::into);
                 }
                 Err(_) => {
                     let spent_time = std::time::Instant::now().duration_since(started);

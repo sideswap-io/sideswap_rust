@@ -2247,9 +2247,8 @@ fn resolve_recv_address(
                 let address_info = worker.find_own_amp_address_info(&resp.address)?;
                 ResolveRes::Success { address_info }
             }),
-            Err(CallError::Backend(err))
-                if err.code == sideswap_api::ErrorCode::UnregisteredGaid =>
-            {
+            Err(CallError::UnregisteredGaid(err)) => {
+                log::debug!("unregistered GAID: {err}");
                 let asset = worker
                     .assets
                     .get(&swap_info.recv_asset)
