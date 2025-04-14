@@ -53,12 +53,13 @@ use crate::{
         decode_pset, encode_pset, get_jade_asset_info, get_jade_network, get_redeem_script,
         get_witness, unlock_hw,
     },
+    settings::{AddressCacheEntry, AddressWallet},
     worker::{self, convert_to_swap_utxo, wallet},
 };
 
 use super::{
-    convert_chart_point, AccountId, CallError, ACCOUNT_ID_AMP, ACCOUNT_ID_REG,
-    SERVER_REQUEST_TIMEOUT_LONG,
+    convert_chart_point, derive_multi_sig_address, derive_single_sig_address, AccountId, CallError,
+    ACCOUNT_ID_AMP, ACCOUNT_ID_REG, SERVER_REQUEST_TIMEOUT_LONG,
 };
 
 // Some random path (not hardened)
@@ -1547,7 +1548,12 @@ fn try_online_order_submit(
         .map(DurationMs::from);
     let private = msg.private;
     let client_order_id = None;
-    let change_address = get_change_address(worker, swap_info.change_wallet)?;
+    let change_address = get_address(
+        worker,
+        swap_info.change_wallet,
+        AddressType::Change,
+        CachePolicy::Skip,
+    )?;
 
     // TODO: Set allowed price range for price_tracking
     let min_price = None;
@@ -1608,6 +1614,7 @@ fn try_create_funding_tx(
         .values()
         .flat_map(|utxos| utxos.unspent_outputs.values())
         .flatten()
+        .cloned()
         .collect::<Vec<_>>();
 
     let bitcoin_total = utxos
@@ -1669,7 +1676,7 @@ fn try_create_funding_tx(
     let selected_utxos = inputs
         .iter()
         .map(|selected| {
-            *utxos
+            utxos
                 .iter()
                 .find(|utxo| utxo.txhash == selected.txid && utxo.vout == selected.vout)
                 .expect("UTXO must exist")
@@ -1699,7 +1706,7 @@ fn try_create_funding_tx(
     let mut outputs = Vec::<PsetOutput>::new();
     let updated_recipient = &updated_recipients[0];
     let account = get_wallet_account(wallet_type);
-    let receive_address = get_receive_address(worker, account)?;
+    let receive_address = get_address(worker, account, AddressType::Receive, CachePolicy::Skip)?;
     outputs.push(PsetOutput {
         address: receive_address.address.clone(),
         asset_id: updated_recipient.asset_id,
@@ -1709,7 +1716,7 @@ fn try_create_funding_tx(
     let mut change_addresses = Vec::new();
     for output in change {
         let account = get_wallet_account(output.wallet);
-        let change_address = get_change_address(worker, account)?;
+        let change_address = get_address(worker, account, AddressType::Change, CachePolicy::Skip)?;
         outputs.push(PsetOutput {
             address: change_address.address.clone(),
             asset_id: output.asset_id,
@@ -2126,17 +2133,101 @@ enum ResolveRes {
     UnregisteredGaid { domain_agent: String },
 }
 
-fn get_receive_address(
-    worker: &super::Data,
+#[derive(Copy, Clone)]
+enum CachePolicy {
+    Use,
+    Skip,
+}
+
+#[derive(Copy, Clone)]
+enum AddressType {
+    Receive,
+    Change,
+}
+
+fn get_address(
+    worker: &mut super::Data,
     account_id: AccountId,
+    address: AddressType,
+    cache_policy: CachePolicy,
 ) -> Result<gdk_json::AddressInfo, anyhow::Error> {
-    let address = wallet::call(account_id, worker, |data| data.ses.get_receive_address())?;
+    let address_wallet = match (account_id, address) {
+        (ACCOUNT_ID_REG, AddressType::Receive) => AddressWallet::NestedReceive,
+        (ACCOUNT_ID_REG, AddressType::Change) => AddressWallet::NestedChange,
+        (ACCOUNT_ID_AMP, _) => AddressWallet::Amp,
+        _ => unreachable!("unexpected account_id: {account_id}"),
+    };
+
+    match cache_policy {
+        CachePolicy::Use => {
+            let cached_address = worker
+                .settings
+                .address_cache
+                .iter()
+                .find(|address| address.address_wallet == address_wallet);
+            if let Some(address) = cached_address {
+                let wallet = worker.get_wallet(account_id)?;
+
+                let expected_address = match address_wallet {
+                    AddressWallet::NestedReceive | AddressWallet::NestedChange => {
+                        derive_single_sig_address(
+                            &wallet.xpubs.single_sig_account,
+                            worker.env.d().network,
+                            address_wallet == AddressWallet::NestedChange,
+                            address.address.pointer,
+                            Some(&wallet.xpubs.master_blinding_key),
+                        )
+                    }
+                    AddressWallet::Amp => derive_multi_sig_address(
+                        &wallet.xpubs.multi_sig_service_xpub,
+                        &wallet.xpubs.multi_sig_user_xpub,
+                        worker.env.d().network,
+                        address.address.pointer,
+                        Some(&wallet.xpubs.master_blinding_key),
+                    ),
+                };
+                assert_eq!(
+                    expected_address, address.address.address,
+                    "wrong cached address"
+                );
+
+                return Ok(address.address.clone());
+            }
+        }
+        CachePolicy::Skip => {}
+    }
+
+    let address = wallet::call(account_id, worker, move |data| match address {
+        AddressType::Receive => data.ses.get_receive_address(),
+        AddressType::Change => data.ses.get_change_address(),
+    })?;
+
+    match cache_policy {
+        CachePolicy::Use => {
+            worker.settings.address_cache.push(AddressCacheEntry {
+                address: address.clone(),
+                address_wallet,
+            });
+            worker.save_settings();
+        }
+        CachePolicy::Skip => {}
+    }
+
     Ok(address)
+}
+
+fn remove_cached_address(worker: &mut super::Data, address: &elements::Address) {
+    worker
+        .settings
+        .address_cache
+        .retain(|item| item.address.address != *address);
+    worker.save_settings();
 }
 
 fn resolve_recv_address(
     worker: &mut super::Data,
     swap_info: &SwapInfo,
+    cache_policy: CachePolicy,
 ) -> Result<ResolveRes, anyhow::Error> {
     if swap_info.recv_amp_asset {
         let gaid = wallet::call(ACCOUNT_ID_AMP, worker, |data| data.ses.get_gaid())?;
@@ -2173,17 +2264,14 @@ fn resolve_recv_address(
             Err(err) => Err(err.into()),
         }
     } else {
-        let address_info = get_receive_address(worker, swap_info.receive_wallet)?;
+        let address_info = get_address(
+            worker,
+            swap_info.receive_wallet,
+            AddressType::Receive,
+            cache_policy,
+        )?;
         Ok(ResolveRes::Success { address_info })
     }
-}
-
-fn get_change_address(
-    worker: &super::Data,
-    account_id: AccountId,
-) -> Result<gdk_json::AddressInfo, anyhow::Error> {
-    let address = wallet::call(account_id, worker, |data| data.ses.get_change_address())?;
-    Ok(address)
 }
 
 pub fn order_submit(worker: &mut super::Data, msg: proto::to::OrderSubmit) {
@@ -2192,7 +2280,7 @@ pub fn order_submit(worker: &mut super::Data, msg: proto::to::OrderSubmit) {
 
     let swap_info = get_swap_info(worker, &asset_pair, trade_dir);
 
-    let res = resolve_recv_address(worker, &swap_info);
+    let res = resolve_recv_address(worker, &swap_info, CachePolicy::Skip);
 
     let res = match res {
         Ok(ResolveRes::Success { address_info }) => Ok(address_info),
@@ -2396,7 +2484,12 @@ fn try_start_quotes(
         .cloned()
         .collect::<Vec<_>>();
 
-    let change_address = get_change_address(worker, swap_info.change_wallet)?;
+    let change_address = get_address(
+        worker,
+        swap_info.change_wallet,
+        AddressType::Change,
+        CachePolicy::Use,
+    )?;
 
     let resp = send_market_request!(
         worker,
@@ -2488,7 +2581,7 @@ pub fn start_quotes(
 
     let swap_info = get_swap_info(worker, &asset_pair, base_trade_dir);
 
-    let res = resolve_recv_address(worker, &swap_info);
+    let res = resolve_recv_address(worker, &swap_info, CachePolicy::Use);
 
     let res = match res {
         Ok(ResolveRes::Success { address_info }) => Ok(address_info),
@@ -2624,7 +2717,7 @@ fn try_accept_quote(
         .get(&quote_id)
         .ok_or_else(|| anyhow!("Quote expired"))?;
 
-    let started_quote = &received_quote.started_quote;
+    let started_quote = Arc::clone(&received_quote.started_quote);
 
     let resp = send_market_request!(
         worker,
@@ -2698,6 +2791,9 @@ fn try_accept_quote(
         },
         SERVER_REQUEST_TIMEOUT_LONG
     )?;
+
+    remove_cached_address(worker, &started_quote.receive_address.address);
+    remove_cached_address(worker, &started_quote.change_address.address);
 
     Ok(resp.txid)
 }

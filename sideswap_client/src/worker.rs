@@ -429,6 +429,7 @@ fn derive_single_sig_address(
     network: Network,
     is_internal: bool,
     pointer: u32,
+    master_blinding_key: Option<&MasterBlindingKey>,
 ) -> elements::Address {
     let pub_key = account_xpub
         .derive_pub(
@@ -441,7 +442,16 @@ fn derive_single_sig_address(
         .unwrap()
         .to_pub();
     let pub_key = elements::bitcoin::PublicKey::new(pub_key.0);
-    elements::Address::p2shwpkh(&pub_key, None, network.d().elements_params)
+    let address = elements::Address::p2shwpkh(&pub_key, None, network.d().elements_params);
+
+    match master_blinding_key {
+        Some(master_blinding_key) => {
+            let blinding_pubkey =
+                master_blinding_key.blinding_key(SECP256K1, &address.script_pubkey());
+            address.to_confidential(blinding_pubkey)
+        }
+        None => address,
+    }
 }
 
 fn derive_multi_sig_address(
@@ -1592,6 +1602,7 @@ impl Data {
         Ok(())
     }
 
+    // TODO: Remove instant swaps messages
     fn process_instant_swap_request(&mut self, req: proto::to::SwapRequest) {
         info!(
             "start swap request: asset: {}, send_bitcoins: {}, send_amount: {}, recv_amount: {}, raw_price: {}",
@@ -3320,6 +3331,7 @@ impl Data {
                             self.env.d().network,
                             is_internal,
                             pointer,
+                            None,
                         )
                         .to_string()
                     })

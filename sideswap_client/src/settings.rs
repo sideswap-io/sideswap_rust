@@ -2,6 +2,8 @@ use bitcoin::bip32;
 use serde::{Deserialize, Serialize};
 use sideswap_api::{OrderId, SessionId};
 
+use crate::gdk_json;
+
 #[derive(Eq, PartialEq, Serialize, Deserialize, Copy, Clone)]
 pub enum PegDir {
     In,
@@ -43,7 +45,20 @@ pub struct RegInfo {
     pub multi_sig_user_path: Vec<u32>,
 }
 
-// All will be cleared after new wallet import!
+#[derive(Serialize, Deserialize, PartialEq, Eq)]
+pub enum AddressWallet {
+    NestedReceive,
+    NestedChange,
+    Amp,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct AddressCacheEntry {
+    pub address: gdk_json::AddressInfo,
+    pub address_wallet: AddressWallet,
+}
+
+// Everything will be deleted after importing a new wallet!
 #[derive(Serialize, Deserialize, Default)]
 pub struct Settings {
     pub pegs: Option<Vec<Peg>>,
@@ -62,6 +77,9 @@ pub struct Settings {
     pub reg_info_v3: Option<RegInfo>,
 
     pub event_proofs: Option<serde_json::Value>,
+
+    #[serde(default)]
+    pub address_cache: Vec<AddressCacheEntry>,
 }
 
 const SETTINGS_NAME: &str = "settings.json";

@@ -330,6 +330,7 @@ pub struct RecvAddrOpt {
     pub is_internal: Option<bool>,
 }
 
+// NOTE: Do not make incompatible changes, the data can be saved in the settings file!
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct AddressInfo {
     pub address: elements::Address,
