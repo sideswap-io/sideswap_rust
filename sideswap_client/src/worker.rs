@@ -53,6 +53,8 @@ pub enum CallError {
     Backend(String),
     #[error("{0}")]
     UnregisteredGaid(String),
+    #[error("Unknown UTXO, wait for wallet sync")]
+    UnknownUtxo,
     #[error("Request timeout")]
     Timeout,
     #[error("Unexpected response")]
@@ -65,6 +67,8 @@ impl From<sideswap_api::Error> for CallError {
     fn from(value: sideswap_api::Error) -> Self {
         match value.code {
             sideswap_api::ErrorCode::UnregisteredGaid => CallError::UnregisteredGaid(value.message),
+
+            sideswap_api::ErrorCode::UnknownUtxo => CallError::UnknownUtxo,
 
             sideswap_api::ErrorCode::ParseError
             | sideswap_api::ErrorCode::InvalidRequest

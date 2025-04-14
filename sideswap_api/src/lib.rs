@@ -1195,8 +1195,11 @@ pub enum ErrorCode {
 
     UnknownToken,
 
-    // GAID is not allowed for trading the requested AMP asset
+    /// GAID is not allowed for trading the requested AMP asset
     UnregisteredGaid,
+
+    /// UTXO has already been spent or the transaction has not yet been received
+    UnknownUtxo,
 
     #[serde(other)]
     Unknown,
@@ -1213,6 +1216,7 @@ pub fn error_code(code: ErrorCode) -> i32 {
         ErrorCode::Unknown => 0,
         ErrorCode::UnknownToken => 1,
         ErrorCode::UnregisteredGaid => 2,
+        ErrorCode::UnknownUtxo => 3,
     }
 }
 
