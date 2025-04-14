@@ -948,17 +948,17 @@ fn process_ws_quote(worker: &mut super::Data, notif: mkt::QuoteNotif) {
                 TradeDir::Buy => recv_amount,
             };
 
-            if started_quote.instant_swaps && started_quote.amount < expected_amount {
+            if started_quote.instant_swaps && started_quote.amount != expected_amount {
                 // The total order book is less than the requested amount.
                 // Show an error so that the user can enter lower amount.
-                proto::from::quote::Result::LowBalance(proto::from::quote::LowBalance {
-                    base_amount,
-                    quote_amount,
-                    server_fee,
-                    fixed_fee,
-                    price_taker,
-                    available: send_amount, // The user will need to limit how much they are going to sell
-                })
+                // The user will need to limit how much they are going to sell
+                let send_asset = match base_trade_dir {
+                    TradeDir::Sell => started_quote.asset_pair.base,
+                    TradeDir::Buy => started_quote.asset_pair.quote,
+                };
+                let send_asset = worker.assets.get(&send_asset).expect("must be known");
+                let send_amount = asset_float_amount_(send_amount, send_asset.precision);
+                proto::from::quote::Result::Error(format!("Max: {send_amount}"))
             } else {
                 worker.market.received_quotes.insert(
                     quote_id,
