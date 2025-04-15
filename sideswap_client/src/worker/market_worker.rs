@@ -2444,6 +2444,15 @@ fn try_start_quotes(
 ) -> Result<StartedQuote, anyhow::Error> {
     let asset_pair = AssetPair::from(&msg.asset_pair);
 
+    worker.add_gdk_assets_for_asset_pair(std::iter::once(&asset_pair));
+
+    for asset_id in [asset_pair.base, asset_pair.quote] {
+        ensure!(
+            worker.assets.contains_key(&asset_id),
+            "asset is not registered, asset_id: {asset_id}"
+        );
+    }
+
     let instant_swaps = msg.instant_swaps;
     let ind_price = instant_swaps && msg.amount == 0;
     let msg_amount = msg.amount;
