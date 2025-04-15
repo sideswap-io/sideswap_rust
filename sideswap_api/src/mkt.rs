@@ -567,6 +567,7 @@ pub struct GetOrderResponse {
     pub trade_dir: TradeDir,
     pub amount: u64,
     pub price: NormalFloat,
+    pub fee_asset: AssetType,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

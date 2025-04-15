@@ -2694,6 +2694,7 @@ pub fn start_order(
                             trade_dir: proto::TradeDir::from(private.trade_dir).into(),
                             amount: private.amount,
                             price: private.price.value(),
+                            fee_asset: proto::AssetType::from(private.fee_asset).into(),
                         },
                     )),
                     order_id,
