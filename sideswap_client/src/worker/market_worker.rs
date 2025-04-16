@@ -76,7 +76,7 @@ struct StartedQuote {
     fee_asset: AssetType,
     order_id: Option<u64>,
     client_sub_id: Option<i64>,
-    instant_swaps: bool,
+    instant_swap: bool,
     ind_price: bool,
 
     utxos: Vec<gdk_json::UnspentOutput>,
@@ -948,7 +948,7 @@ fn process_ws_quote(worker: &mut super::Data, notif: mkt::QuoteNotif) {
                 TradeDir::Buy => recv_amount,
             };
 
-            if started_quote.instant_swaps && started_quote.amount != expected_amount {
+            if started_quote.instant_swap && started_quote.amount != expected_amount {
                 // The total order book is less than the requested amount.
                 // Show an error so that the user can enter lower amount.
                 // The user will need to limit how much they are going to sell
@@ -1021,7 +1021,7 @@ fn process_ws_quote(worker: &mut super::Data, notif: mkt::QuoteNotif) {
 
             if started_quote.ind_price {
                 proto::from::quote::Result::IndPrice(proto::from::quote::IndPrice { price_taker })
-            } else if started_quote.instant_swaps && started_quote.amount != expected_amount {
+            } else if started_quote.instant_swap && started_quote.amount != expected_amount {
                 // The total order book is less than the requested amount.
                 // Show an error so that the user can enter lower amount.
                 // The user will need to limit how much they are going to sell
@@ -2453,8 +2453,8 @@ fn try_start_quotes(
         );
     }
 
-    let instant_swaps = msg.instant_swaps;
-    let ind_price = instant_swaps && msg.amount == 0;
+    let instant_swap = msg.instant_swap;
+    let ind_price = instant_swap && msg.amount == 0;
     let msg_amount = msg.amount;
 
     let (asset_type, trade_dir, amount) = if ind_price {
@@ -2541,6 +2541,7 @@ fn try_start_quotes(
             change_address: change_address.address.clone(),
             order_id: order_id.map(OrdId::new),
             private_id: private_id.clone().map(Box::new),
+            instant_swap,
         },
         SERVER_REQUEST_TIMEOUT_LONG
     )?;
@@ -2552,7 +2553,7 @@ fn try_start_quotes(
         amount: msg_amount,
         trade_dir,
         fee_asset: resp.fee_asset,
-        instant_swaps,
+        instant_swap,
         ind_price,
         utxos,
         receive_address,
@@ -2716,7 +2717,7 @@ pub fn start_order(
                     asset_type: proto::AssetType::Base.into(),
                     amount: u64::MAX,
                     trade_dir: proto::TradeDir::from(private.trade_dir.inv()).into(),
-                    instant_swaps: false,
+                    instant_swap: false,
                     client_sub_id: None,
                 },
                 Some(order_id),

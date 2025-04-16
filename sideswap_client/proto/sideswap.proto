@@ -358,12 +358,12 @@ message To {
   message StartQuotes {
     required AssetPair asset_pair = 1;
     required AssetType asset_type = 2;
-    // Can be 0, if instant_swaps is true.
+    // Can be 0, if instant_swap is true.
     // 0 can be used to load indicative buy and sell prices (the best price from the order book).
     required uint64 amount = 3;
     required TradeDir trade_dir = 4;
     // Set to true, if started from the Instant Swaps page
-    required bool instant_swaps = 5;
+    required bool instant_swap = 5;
     // Optional client-generated ID that will later be returned with all received quotes
     optional int64 client_sub_id = 6;
   }

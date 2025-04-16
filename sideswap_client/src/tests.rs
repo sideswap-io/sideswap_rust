@@ -390,7 +390,7 @@ fn make_swap(
         asset_type: asset_type.into(),
         amount,
         trade_dir: trade_dir.into(),
-        instant_swaps: false,
+        instant_swap: false,
         client_sub_id: None,
     }));
 
@@ -826,7 +826,7 @@ fn instant_swaps_ind_price() {
         asset_type: proto::AssetType::Base.into(),
         amount: 0,
         trade_dir: proto::TradeDir::Sell.into(),
-        instant_swaps: true,
+        instant_swap: true,
         client_sub_id: None,
     }));
 

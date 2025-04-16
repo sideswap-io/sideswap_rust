@@ -1227,6 +1227,7 @@ fn start_quotes(
             change_address,
             order_id,
             private_id,
+            instant_swap: false,
         }),
         Box::new(move |data, res| {
             let res = match res {

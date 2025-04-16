@@ -510,6 +510,8 @@ pub struct StartQuotesRequest {
     pub change_address: Address,
     pub order_id: Option<OrdId>,
     pub private_id: Option<Box<String>>,
+    #[serde(default)]
+    pub instant_swap: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

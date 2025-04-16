@@ -337,6 +337,10 @@ pub struct GetQuoteReq {
     /// The Liquid confidential address that will receive the `recv_asset`.
     /// This address does *not* need to belong to the user's wallet.
     pub receive_address: elements::Address,
+    /// If true, use only orders within a predefined price range (within 1-2% of the index price).
+    /// This reduces liquidity but is safer.
+    #[serde(default)]
+    pub instant_swap: bool,
 }
 
 /// GetQuote response
