@@ -366,7 +366,7 @@ fn select_bitcoin_inputs(
     }
 }
 
-fn tx_weight<'a>(
+pub fn tx_weight<'a>(
     inputs: impl Iterator<Item = WalletType>,
     outputs: impl Iterator<Item = &'a RecipientAddress>,
     change: impl Iterator<Item = WalletType>,
