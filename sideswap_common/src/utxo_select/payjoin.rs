@@ -156,10 +156,14 @@ fn try_select(args: Args) -> Result<Res, Error> {
 
             let server_fee_min = (network_fee as f64 * price) as u64 + fixed_fee;
 
-            let server_fee = if with_change {
+            let server_fee = if with_change || deduct_fee.is_some() {
                 server_fee_min
             } else {
-                fee_asset_total - recipients_fee_asset_total
+                let server_fee = fee_asset_total - recipients_fee_asset_total;
+                if server_fee < server_fee_min {
+                    continue;
+                }
+                server_fee
             };
 
             let fee_asset_change = if deduct_fee.is_some() {
@@ -170,6 +174,10 @@ fn try_select(args: Args) -> Result<Res, Error> {
                 }
                 fee_asset_total - recipients_fee_asset_total - server_fee
             };
+
+            if with_change != (fee_asset_change != 0) {
+                continue;
+            }
 
             let fee_asset_change = with_change.then_some(Change {
                 wallet: fee_asset_wallet,
@@ -223,3 +231,6 @@ pub fn select(args: Args) -> Result<Res, Error> {
     log::debug!("utxo res: {res:#?}");
     res
 }
+
+#[cfg(test)]
+mod tests;
