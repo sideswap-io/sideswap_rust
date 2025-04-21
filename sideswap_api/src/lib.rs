@@ -253,8 +253,9 @@ pub struct PegRequest {
     pub send_amount: Option<i64>,
     pub peg_in: bool,
     pub device_key: Option<String>,
-    pub blocks: Option<i32>,
     pub peg_out_amounts: Option<PegOutAmounts>,
+    pub fee_rate: Option<FeeRateSats>,
+    pub blocks: Option<i32>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

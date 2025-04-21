@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
-use sideswap_types::{duration_ms::DurationMs, timestamp_ms::TimestampMs};
+use sideswap_types::{duration_ms::DurationMs, fee_rate::FeeRateSats, timestamp_ms::TimestampMs};
 
 #[derive(Debug, Serialize)]
 pub enum ErrorCode {
@@ -406,6 +406,10 @@ pub struct NewPegReq {
     pub addr_recv: String,
     /// `true` for peg-in (BTC -> L-BTC), `false` for peg-out (L-BTC -> BTC).
     pub peg_in: bool,
+    /// Fee rate (in sats/vbyte) used for the peg-out bitcoin transaction.
+    /// If not set, the current value is used for 2 blocks.
+    /// Cannot be less than 1.0.
+    pub fee_rate: Option<FeeRateSats>,
 }
 
 /// NewPeg response

@@ -1481,6 +1481,7 @@ impl Data {
                     is_send_entered: peg_out_server_amounts.is_send_entered,
                     fee_rate: peg_out_server_amounts.fee_rate
                 }),
+                fee_rate: None,
             },
             SERVER_REQUEST_TIMEOUT_LONG
         )?;
@@ -1539,6 +1540,7 @@ impl Data {
                 device_key: Some(device_key),
                 blocks: None,
                 peg_out_amounts: None,
+                fee_rate: None,
             },
             SERVER_REQUEST_TIMEOUT_LONG
         )?;

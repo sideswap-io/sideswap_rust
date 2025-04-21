@@ -261,6 +261,7 @@ async fn new_peg(
     api::NewPegReq {
         addr_recv: recv_addr,
         peg_in,
+        fee_rate,
     }: api::NewPegReq,
 ) -> Result<api::NewPegResp, Error> {
     let resp = make_request!(
@@ -273,6 +274,7 @@ async fn new_peg(
             device_key: None,
             blocks: None,
             peg_out_amounts: None,
+            fee_rate,
         }
     )?;
 
