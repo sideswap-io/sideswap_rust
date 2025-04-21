@@ -220,7 +220,9 @@ fn select_asset_inputs(
         inputs.append(&mut asset_inputs);
 
         if change_amount > 0 {
-            let wallet = *change_wallets.get(&asset_id).expect("must be known");
+            let wallet = *change_wallets
+                .get(&asset_id)
+                .ok_or(Error::InsufficientFunds)?;
             change.push(Change {
                 wallet,
                 asset_id,
@@ -246,7 +248,9 @@ fn select_bitcoin_inputs(
         .map(|utxo| utxo.value)
         .collect::<Vec<_>>();
 
-    let change_wallet = *change_wallets.get(policy_asset).expect("must be known");
+    let change_wallet = *change_wallets
+        .get(policy_asset)
+        .ok_or(Error::InsufficientFunds)?;
 
     if deduct_fee.is_some() {
         // Fee is deducted from a recipient output, no need for iterative fee calculation here
