@@ -16,3 +16,14 @@ if [[ -n "$GIT_STATUS" ]]; then
 else
     echo "Assets are up to date"
 fi
+
+#git fetch --quiet
+LOCAL="$(git rev-parse @)"
+REMOTE="$(git rev-parse origin/main)"
+
+if [[ "$LOCAL" = "$REMOTE" ]]; then
+    echo "✅ Repo is clean and branch is up‑to‑date with upstream."
+else
+    echo "❌ Repo is not not up-to-date with upstream"
+    exit 1
+fi
