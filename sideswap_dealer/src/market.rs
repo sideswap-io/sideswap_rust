@@ -63,6 +63,7 @@ pub struct Params {
     pub web_server: Option<WebServerConfig>,
     pub ws_server: Option<WsServerConfig>,
     pub ticker_loader: Arc<TickerLoader>,
+    pub user_agent: String,
 }
 
 // Public messages
@@ -495,6 +496,7 @@ struct AcceptingQuote {
 struct Data {
     mode: Mode,
     work_dir: PathBuf,
+    user_agent: String,
     state: persistent_state::Data,
     ticker_loader: Arc<TickerLoader>,
 
@@ -621,6 +623,15 @@ fn ws_callback(data: &mut Data, req: mkt::Request, callback: WsCallback) {
 }
 
 async fn try_login(data: &mut Data) -> Result<mkt::LoginResponse, anyhow::Error> {
+    data.ws.send_request(sideswap_api::Request::LoginClient(
+        sideswap_api::LoginClientRequest {
+            api_key: None,
+            cookie: None,
+            user_agent: data.user_agent.clone(),
+            version: crate::logs::GIT_COMMIT_HASH.to_owned(),
+        },
+    ));
+
     let assets = make_request!(
         data.ws,
         Assets,
@@ -2003,6 +2014,7 @@ async fn run(
     let mut data = Data {
         mode,
         work_dir: params.work_dir,
+        user_agent: params.user_agent,
         state,
         ticker_loader: Arc::clone(&params.ticker_loader),
         ws,

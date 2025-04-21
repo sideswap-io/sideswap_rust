@@ -903,6 +903,15 @@ async fn process_command(data: &mut Data, command: Command) {
 }
 
 fn process_ws_connected(data: &mut Data) {
+    data.ws.send_request(sideswap_api::Request::LoginClient(
+        sideswap_api::LoginClientRequest {
+            api_key: None,
+            cookie: None,
+            user_agent: "SideSwapManager".to_owned(),
+            version: sideswap_dealer::logs::GIT_COMMIT_HASH.to_owned(),
+        },
+    ));
+
     data.ws
         .send_request(sideswap_api::Request::Market(mkt::Request::ListMarkets(
             mkt::ListMarketsRequest {},
