@@ -333,13 +333,6 @@ fn get_price_taker(
     price_taker
 }
 
-fn get_base_trade_dir(asset_type: AssetType, trade_dir: TradeDir) -> TradeDir {
-    match asset_type {
-        AssetType::Base => trade_dir,
-        AssetType::Quote => trade_dir.inv(),
-    }
-}
-
 struct GetSendRecvAmount {
     fee_asset: AssetType,
     base_trade_dir: TradeDir,
@@ -908,7 +901,9 @@ fn process_ws_quote(worker: &mut super::Data, notif: mkt::QuoteNotif) {
         return;
     }
 
-    let base_trade_dir = get_base_trade_dir(started_quote.asset_type, started_quote.trade_dir);
+    let base_trade_dir = started_quote
+        .trade_dir
+        .base_trade_dir(started_quote.asset_type);
 
     let res = match notif.status {
         mkt::QuoteStatus::Success {
@@ -2482,10 +2477,7 @@ fn try_start_quotes(
 
         let orig_asset_type = AssetType::from(msg.asset_type());
         let orig_trade_dir = TradeDir::from(msg.trade_dir());
-        let base_trade_dir = match orig_asset_type {
-            AssetType::Base => orig_trade_dir,
-            AssetType::Quote => orig_trade_dir.inv(),
-        };
+        let base_trade_dir = orig_trade_dir.base_trade_dir(orig_asset_type);
 
         let asset_type = if *selected_asset == asset_pair.base {
             AssetType::Base
@@ -2612,10 +2604,7 @@ pub fn start_quotes(
     let asset_pair = AssetPair::from(&msg.asset_pair);
     let trade_dir = TradeDir::from(msg.trade_dir());
 
-    let base_trade_dir = match msg.asset_type() {
-        proto::AssetType::Base => trade_dir,
-        proto::AssetType::Quote => trade_dir.inv(),
-    };
+    let base_trade_dir = trade_dir.base_trade_dir(msg.asset_type().into());
 
     let swap_info = get_swap_info(worker, &asset_pair, base_trade_dir);
 
@@ -2767,7 +2756,9 @@ fn try_accept_quote(
 
     let pset = decode_pset(&resp.pset)?;
 
-    let base_trade_dir = get_base_trade_dir(started_quote.asset_type, started_quote.trade_dir);
+    let base_trade_dir = started_quote
+        .trade_dir
+        .base_trade_dir(started_quote.asset_type);
 
     let (send_asset, recv_asset) = match base_trade_dir {
         TradeDir::Sell => (
