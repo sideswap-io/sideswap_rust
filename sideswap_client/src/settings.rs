@@ -80,6 +80,8 @@ pub struct Settings {
 
     #[serde(default)]
     pub address_cache: Vec<AddressCacheEntry>,
+
+    pub min_order_amounts: Option<sideswap_api::mkt::MinOrderAmounts>,
 }
 
 const SETTINGS_NAME: &str = "settings.json";

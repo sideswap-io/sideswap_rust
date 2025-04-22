@@ -21,8 +21,8 @@ use sideswap_api::{
     self as api,
     mkt::{
         self, AssetPair, AssetType, ClientEvent, HistStatus, HistoryOrder, MarketInfo,
-        MinOrderAmounts, Notification, OrdId, OwnOrder, PublicOrder, QuoteId, QuoteSubId, Request,
-        Response, TradeDir,
+        Notification, OrdId, OwnOrder, PublicOrder, QuoteId, QuoteSubId, Request, Response,
+        TradeDir,
     },
     AssetBlindingFactor, MarketType, ValueBlindingFactor,
 };
@@ -125,7 +125,6 @@ pub struct Data {
     server_markets: Vec<MarketInfo>,
     token_quotes: Vec<AssetId>,
     ui_markets: Vec<proto::MarketInfo>,
-    min_order_amounts: Option<MinOrderAmounts>,
 }
 
 pub fn new() -> Data {
@@ -141,7 +140,6 @@ pub fn new() -> Data {
         server_markets: Vec::new(),
         token_quotes: Vec::new(),
         ui_markets: Vec::new(),
-        min_order_amounts: None,
     }
 }
 
@@ -641,17 +639,19 @@ fn ws_login(worker: &mut super::Data) {
                                 list: worker.market.own_orders.values().map(Into::into).collect(),
                             }));
 
-                        if worker.market.min_order_amounts != resp.min_order_amounts {
-                            worker.market.min_order_amounts = resp.min_order_amounts;
-                            if let Some(min_order_amounts) = resp.min_order_amounts {
-                                worker.ui.send(proto::from::Msg::MinMarketAmounts(
-                                    proto::from::MinMarketAmounts {
-                                        lbtc: min_order_amounts.lbtc,
-                                        usdt: min_order_amounts.usdt,
-                                        eurx: min_order_amounts.eurx,
-                                    },
-                                ));
+                        if let Some(min_order_amounts) = resp.min_order_amounts {
+                            if worker.settings.min_order_amounts != Some(min_order_amounts) {
+                                worker.settings.min_order_amounts = Some(min_order_amounts);
+                                worker.save_settings();
                             }
+
+                            worker.ui.send(proto::from::Msg::MinMarketAmounts(
+                                proto::from::MinMarketAmounts {
+                                    lbtc: min_order_amounts.lbtc,
+                                    usdt: min_order_amounts.usdt,
+                                    eurx: min_order_amounts.eurx,
+                                },
+                            ));
                         }
 
                         if let Some(xprivs) = worker.market.xprivs.as_mut() {
@@ -2461,7 +2461,7 @@ fn try_start_quotes(
         // Start quotes with some small amount to get the best order book price.
         // It's used to show something to users when they just open the instant swaps page.
         let min_order_amounts = worker
-            .market
+            .settings
             .min_order_amounts
             .as_ref()
             .ok_or_else(|| anyhow!("min_order_amounts is not known"))?;
