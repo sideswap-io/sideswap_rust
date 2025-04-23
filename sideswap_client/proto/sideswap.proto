@@ -273,14 +273,6 @@ message To {
     required bool active = 1;
   }
 
-  message SwapRequest {
-    required bool send_bitcoins = 1;
-    required string asset = 2;
-    required int64 send_amount = 3;
-    required int64 recv_amount = 4;
-    required double price = 5;
-  }
-
   message PegInRequest {
   }
 
@@ -318,13 +310,6 @@ message To {
 
   message UpdatePushToken {
     required string token = 1;
-  }
-
-  message SubscribePriceStream {
-    required string asset_id = 1;
-    required bool send_bitcoins = 2;
-    optional int64 send_amount = 3;
-    optional int64 recv_amount = 4;
   }
 
   message GaidStatus {
@@ -404,14 +389,11 @@ message To {
     Account load_utxos = 17;
     Account load_addresses = 18;
 
-    SwapRequest swap_request = 20;
     PegInRequest peg_in_request = 21;
     PegOutAmount peg_out_amount = 24;
     PegOutRequest peg_out_request = 22;
 
     AssetId asset_details = 57;
-    SubscribePriceStream subscribe_price_stream = 58;
-    Empty unsubscribe_price_stream = 59;
 
     Empty portfolio_prices = 62;
     Empty conversion_rates = 63;
@@ -625,15 +607,6 @@ message From {
     required string asset_id = 1;
     optional Stats stats = 2;
     optional string chart_url = 3;
-  }
-
-  message UpdatePriceStream {
-    required string asset_id = 1;
-    required bool send_bitcoins = 2;
-    optional int64 send_amount = 3;
-    optional int64 recv_amount = 4;
-    optional double price = 5;
-    optional string error_msg = 6;
   }
 
   message LocalMessage {
@@ -853,7 +826,6 @@ message From {
     Empty server_disconnected = 61;
     AssetDetails asset_details = 65;
 
-    UpdatePriceStream update_price_stream = 66;
     LocalMessage local_message = 68;
 
     PortfolioPrices portfolio_prices = 72;

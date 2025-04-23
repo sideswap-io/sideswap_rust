@@ -112,7 +112,6 @@ impl Data {
             | proto::from::Msg::ShowMessage(_)
             | proto::from::Msg::InsufficientFunds(_)
             | proto::from::Msg::AssetDetails(_)
-            | proto::from::Msg::UpdatePriceStream(_)
             | proto::from::Msg::LocalMessage(_)
             | proto::from::Msg::PortfolioPrices(_)
             | proto::from::Msg::ConversionRates(_)

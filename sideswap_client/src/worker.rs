@@ -11,7 +11,7 @@ use crate::gdk_json::{self, AddressInfo};
 use crate::gdk_ses::{self, ElectrumServer, NotifCallback, WalletInfo};
 use crate::settings;
 use crate::{gdk_ses_impl, gdk_ses_stub};
-use crate::{gdk_ses_jade, models, swaps};
+use crate::{gdk_ses_jade, models};
 
 use anyhow::{anyhow, ensure};
 use bitcoin::bip32;
@@ -31,7 +31,7 @@ use sideswap_common::event_proofs::EventProofs;
 use sideswap_common::network::Network;
 use sideswap_common::retry_delay::RetryDelay;
 use sideswap_common::send_tx::coin_select::InOut;
-use sideswap_common::types::{self, peg_out_amount, select_utxo_values, Amount};
+use sideswap_common::types::{self, peg_out_amount, Amount};
 use sideswap_common::ws::next_request_id;
 use sideswap_common::{abort, b64, pin, send_tx, verify};
 use sideswap_jade::jade_mng::{self, JadeStatus, JadeStatusCallback, ManagedJade};
@@ -269,8 +269,6 @@ pub struct Data {
     wallets: BTreeMap<AccountId, Wallet>,
     wallet_data: WalletData,
 
-    active_swap: Option<ActiveSwap>,
-    succeed_swap: Option<elements::Txid>,
     active_extern_peg: Option<ActivePeg>,
     sent_txhash: Option<elements::Txid>,
     peg_out_server_amounts: Option<LastPegOutAmount>,
@@ -280,7 +278,6 @@ pub struct Data {
     settings: settings::Settings,
     push_token: Option<String>,
     policy_asset: AssetId,
-    subscribed_price_stream: Option<api::SubscribePriceStreamRequest>,
     last_blocks: BTreeMap<AccountId, gdk_json::NotificationBlock>,
     used_addresses: UsedAddresses,
 
@@ -292,14 +289,6 @@ pub struct Data {
     proxy_settings: proto::to::ProxySettings,
 
     wallet_event_callback: wallet::EventCallback,
-}
-
-pub struct ActiveSwap {
-    order_id: OrderId,
-    send_asset: AssetId,
-    recv_asset: AssetId,
-    send_amount: u64,
-    recv_amount: u64,
 }
 
 pub enum Message {
@@ -431,20 +420,6 @@ fn get_peg_item(peg: &api::PegStatus, tx: &api::TxStatus) -> proto::TransItem {
         account: get_account(ACCOUNT_ID_REG), // TODO: This is not accurate for peg-outs from the AMP wallet
         item: Some(proto::trans_item::Item::Peg(peg_details)),
     }
-}
-
-fn select_swap_inputs(
-    inputs: Vec<gdk_json::UnspentOutput>,
-    amount: i64,
-) -> Result<Vec<gdk_json::UnspentOutput>, anyhow::Error> {
-    let total = inputs.iter().map(|input| input.satoshi).sum::<u64>() as i64;
-    ensure!(total >= amount, "not enough UTXOs total amount");
-    let inputs = inputs
-        .into_iter()
-        .map(|input| (input.satoshi as i64, input))
-        .collect::<Vec<_>>();
-    let inputs = select_utxo_values(inputs, amount);
-    Ok(inputs)
 }
 
 fn derive_single_sig_address(
@@ -711,15 +686,6 @@ impl Data {
                     result: Some(result),
                 }));
                 self.sent_txhash = None;
-                self.update_sync_interval();
-            }
-        }
-
-        if let Some(txid) = self.succeed_swap.as_ref() {
-            let tx = updated.get(txid);
-            if let Some(tx) = tx {
-                queue_msgs.push(proto::from::Msg::SwapSucceed(tx.clone()));
-                self.succeed_swap = None;
                 self.update_sync_interval();
             }
         }
@@ -1104,10 +1070,6 @@ impl Data {
                 };
             },
         );
-
-        for req in self.subscribed_price_stream.iter() {
-            self.send_request_msg(api::Request::SubscribePriceStream(req.clone()));
-        }
 
         // verify device key if exists
         if let Some(device_key) = &self.settings.device_key {
@@ -1569,95 +1531,6 @@ impl Data {
                 self.ui.send(proto::from::Msg::SwapFailed(e.to_string()));
             }
         }
-    }
-
-    fn continue_swap_request(
-        &mut self,
-        req: proto::to::SwapRequest,
-        inputs: gdk_json::UnspentOutputs,
-        recv_addr: gdk_json::AddressInfo,
-        change_addr: gdk_json::AddressInfo,
-    ) -> Result<(), anyhow::Error> {
-        let asset = AssetId::from_str(&req.asset)
-            .map_err(|_| anyhow!("invalid asset id: {}", req.asset))?;
-
-        let (send_asset, recv_asset) = if req.send_bitcoins {
-            (self.policy_asset, asset)
-        } else {
-            (asset, self.policy_asset)
-        };
-        let send_amount = req.send_amount;
-        let recv_amount = req.recv_amount;
-
-        let inputs = inputs
-            .unspent_outputs
-            .get(&send_asset)
-            .cloned()
-            .unwrap_or_default();
-
-        let inputs = select_swap_inputs(inputs, send_amount)?
-            .into_iter()
-            .map(convert_to_swap_utxo)
-            .collect();
-
-        let swap_resp = send_request!(
-            self,
-            StartSwapClient,
-            api::StartSwapClientRequest {
-                price: req.price,
-                asset,
-                send_bitcoins: req.send_bitcoins,
-                send_amount,
-                recv_amount,
-                inputs,
-                recv_addr: recv_addr.address,
-                change_addr: change_addr.address,
-            },
-            SERVER_REQUEST_TIMEOUT_LONG
-        )?;
-
-        self.active_swap = Some(ActiveSwap {
-            order_id: swap_resp.order_id,
-            send_asset,
-            recv_asset,
-            send_amount: send_amount as u64,
-            recv_amount: recv_amount as u64,
-        });
-
-        Ok(())
-    }
-
-    // TODO: Remove instant swaps messages
-    fn process_instant_swap_request(&mut self, req: proto::to::SwapRequest) {
-        info!(
-            "start swap request: asset: {}, send_bitcoins: {}, send_amount: {}, recv_amount: {}, raw_price: {}",
-            req.asset, &req.send_bitcoins, req.send_amount, req.recv_amount, req.price
-        );
-
-        let account_id = ACCOUNT_ID_REG;
-
-        wallet::callback(
-            account_id,
-            self,
-            |data| {
-                let inputs = data.ses.get_utxos()?;
-                let recv_addr = data.ses.get_receive_address()?;
-                let change_addr = data.ses.get_change_address()?;
-                Ok((inputs, recv_addr, change_addr))
-            },
-            move |data, res| {
-                let res = match res {
-                    Ok((inputs, recv_addr, change_addr)) => {
-                        data.continue_swap_request(req, inputs, recv_addr, change_addr)
-                    }
-                    Err(err) => Err(err),
-                };
-                if let Err(err) = res {
-                    error!("swap request failed: {}", err.to_string());
-                    data.ui.send(proto::from::Msg::SwapFailed(err.to_string()));
-                }
-            },
-        );
     }
 
     fn process_get_recv_address(&mut self, account: proto::Account) {
@@ -2145,8 +2018,6 @@ impl Data {
         self.wallet_loaded_sent = false;
         self.confirmed_txids.clear();
         self.unconfirmed_txids.clear();
-        self.active_swap = None;
-        self.succeed_swap = None;
         self.active_extern_peg = None;
         self.sent_txhash = None;
         self.peg_out_server_amounts = None;
@@ -2618,29 +2489,6 @@ impl Data {
         }));
     }
 
-    fn process_subscribe_price_stream(&mut self, req: proto::to::SubscribePriceStream) {
-        let req = api::SubscribePriceStreamRequest {
-            subscribe_id: None,
-            asset: AssetId::from_str(&req.asset_id).unwrap(),
-            send_bitcoins: req.send_bitcoins,
-            send_amount: req.send_amount,
-            recv_amount: req.recv_amount,
-        };
-        if self.subscribed_price_stream.as_ref() != Some(&req) {
-            self.subscribed_price_stream = Some(req.clone());
-            self.send_request_msg(api::Request::SubscribePriceStream(req));
-        }
-    }
-
-    fn process_unsubscribe_price_stream(&mut self) {
-        if self.subscribed_price_stream.is_some() {
-            self.subscribed_price_stream = None;
-            self.send_request_msg(api::Request::UnsubscribePriceStream(
-                api::UnsubscribePriceStreamRequest { subscribe_id: None },
-            ));
-        }
-    }
-
     fn process_portfolio_prices(&mut self) {
         self.make_async_request(api::Request::PortfolioPrices(None), move |data, res| {
             if let Ok(api::Response::PortfolioPrices(resp)) = res {
@@ -2667,116 +2515,6 @@ impl Data {
                 ));
             }
         });
-    }
-
-    fn process_update_price_stream(&self, msg: api::SubscribePriceStreamResponse) {
-        let msg = proto::from::UpdatePriceStream {
-            asset_id: msg.asset.to_string(),
-            send_bitcoins: msg.send_bitcoins,
-            send_amount: msg.send_amount,
-            recv_amount: msg.recv_amount,
-            price: msg.price,
-            error_msg: msg.error_msg,
-        };
-        self.ui.send(proto::from::Msg::UpdatePriceStream(msg));
-    }
-
-    fn blinded_swap_client_continue(
-        &mut self,
-        order_id: OrderId,
-        pset: String,
-    ) -> Result<(), anyhow::Error> {
-        send_request!(
-            self,
-            SignedSwapClient,
-            api::SignedSwapClientRequest { order_id, pset },
-            SERVER_REQUEST_TIMEOUT_LONG
-        )?;
-        Ok(())
-    }
-
-    fn try_process_blinded_swap_client(
-        &mut self,
-        msg: api::BlindedSwapClientNotification,
-    ) -> Result<(), anyhow::Error> {
-        let account_id = ACCOUNT_ID_REG;
-
-        let active_swap = self
-            .active_swap
-            .as_ref()
-            .ok_or_else(|| anyhow!("unexpected swap request"))?;
-        ensure!(active_swap.order_id == msg.order_id);
-
-        let amounts = swaps::Amounts {
-            send_asset: active_swap.send_asset,
-            recv_asset: active_swap.recv_asset,
-            send_amount: active_swap.send_amount,
-            recv_amount: active_swap.recv_amount,
-        };
-
-        let send_amp = self.amp_assets.contains(&amounts.send_asset);
-        let recv_amp = self.amp_assets.contains(&amounts.recv_asset);
-        ensure!(!send_amp && !recv_amp, "AMP assets are not allowed");
-
-        let assets = self.assets.clone();
-        let order_id = msg.order_id;
-        wallet::callback(
-            account_id,
-            self,
-            move |data| {
-                data.ses
-                    .verify_and_sign_pset(&amounts, &msg.pset, &[], &assets)
-            },
-            move |data, res| {
-                let res = match res {
-                    Ok(pset) => data.blinded_swap_client_continue(order_id, pset),
-                    Err(err) => Err(err),
-                };
-                if let Err(err) = res {
-                    error!("instant swap failed: {}", err.to_string());
-                    data.ui.send(proto::from::Msg::SwapFailed(err.to_string()));
-                }
-            },
-        );
-
-        Ok(())
-    }
-
-    fn process_blinded_swap_client(&mut self, msg: api::BlindedSwapClientNotification) {
-        let res = self.try_process_blinded_swap_client(msg);
-        if let Err(err) = res {
-            error!("processing blinded swap failed: {}", err.to_string());
-            self.ui.send(proto::from::Msg::SwapFailed(err.to_string()));
-        }
-    }
-
-    fn process_instant_swap_done(&mut self, msg: api::SwapDoneNotification) {
-        match self.active_swap.as_ref() {
-            Some(v) if v.order_id == msg.order_id => v,
-            _ => return,
-        };
-        let _active_swap = self.active_swap.take().unwrap();
-
-        let error = match msg.status {
-            api::SwapDoneStatus::Success => None,
-            api::SwapDoneStatus::ClientError => Some("Transaction not signed in time"),
-            api::SwapDoneStatus::DealerError => Some("Unexpected dealer error"),
-            api::SwapDoneStatus::ServerError => Some("Unexpected server error"),
-        };
-        match (error, msg.txid) {
-            (None, Some(txid)) => {
-                debug!("instant swap succeed, txid: {}", txid);
-                self.succeed_swap = Some(txid);
-                self.update_sync_interval();
-            }
-            (Some(e), None) => {
-                self.ui.send(proto::from::Msg::SwapFailed(e.to_owned()));
-            }
-            _ => {
-                self.ui
-                    .send(proto::from::Msg::SwapFailed("server error".to_owned()));
-            }
-        };
     }
 
     fn process_local_message(&mut self, msg: api::LocalMessageNotification) {
@@ -3002,7 +2740,6 @@ impl Data {
             proto::to::Msg::PegInRequest(_) => self.process_pegin_request(),
             proto::to::Msg::PegOutAmount(req) => self.process_pegout_amount(req),
             proto::to::Msg::PegOutRequest(req) => self.process_pegout_request(req),
-            proto::to::Msg::SwapRequest(req) => self.process_instant_swap_request(req),
             proto::to::Msg::GetRecvAddress(req) => self.process_get_recv_address(req),
             proto::to::Msg::CreateTx(req) => self.process_create_tx(req),
             proto::to::Msg::SendTx(req) => self.process_send_tx(req),
@@ -3012,8 +2749,6 @@ impl Data {
             proto::to::Msg::LoadAddresses(req) => self.process_load_addresses(req),
             proto::to::Msg::UpdatePushToken(req) => self.process_update_push_token(req),
             proto::to::Msg::AssetDetails(req) => self.process_asset_details(req),
-            proto::to::Msg::SubscribePriceStream(req) => self.process_subscribe_price_stream(req),
-            proto::to::Msg::UnsubscribePriceStream(_) => self.process_unsubscribe_price_stream(),
             proto::to::Msg::PortfolioPrices(_) => self.process_portfolio_prices(),
             proto::to::Msg::ConversionRates(_) => self.process_conversion_rates(),
             proto::to::Msg::JadeRescan(_) => self.process_jade_rescan_request(),
@@ -3071,7 +2806,7 @@ impl Data {
             api::Response::GaidStatus(_) => {}
             api::Response::AssetDetails(msg) => self.process_asset_details_response(msg),
             api::Response::BroadcastPriceStream(_) => {}
-            api::Response::SubscribePriceStream(msg) => self.process_update_price_stream(msg),
+            api::Response::SubscribePriceStream(_) => {}
             api::Response::UnsubscribePriceStream(_) => {}
             api::Response::StartSwapWeb(_) => {}
             api::Response::StartSwapClient(_) => {}
@@ -3129,9 +2864,9 @@ impl Data {
             api::Notification::OrderCreated(_) => {}
             api::Notification::OrderRemoved(_) => {}
             api::Notification::UpdatePrices(_) => {}
-            api::Notification::UpdatePriceStream(msg) => self.process_update_price_stream(msg),
-            api::Notification::BlindedSwapClient(msg) => self.process_blinded_swap_client(msg),
-            api::Notification::SwapDone(msg) => self.process_instant_swap_done(msg),
+            api::Notification::UpdatePriceStream(_) => {}
+            api::Notification::BlindedSwapClient(_) => {}
+            api::Notification::SwapDone(_) => {}
             api::Notification::LocalMessage(msg) => self.process_local_message(msg),
             api::Notification::NewAsset(_) => {}
             api::Notification::MarketDataUpdate(_) => {}
@@ -3727,8 +3462,6 @@ pub fn start_processing(
         confirmed_txids: BTreeMap::new(),
         unconfirmed_txids: BTreeMap::new(),
         wallets: BTreeMap::new(),
-        active_swap: None,
-        succeed_swap: None,
         active_extern_peg: None,
         sent_txhash: None,
         peg_out_server_amounts: None,
@@ -3737,7 +3470,6 @@ pub fn start_processing(
         settings,
         push_token: None,
         policy_asset,
-        subscribed_price_stream: None,
         last_blocks: BTreeMap::new(),
         used_addresses: Default::default(),
         jade_mng: jade_mng::JadeMng::new(jade_status_callback),
