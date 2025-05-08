@@ -87,3 +87,10 @@ ureq = { version = "2.9", features = ["json", "socks-proxy"] }
 url = "2.3"
 uuid = { version = "1.8" }
 vergen = { version = "5.1", default-features = false, features = ["build", "rustc", "git"] }
+
+[profile.release]
+strip = true
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
