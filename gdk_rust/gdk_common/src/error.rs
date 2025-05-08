@@ -48,17 +48,14 @@ pub enum Error {
     #[error("Invalid input")]
     InputValidationFailed,
 
-    #[error("Invalid address")]
-    InvalidAddress,
-
     #[error("Invalid address type")]
     InvalidAddressType,
 
-    #[error("Invalid sighash")]
-    InvalidSigHash,
-
     #[error("Invalid SLIP132 version")]
     InvalidSlip132Version,
+
+    #[error("Script type cannot be represented in SLIP132")]
+    UnrepresentableSlip132ScriptType,
 
     #[error("Invalid URL: {0}")]
     InvalidUrl(String),
@@ -75,13 +72,10 @@ pub enum Error {
     #[error("Mismatching xpub")]
     MismatchingXpub,
 
-    #[error("Unexpected child number")]
+    #[error("Invalid credentials")]
     UnexpectedChildNumber,
 
-    #[error("Unsupported sighash")]
-    UnsupportedSigHash,
-
-    #[error("Unsupported descriptor")]
+    #[error("Invalid credentials")]
     UnsupportedDescriptor,
 
     #[error(transparent)]

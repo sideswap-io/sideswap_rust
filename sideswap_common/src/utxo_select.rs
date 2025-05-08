@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use elements::{Address, AssetId, Txid};
+use serde::Serialize;
 
 use crate::{coin_select::no_change_or_naive, verify};
 
@@ -25,7 +26,7 @@ pub fn weight_to_fee(weight: usize, fee_rate: f64) -> u64 {
 }
 
 // Must be sorted in order of priority
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub enum WalletType {
     Native,
     Nested,

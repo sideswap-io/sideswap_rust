@@ -1,3 +1,5 @@
+use crate::timestamp_ms::TimestampMs;
+
 // In microseconds since UNIX epoch
 #[derive(
     Debug, Copy, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, PartialOrd, Ord,
@@ -26,7 +28,11 @@ impl TimestampUs {
         Self::from_time(std::time::SystemTime::now()).expect("invalid SystemTime")
     }
 
-    pub fn as_micros(self) -> u64 {
+    pub fn micros(self) -> u64 {
         self.0
+    }
+
+    pub fn as_millis(self) -> TimestampMs {
+        TimestampMs::from_millis(self.0 / 1000)
     }
 }

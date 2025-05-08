@@ -13,14 +13,15 @@ const VERSION_TPUB: [u8; 4] = [0x04, 0x35, 0x87, 0xcf]; // testnet p2pkh
 const VERSION_UPUB: [u8; 4] = [0x04, 0x4a, 0x52, 0x62]; // testnet p2sh-p2wpkh
 const VERSION_VPUB: [u8; 4] = [0x04, 0x5f, 0x1c, 0xf6]; // testnet p2wpkh
 
-pub fn slip132_version(is_mainnet: bool, script_type: ScriptType) -> [u8; 4] {
+pub fn slip132_version(is_mainnet: bool, script_type: ScriptType) -> Result<[u8; 4], Error> {
     match (is_mainnet, script_type) {
-        (true, ScriptType::P2pkh) => VERSION_XPUB,
-        (true, ScriptType::P2shP2wpkh) => VERSION_YPUB,
-        (true, ScriptType::P2wpkh) => VERSION_ZPUB,
-        (false, ScriptType::P2pkh) => VERSION_TPUB,
-        (false, ScriptType::P2shP2wpkh) => VERSION_UPUB,
-        (false, ScriptType::P2wpkh) => VERSION_VPUB,
+        (true, ScriptType::P2pkh) => Ok(VERSION_XPUB),
+        (true, ScriptType::P2shP2wpkh) => Ok(VERSION_YPUB),
+        (true, ScriptType::P2wpkh) => Ok(VERSION_ZPUB),
+        (false, ScriptType::P2pkh) => Ok(VERSION_TPUB),
+        (false, ScriptType::P2shP2wpkh) => Ok(VERSION_UPUB),
+        (false, ScriptType::P2wpkh) => Ok(VERSION_VPUB),
+        _ => Err(Error::UnrepresentableSlip132ScriptType),
     }
 }
 
@@ -58,6 +59,10 @@ pub fn extract_bip32_account(xpub: &Xpub) -> Result<u32, Error> {
         ChildNumber::Hardened {
             index: n,
         } => Ok(n),
+        // Ledger sets the child number to unhardened 0, allow for that
+        ChildNumber::Normal {
+            index: 0,
+        } => Ok(0),
         _ => Err(Error::UnexpectedChildNumber),
     }
 }
@@ -75,6 +80,7 @@ mod test {
         let tpub0 = "tpubDC2Q4xK4XH72HeV8i1wzpYqdSJq2pW24FCAaLxTEbQ2JL2ArB5NrGjFSGkTpMaQPViLBHJipgosUhkKpRpmR2vfwy2pYkpnx6E5j6VBf8Di";
         let tpub1 = "tpubDC2Q4xK4XH72KGQWGBDPPgT6LQpaHQMqfFCTDgsXaR4objnmduzxcdJfy6BBnpWBbYQs4jRP7tZWcJ4J44E5MVA3jDRy7rNygmLYzheF284";
         let ypub1 = "ypub6We8xsTdpgW69bD4PGaWUPkkCxXkgqdm4Lrb51DG7fNnhft8AS3VzDXR32pwdM9kbzv6wVbkNoGRKwT16krpp82bNTGxf4Um3sKqwYoGn8q";
+        let tpub_ledger = "upub5D9ydiUdMxX8TwbwXDRtgF2oWCgNxLKjM9JJr7ELmTXvn4nepP98Y94hfE7LUM4coGg9pZH6eJ2LgEWQwCkT2wspzmxhZaKDQvTYUR8ZNAP";
 
         let args = [
             (upub0, ScriptType::P2shP2wpkh, VERSION_UPUB, false, 0),
@@ -84,6 +90,7 @@ mod test {
             (tpub0, ScriptType::P2pkh, VERSION_TPUB, false, 0),
             (tpub1, ScriptType::P2pkh, VERSION_TPUB, false, 1),
             (ypub1, ScriptType::P2shP2wpkh, VERSION_YPUB, true, 1),
+            (tpub_ledger, ScriptType::P2shP2wpkh, VERSION_UPUB, false, 0),
         ];
         for (ext_key, script_type, version, is_mainnet, n) in args {
             let (m, t, xpub) = decode_from_slip132_string(ext_key).unwrap();
@@ -95,13 +102,13 @@ mod test {
             } else {
                 assert_eq!(prefix, "tpub");
             }
-            assert_eq!(slip132_version(is_mainnet, script_type), version);
+            assert_eq!(slip132_version(is_mainnet, script_type).unwrap(), version);
             assert_eq!(extract_bip32_account(&xpub).unwrap(), n)
         }
 
         assert!(decode_from_slip132_string("foobar").is_err());
 
-        let tpub_err = "tpubDC2Q4xJvBca46ZxTdaQEB1pT6j9fuPG5HnrP5chgWPFh1EjfaCt8f5v6b68M5D7xBBF4Md2MCFi2KBDYPLHy6QhBLuifUTPRSDnMWDYUWAy";
+        let tpub_err = "tpubDC2Q4xJvBca497nSAYAKBYtR3UiCeH6oEL7Ga9WBHjj4bJxZuvsJ2tdHsKyw4Qdsp5d9uECs7ELpMnB6rFRGHhqtTLCUvdBUGnDb1kzrH9W";
         let (_, _, xpub) = decode_from_slip132_string(tpub_err).unwrap();
         assert!(extract_bip32_account(&xpub).is_err());
     }

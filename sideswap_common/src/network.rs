@@ -8,7 +8,7 @@ pub enum Network {
 }
 
 impl Network {
-    pub fn bitcoin(self) -> bitcoin::Network {
+    pub fn to_bitcoin_network(self) -> bitcoin::Network {
         match self {
             Network::Liquid => bitcoin::Network::Bitcoin,
             Network::LiquidTestnet => bitcoin::Network::Testnet,
@@ -42,7 +42,8 @@ pub struct NetworkData {
     pub name: &'static str,
     pub elements_params: &'static elements::address::AddressParams,
     pub bitcoin_network: bitcoin::Network,
-    pub single_sig_account_path: [u32; 3],
+    pub account_path_sh_wpkh: [u32; 3],
+    pub account_path_wpkh: [u32; 3],
     pub electrum_url: &'static str,
     pub electrum_tls: bool,
     pub asset_registry_url: &'static str,
@@ -61,7 +62,8 @@ pub const NETWORK_LIQUID: NetworkData = NetworkData {
     name: "Liquid",
     elements_params: &elements::address::AddressParams::LIQUID,
     bitcoin_network: bitcoin::Network::Bitcoin,
-    single_sig_account_path: [0x80000031, 0x800006F0, 0x80000000],
+    account_path_sh_wpkh: [0x80000031, 0x800006F0, 0x80000000],
+    account_path_wpkh: [0x80000054, 0x800006F0, 0x80000000],
     electrum_url: "blockstream.info:995",
     electrum_tls: true,
     asset_registry_url: "https://assets.blockstream.info",
@@ -85,7 +87,8 @@ pub const NETWORK_LIQUID_TESTNET: NetworkData = NetworkData {
     name: "LiquidTestnet",
     elements_params: &elements::address::AddressParams::LIQUID_TESTNET,
     bitcoin_network: bitcoin::Network::Testnet,
-    single_sig_account_path: [0x80000031, 0x80000001, 0x80000000],
+    account_path_sh_wpkh: [0x80000031, 0x80000001, 0x80000000],
+    account_path_wpkh: [0x80000054, 0x80000001, 0x80000000],
     electrum_url: "blockstream.info:465",
     electrum_tls: true,
     asset_registry_url: "https://assets-testnet.blockstream.info",
@@ -110,7 +113,8 @@ pub const NETWORK_LIQUID_REGTEST: NetworkData = NetworkData {
     name: "LiquidRegtest",
     elements_params: &elements::address::AddressParams::ELEMENTS,
     bitcoin_network: bitcoin::Network::Regtest,
-    single_sig_account_path: [0x80000031, 0x80000001, 0x80000000],
+    account_path_sh_wpkh: [0x80000031, 0x80000001, 0x80000000],
+    account_path_wpkh: [0x80000054, 0x80000001, 0x80000000],
     electrum_url: "127.0.0.1:56705",
     electrum_tls: true,
     asset_registry_url: "fixme",

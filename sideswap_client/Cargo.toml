@@ -11,6 +11,9 @@ crate-type = ["cdylib", "staticlib", "rlib"]
 [dependencies]
 gdk-common = { path = "../gdk_rust/gdk_common" }
 gdk-registry = { path = "../gdk_rust/gdk_registry" }
+gdk-electrum = { path = "../gdk_rust/gdk_electrum" }
+
+sideswap_amp = { path = "../sideswap_amp" }
 sideswap_api = { path = "../sideswap_api" }
 sideswap_common = { path = "../sideswap_common" }
 sideswap_jade = { path = "../sideswap_jade" }

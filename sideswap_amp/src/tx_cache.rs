@@ -10,11 +10,13 @@ use super::*;
 pub struct TransactionInput {
     pub prevtxid: elements::Txid,
     pub previdx: u32,
+    pub unblinded: Option<TxOutSecrets>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TransactionOutput {
     pub pt_idx: u32,
+    pub unblinded: Option<TxOutSecrets>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -28,6 +30,7 @@ pub struct Transaction {
     pub network_fee: u64,
     pub inputs: Vec<TransactionInput>,
     pub outputs: Vec<TransactionOutput>,
+    pub vsize: usize,
 }
 
 #[derive(Default, Serialize, Deserialize)]

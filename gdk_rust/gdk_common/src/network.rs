@@ -14,14 +14,14 @@ pub const NETWORK_REQUEST_TIMEOUT: Duration = Duration::from_secs(90);
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct NetworkParameters {
     pub name: String,
-    network: String,
+    pub network: String,
 
     pub development: bool,
     pub liquid: bool,
     pub mainnet: bool,
 
-    tx_explorer_url: String,
-    address_explorer_url: String,
+    pub tx_explorer_url: String,
+    pub address_explorer_url: String,
 
     pub electrum_tls: Option<bool>,
     pub electrum_url: Option<String>,
@@ -30,12 +30,12 @@ pub struct NetworkParameters {
     pub policy_asset: Option<String>,
     pub sync_interval: Option<u32>,
     pub spv_enabled: Option<bool>,
-    asset_registry_url: Option<String>,
-    asset_registry_onion_url: Option<String>,
+    pub asset_registry_url: Option<String>,
+    pub asset_registry_onion_url: Option<String>,
 
-    pin_server_url: String,
-    pin_server_onion_url: String,
-    pin_server_public_key: String,
+    pub pin_server_url: String,
+    pub pin_server_onion_url: String,
+    pub pin_server_public_key: String,
 
     pub spv_multi: Option<bool>,
     pub spv_servers: Option<Vec<String>>,

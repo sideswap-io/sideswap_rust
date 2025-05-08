@@ -1,51 +1,35 @@
+use std::path::PathBuf;
 use std::str::FromStr;
-use std::{collections::BTreeMap, sync::Arc};
+use std::sync::Arc;
 
-use crate::{
-    ffi::proto,
-    gdk_json::{self, AddressInfo},
-    gdk_ses_impl::CreatedTxCache,
-    models,
-    settings::WatchOnly,
-    worker,
-};
+use crate::{ffi::proto, models, settings::WatchOnly};
 use bitcoin::bip32;
-use sideswap_api::{Asset, AssetId};
+use elements_miniscript::slip77::MasterBlindingKey;
 use sideswap_common::env::Env;
 use sideswap_jade::{jade_mng, models::JadeNetwork};
 
-#[derive(Debug, Copy, Clone)]
-pub enum SignWith {
-    User,
-    GreenBackend,
-    #[allow(dead_code)]
-    All,
-}
-
-impl SignWith {
-    pub fn to_json(self) -> Vec<gdk_json::SignWith> {
-        match self {
-            SignWith::User => vec![gdk_json::SignWith::User],
-            SignWith::GreenBackend => vec![gdk_json::SignWith::GreenBackend],
-            SignWith::All => vec![gdk_json::SignWith::User, gdk_json::SignWith::GreenBackend],
-        }
-    }
-}
-
 #[derive(Clone)]
-pub struct HwData {
+pub struct JadeData {
     pub env: Env,
-    pub name: String,
     pub jade: Arc<jade_mng::ManagedJade>,
-    pub master_blinding_key: String,
-    pub xpubs: BTreeMap<Vec<u32>, bip32::Xpub>,
 }
 
 #[derive(Clone)]
 pub enum WalletInfo {
-    Mnemonic(String),
-    HwData(HwData),
-    WatchOnly(WatchOnly),
+    Mnemonic(bip39::Mnemonic),
+    Jade(JadeData, WatchOnly),
+}
+
+impl WalletInfo {
+    pub fn master_blinding_key(&self) -> MasterBlindingKey {
+        match &self {
+            WalletInfo::Mnemonic(mnemonic) => {
+                let seed = mnemonic.to_seed("");
+                MasterBlindingKey::from_seed(&seed)
+            }
+            WalletInfo::Jade(_jade_data, watch_only) => watch_only.master_blinding_key.into_inner(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -68,32 +52,27 @@ impl Default for ElectrumServer {
 
 #[derive(Clone)]
 pub struct LoginInfo {
-    pub account_id: worker::AccountId,
+    pub account: proto::Account,
     pub env: Env,
-    pub cache_dir: String,
+    pub cache_dir: PathBuf,
     pub wallet_info: WalletInfo,
-    pub single_sig: bool,
     pub electrum_server: ElectrumServer,
     pub proxy: Option<String>,
 }
 
-pub type NotifCallback = Box<dyn Fn(worker::AccountId, gdk_json::Notification)>;
+pub enum WalletNotif {
+    Transaction(elements::Txid),
+    Block,
+    AccountSynced,
+    AmpConnected { subaccount: u32, gaid: String },
+    AmpDisconnected,
+    AmpFailed { error_msg: String },
+    AmpBalanceUpdated,
+}
 
-impl HwData {
-    pub fn get_hw_device(hw_data: Option<&Self>) -> gdk_json::HwDevice {
-        gdk_json::HwDevice {
-            device: hw_data.map(|hw_data| gdk_json::HwDeviceDetails {
-                name: hw_data.name.clone(),
-                supports_ae_protocol: 1,
-                supports_arbitrary_scripts: true,
-                supports_host_unblinding: true,
-                supports_external_blinding: true,
-                supports_liquid: 1,
-                supports_low_r: true,
-            }),
-        }
-    }
+pub type NotifCallback = Box<dyn Fn(proto::Account, WalletNotif) + Send + Sync>;
 
+impl JadeData {
     pub fn resolve_xpub(
         &self,
         network: JadeNetwork,
@@ -103,107 +82,64 @@ impl HwData {
         let xpub = bip32::Xpub::from_str(&xpub)?;
         Ok(xpub)
     }
+
+    pub fn master_blinding_key(&self) -> Result<MasterBlindingKey, anyhow::Error> {
+        let master_blinding_key = self.jade.master_blinding_key()?;
+        let master_blinding_key = <[u8; 32]>::try_from(master_blinding_key).expect("must not fail");
+        Ok(MasterBlindingKey::from(master_blinding_key))
+    }
 }
 
 impl WalletInfo {
-    pub fn mnemonic(&self) -> Option<&String> {
+    pub fn mnemonic(&self) -> Option<&bip39::Mnemonic> {
         match self {
             WalletInfo::Mnemonic(mnemonic) => Some(mnemonic),
-            WalletInfo::HwData(_) | WalletInfo::WatchOnly(_) => None,
+            WalletInfo::Jade(_, _) => None,
         }
     }
 
-    pub fn hw_data(&self) -> Option<&HwData> {
+    pub fn hw_data(&self) -> Option<&JadeData> {
         match self {
-            WalletInfo::HwData(hw_data) => Some(hw_data),
-            WalletInfo::Mnemonic(_) | WalletInfo::WatchOnly(_) => None,
-        }
-    }
-
-    pub fn watch_only(&self) -> Option<&WatchOnly> {
-        match self {
-            WalletInfo::WatchOnly(watch_only) => Some(watch_only),
-            WalletInfo::Mnemonic(_) | WalletInfo::HwData(_) => None,
+            WalletInfo::Jade(hw_data, _) => Some(hw_data),
+            WalletInfo::Mnemonic(_) => None,
         }
     }
 }
 
-pub type Balances = BTreeMap<AssetId, i64>;
+#[derive(Copy, Clone)]
+pub enum GetTransactionsOpt {
+    PendingOnly,
+    All,
+}
 
-pub trait GdkSes {
-    fn login(&mut self) -> Result<(), anyhow::Error>;
+#[derive(Clone)]
+pub struct TransactionList {
+    pub tip_height: u32,
+    pub list: Vec<models::Transaction>,
+}
 
-    fn register(&mut self) -> Result<(), anyhow::Error>;
+pub struct AddressList {
+    pub list: Vec<models::AddressInfo>,
+}
 
-    fn set_watch_only(&mut self, username: &str, password: &str) -> Result<(), anyhow::Error>;
-
-    fn connect(&mut self);
-
-    fn disconnect(&mut self);
-
+pub trait GdkSes: Send + Sync {
     fn login_info(&self) -> &LoginInfo;
 
-    fn get_gaid(&self) -> Result<String, anyhow::Error>;
+    fn get_transactions(&self, opts: GetTransactionsOpt) -> Result<TransactionList, anyhow::Error>;
 
-    fn get_balances(&self) -> Result<Balances, anyhow::Error>;
+    fn get_address(&self, is_internal: bool) -> Result<models::AddressInfo, anyhow::Error>;
 
-    fn get_transactions_impl(&self) -> Result<Vec<gdk_json::Transaction>, anyhow::Error>;
+    fn broadcast_tx(&self, tx: &str) -> Result<(), anyhow::Error>;
 
-    fn get_transactions(&self) -> Result<Vec<models::Transaction>, anyhow::Error> {
-        self.get_transactions_impl().map(|transactions| {
-            transactions
-                .iter()
-                .map(crate::gdk_ses_impl::convert_tx)
-                .collect()
-        })
+    fn get_utxos(&self) -> Result<models::UtxoList, anyhow::Error>;
+
+    fn get_previous_addresses(&self) -> Result<AddressList, anyhow::Error>;
+
+    fn get_receive_address(&self) -> Result<models::AddressInfo, anyhow::Error> {
+        self.get_address(false)
     }
 
-    fn get_receive_address(&self) -> Result<AddressInfo, anyhow::Error>;
-
-    fn get_change_address(&self) -> Result<AddressInfo, anyhow::Error>;
-
-    fn create_tx(
-        &mut self,
-        cache: &mut CreatedTxCache,
-        tx: proto::CreateTx,
-    ) -> Result<proto::CreatedTx, anyhow::Error>;
-
-    fn send_tx(
-        &mut self,
-        cache: &mut CreatedTxCache,
-        id: &str,
-        assets: &BTreeMap<AssetId, Asset>,
-    ) -> Result<elements::Txid, anyhow::Error>;
-
-    fn broadcast_tx(&mut self, tx: &str) -> Result<(), anyhow::Error>;
-
-    fn get_utxos(&self) -> Result<gdk_json::UnspentOutputs, anyhow::Error>;
-
-    fn get_blinded_values(&self, txid: &elements::Txid) -> Result<Vec<String>, anyhow::Error>;
-
-    fn get_previous_addresses(
-        &mut self,
-        last_pointer: Option<u32>,
-        is_internal: bool,
-    ) -> Result<gdk_json::PreviousAddresses, anyhow::Error>;
-
-    fn verify_and_sign_pset(
-        &mut self,
-        amounts: &crate::swaps::Amounts,
-        pset: &str,
-        nonces: &[String],
-        assets: &BTreeMap<AssetId, Asset>,
-    ) -> Result<String, anyhow::Error>;
-
-    fn sign_pset(
-        &mut self,
-        utxos: &gdk_json::UnspentOutputs,
-        pset: &str,
-        nonces: &[String],
-        assets: &BTreeMap<AssetId, Asset>,
-        tx_type: jade_mng::TxType,
-        sign_with: SignWith,
-    ) -> Result<String, anyhow::Error>;
-
-    fn set_memo(&mut self, txid: &str, memo: &str) -> Result<(), anyhow::Error>;
+    fn get_change_address(&self) -> Result<models::AddressInfo, anyhow::Error> {
+        self.get_address(true)
+    }
 }

@@ -14,7 +14,7 @@ pub enum TransportType {
     Tcp,
 }
 
-pub trait Transport {
+pub trait Transport: Send + Sync {
     fn transport_type(&self) -> TransportType;
     fn ports(&self) -> Result<Vec<Port>, anyhow::Error>;
     fn belongs(&self, jade_id: &JadeId) -> bool;

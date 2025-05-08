@@ -7,6 +7,10 @@ fn generate_random_vector(n: usize) -> Vec<u8> {
     (0..n).map(|_| rng.gen::<u8>()).collect()
 }
 
+fn generate_random_key() -> [u8; 32] {
+    rand::thread_rng().gen()
+}
+
 fn test_cipher(mut cipher: impl Cipher) {
     let mut rng = rand::thread_rng();
 
@@ -32,9 +36,7 @@ fn test_cipher(mut cipher: impl Cipher) {
 
 #[test]
 fn test_aes() {
-    let key_len = rand::thread_rng().gen_range(1..100);
-    let key = generate_random_vector(key_len);
-
+    let key = generate_random_key();
     let cipher = AesCipher::new(&key);
     test_cipher(cipher);
 }

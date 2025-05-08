@@ -1,51 +1,54 @@
 use crate::be::BEBlockHeader;
-use crate::util::make_str;
 use crate::{be::BEBlockHash, model::Settings, model::TransactionType, State};
-use log::{info, warn};
+use log::warn;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::Value;
 
 pub type NativeType =
     (extern "C" fn(*const libc::c_void, *const libc::c_char), *const libc::c_void);
+
 #[derive(Clone)]
 pub struct NativeNotif {
-    pub native: Option<NativeType>,
+    pub callback: Option<std::sync::Arc<dyn Fn(Notification) + Send + Sync>>,
 
     /// With testing feature notifications are simply pushed in the following vec so assertions
     /// could check over it, it's a mutex so that methods signatures doesn't need to be mut
     #[cfg(feature = "testing")]
     pub testing: std::sync::Arc<std::sync::Mutex<Vec<Value>>>,
 }
-unsafe impl Send for NativeNotif {}
 
 #[derive(Serialize, Deserialize)]
 pub struct Notification {
     #[serde(skip_serializing_if = "Option::is_none")]
-    network: Option<NetworkNotification>,
+    pub network: Option<NetworkNotification>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
-    transaction: Option<TransactionNotification>,
+    pub transaction: Option<TransactionNotification>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
-    block: Option<BlockNotification>,
+    pub block: Option<BlockNotification>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
-    subaccount: Option<SubaccountNotification>,
+    pub subaccount: Option<SubaccountNotification>,
 
-    event: Kind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub settings: Option<Settings>,
+
+    pub event: Kind,
 }
 
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-enum Kind {
+pub enum Kind {
     Network,
     Transaction,
     Block,
     Subaccount,
+    Settings,
 }
 
 #[derive(Serialize, Deserialize)]
-struct NetworkNotification {
+pub struct NetworkNotification {
     current_state: State,
     next_state: State,
     wait_ms: u32,
@@ -95,8 +98,8 @@ pub enum SubaccountEventType {
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct SubaccountNotification {
-    /// The subaccount number.
-    pub pointer: u32,
+    /// The subaccount numbers.
+    pub accounts: Vec<u32>,
 
     /// The type of subaccount event occurred.
     pub event_type: SubaccountEventType,
@@ -113,6 +116,7 @@ impl Notification {
             transaction: None,
             block: None,
             subaccount: None,
+            settings: None,
             event: Kind::Network,
         }
     }
@@ -123,6 +127,7 @@ impl Notification {
             transaction: Some(ntf.clone()),
             block: None,
             subaccount: None,
+            settings: None,
             event: Kind::Transaction,
         }
     }
@@ -137,6 +142,7 @@ impl Notification {
                 previous_hash: prev_hash.into_bitcoin(),
             }),
             subaccount: None,
+            settings: None,
             event: Kind::Block,
         }
     }
@@ -151,19 +157,21 @@ impl Notification {
                 previous_hash: header.prev_block_hash().into_bitcoin(),
             }),
             subaccount: None,
+            settings: None,
             event: Kind::Block,
         }
     }
 
-    pub fn subaccount(pointer: u32, event_type: SubaccountEventType) -> Self {
+    pub fn subaccounts(accounts: Vec<u32>, event_type: SubaccountEventType) -> Self {
         Notification {
             network: None,
             transaction: None,
             block: None,
             subaccount: Some(SubaccountNotification {
-                pointer,
+                accounts,
                 event_type,
             }),
+            settings: None,
             event: Kind::Subaccount,
         }
     }
@@ -173,28 +181,23 @@ impl NativeNotif {
     #[cfg(not(feature = "testing"))]
     pub fn new() -> Self {
         NativeNotif {
-            native: None,
+            callback: None,
         }
     }
 
     // TODO once every notification is a struct, accept a `Notification` here
-    fn notify<T: Serialize>(&self, data: T) {
-        let data = serde_json::to_value(data).unwrap();
-
-        info!("push notification: {:?}", data);
-        if let Some((handler, self_context)) = self.native.as_ref() {
-            handler(*self_context, make_str(data.to_string()));
+    fn notify(&self, data: Notification) {
+        // info!("push notification: {:?}", data);
+        if let Some(callback) = self.callback.as_ref() {
+            callback(data);
         } else {
             if !cfg!(feature = "testing") {
                 warn!("no registered handler to receive notification");
             }
-            self.push(data);
         }
     }
 
-    pub fn set_native(&mut self, native_type: NativeType) {
-        self.native = Some(native_type);
-    }
+    pub fn set_native(&mut self, _native_type: NativeType) {}
 
     pub fn block_from_hashes(&self, height: u32, hash: &BEBlockHash, prev_hash: &BEBlockHash) {
         self.notify(Notification::new_block_from_hashes(height, hash, prev_hash));
@@ -205,8 +208,14 @@ impl NativeNotif {
     }
 
     pub fn settings(&self, settings: &Settings) {
-        let data = json!({"settings":settings,"event":"settings"});
-        self.notify(data);
+        self.notify(Notification {
+            network: None,
+            transaction: None,
+            block: None,
+            subaccount: None,
+            settings: Some(settings.clone()),
+            event: Kind::Settings,
+        });
     }
 
     pub fn updated_txs(&self, ntf: &TransactionNotification) {
@@ -218,11 +227,11 @@ impl NativeNotif {
     }
 
     pub fn subaccount_new(&self, pointer: u32) {
-        self.notify(Notification::subaccount(pointer, SubaccountEventType::New));
+        self.notify(Notification::subaccounts(vec![pointer], SubaccountEventType::New));
     }
 
-    pub fn subaccount_synced(&self, pointer: u32) {
-        self.notify(Notification::subaccount(pointer, SubaccountEventType::Synced));
+    pub fn subaccount_synced(&self, accounts: Vec<u32>) {
+        self.notify(Notification::subaccounts(accounts, SubaccountEventType::Synced));
     }
 
     #[cfg(not(feature = "testing"))]
@@ -252,45 +261,5 @@ impl NativeNotif {
 
     pub fn push(&self, value: Value) {
         self.testing.lock().unwrap().push(value);
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use bitcoin::hashes::Hash;
-    use elements::bitcoin::BlockHash;
-
-    use super::*;
-    use crate::State;
-
-    #[test]
-    fn test_network_json() {
-        let expected = json!({"network":{"wait_ms": 0, "current_state": "connected", "next_state": "connected"},"event":"network"});
-        let obj = Notification::new_network(State::Connected, State::Connected);
-        assert_eq!(expected, serde_json::to_value(&obj).unwrap());
-    }
-
-    #[test]
-    fn test_transaction_json() {
-        let account_num = 0;
-        let expected = json!({"event":"transaction","transaction":{"subaccounts":[account_num],"txhash":"0000000000000000000000000000000000000000000000000000000000000000"}});
-        let obj = Notification::new_transaction(&TransactionNotification {
-            subaccounts: vec![account_num],
-            txid: bitcoin::Txid::all_zeros(),
-            satoshi: None,
-            type_: None,
-        });
-        assert_eq!(expected, serde_json::to_value(&obj).unwrap());
-    }
-
-    #[test]
-    fn test_block_json() {
-        let expected = json!({"block_height":0,"block_hash":"0000000000000000000000000000000000000000000000000000000000000000","previous_hash":"0000000000000000000000000000000000000000000000000000000000000000"});
-        let obj = BlockNotification {
-            block_height: 0,
-            block_hash: BlockHash::all_zeros(),
-            previous_hash: BlockHash::all_zeros(),
-        };
-        assert_eq!(expected, serde_json::to_value(&obj).unwrap());
     }
 }

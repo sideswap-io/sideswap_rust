@@ -1,4 +1,3 @@
-use std::collections::{HashMap, HashSet};
 use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 use std::{
@@ -6,40 +5,50 @@ use std::{
     str::FromStr,
 };
 
+use crate::ffi::proto::Account;
 use crate::ffi::{self, proto, GIT_COMMIT_HASH};
-use crate::gdk_json::{self, AddressInfo};
-use crate::gdk_ses::{self, ElectrumServer, NotifCallback, WalletInfo};
-use crate::settings;
-use crate::{gdk_ses_impl, gdk_ses_stub};
-use crate::{gdk_ses_jade, models};
+use crate::gdk_ses::{
+    self, ElectrumServer, GdkSes, JadeData, NotifCallback, TransactionList, WalletInfo, WalletNotif,
+};
+use crate::gdk_ses_amp::{derive_amp_wo_login, GdkSesAmp};
+use crate::gdk_ses_rust::{self};
+use crate::models::AddressType;
+use crate::settings::WatchOnly;
+use crate::utils::{
+    self, convert_tx, derive_amp_address, derive_native_address, derive_nested_address,
+    get_peg_item, get_tx_size, redact_from_msg, redact_to_msg, TxSize,
+};
+use crate::{gdk_ses_amp, models, settings};
 
 use anyhow::{anyhow, ensure};
 use bitcoin::bip32;
-use bitcoin::hashes::Hash;
-use bitcoin::hex::FromHex;
 use bitcoin::secp256k1::global::SECP256K1;
 use elements::bitcoin::bip32::ChildNumber;
-use elements::AssetId;
+use elements::pset::PartiallySignedTransaction;
+use elements::{AssetId, TxOutSecrets};
 use elements_miniscript::slip77::MasterBlindingKey;
 use log::{debug, error, info, warn};
-use market_worker::REGISTER_PATH;
-use rand::Rng;
+use market_worker::{get_wallet_account, REGISTER_PATH};
 use serde::{Deserialize, Serialize};
+use sideswap_amp::sw_signer::SwSigner;
 use sideswap_api::mkt::AssetPair;
 use sideswap_common::env::Env;
 use sideswap_common::event_proofs::EventProofs;
 use sideswap_common::network::Network;
-use sideswap_common::retry_delay::RetryDelay;
-use sideswap_common::send_tx::coin_select::InOut;
+use sideswap_common::pset_blind::get_blinding_nonces;
+use sideswap_common::recipient::Recipient;
+use sideswap_common::send_tx::pset::{
+    construct_pset, ConstructPsetArgs, ConstructedPset, PsetInput, PsetOutput,
+};
 use sideswap_common::types::{self, peg_out_amount, Amount};
+use sideswap_common::utxo_select::{self, WalletType};
 use sideswap_common::ws::next_request_id;
-use sideswap_common::{abort, b64, pin, send_tx, verify};
+use sideswap_common::{abort, b64, pin, verify};
 use sideswap_jade::jade_mng::{self, JadeStatus, JadeStatusCallback, ManagedJade};
-use sideswap_types::asset_precision::AssetPrecision;
 use sideswap_types::fee_rate::FeeRateSats;
 use tokio::sync::mpsc::UnboundedSender;
 
-use sideswap_api::{self as api, fcm_models, Hash32, MarketType, OrderId};
+use sideswap_api::{self as api, fcm_models, MarketType, OrderId};
 use sideswap_common::ws::manual as ws;
 
 pub struct StartParams {
@@ -117,34 +126,21 @@ const SERVER_REQUEST_TIMEOUT_SHORT: std::time::Duration = std::time::Duration::f
 const SERVER_REQUEST_TIMEOUT_LONG: std::time::Duration = std::time::Duration::from_secs(40);
 const SERVER_REQUEST_POLL_PERIOD: std::time::Duration = std::time::Duration::from_secs(1);
 
-// AMP session stops somewhere between 50 and 125 minutes, check it every 40 minutes
-const AMP_CONNECTION_CHECK_PERIOD: std::time::Duration = std::time::Duration::from_secs(2400);
-
 pub const TX_CONF_COUNT_LIQUID: u32 = 2;
 
 const DEFAULT_ICON: &[u8] = include_bytes!("../images/icon_blank.png");
-
-pub type AccountId = i32;
-
-pub const ACCOUNT_ID_REG: AccountId = 0;
-pub const ACCOUNT_ID_AMP: AccountId = 1;
 
 struct ActivePeg {
     order_id: api::OrderId,
 }
 
-pub struct ServerResp(String, Result<api::Response, api::Error>);
+struct ServerResp(String, Result<api::Response, api::Error>);
 
-pub type FromCallback = Arc<dyn Fn(proto::from::Msg) -> bool>;
+type FromCallback = Arc<dyn Fn(proto::from::Msg) -> bool + Send + Sync>;
 
 enum LoginData {
-    Mnemonic {
-        mnemonic: bip39::Mnemonic,
-    },
-    Jade {
-        name: String,
-        jade: Arc<ManagedJade>,
-    },
+    Mnemonic { mnemonic: bip39::Mnemonic },
+    Jade { jade: Arc<ManagedJade> },
 }
 
 #[derive(Clone)]
@@ -155,23 +151,18 @@ struct UiData {
 
 #[derive(Default)]
 struct UsedAddresses {
-    single_sig: [u32; 2],
-    multi_sig: u32,
+    nested: [u32; 2],
+    native: [u32; 2],
+    amp: u32,
 }
 
 #[derive(Clone)]
-pub struct XPubInfo {
-    single_sig_account: bip32::Xpub,
-    multi_sig_service_xpub: bip32::Xpub,
-    multi_sig_user_xpub: bip32::Xpub,
+struct XPubInfo {
     master_blinding_key: MasterBlindingKey,
-}
-
-#[derive(Clone)]
-pub struct Wallet {
-    login_info: gdk_ses::LoginInfo,
-    command_sender: mpsc::Sender<wallet::Command>,
-    xpubs: XPubInfo,
+    nested_account: bip32::Xpub,
+    native_account: bip32::Xpub,
+    amp_service_xpub: bip32::Xpub,
+    amp_user_xpub: bip32::Xpub,
 }
 
 type AsyncRequests =
@@ -179,27 +170,37 @@ type AsyncRequests =
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 enum TimerEvent {
-    AmpConnectionCheck,
     SyncUtxos,
     SendAck,
     CleanQuotes,
-    ReconnectRegular,
+}
+
+struct CreatedTx {
+    pset: PartiallySignedTransaction,
+    selected_utxos: Vec<models::Utxo>,
+    change_addresses: Vec<models::AddressInfo>,
+    blinding_nonces: Vec<String>,
+    assets: BTreeSet<AssetId>,
 }
 
 pub struct WalletData {
-    reconnect_delay: RetryDelay,
-    multi_sig_address_cache: BTreeMap<u32, AddressInfo>,
+    xpubs: XPubInfo,
+    wallet_reg: Arc<dyn GdkSes>,
+    wallet_amp: Arc<GdkSesAmp>,
     address_registration_active: bool,
-}
+    /// An updated UTXO list (updates whenever the wallet balance changes)
+    wallet_utxos: BTreeMap<Account, models::UtxoList>,
+    created_txs: BTreeMap<String, CreatedTx>,
+    sent_txhash: Option<elements::Txid>,
+    used_addresses: UsedAddresses,
+    pending_txs: BTreeMap<Account, TransactionList>,
+    gaid: Option<String>,
+    amp_subaccount: Option<u32>,
 
-impl WalletData {
-    fn new() -> WalletData {
-        WalletData {
-            reconnect_delay: RetryDelay::default(),
-            multi_sig_address_cache: BTreeMap::new(),
-            address_registration_active: false,
-        }
-    }
+    reg_sync_complete: bool,
+    wallet_loaded_sent: bool,
+    active_extern_peg: Option<ActivePeg>,
+    peg_out_server_amounts: Option<LastPegOutAmount>,
 }
 
 #[derive(Clone)]
@@ -213,23 +214,15 @@ struct LastPegOutAmount {
 
 #[derive(PartialEq, Eq)]
 struct WalletAddress {
+    address_type: AddressType,
     address: elements::Address,
     pointer: u32,
     is_internal: bool,
 }
 
-impl From<&AddressInfo> for WalletAddress {
-    fn from(value: &AddressInfo) -> Self {
-        WalletAddress {
-            address: value.address.clone(),
-            pointer: value.pointer,
-            is_internal: value.is_internal.unwrap_or_default(),
-        }
-    }
-}
-
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
 struct AddressPointer {
+    address_type: AddressType,
     is_internal: bool,
     pointer: u32,
 }
@@ -237,6 +230,7 @@ struct AddressPointer {
 impl From<&WalletAddress> for AddressPointer {
     fn from(value: &WalletAddress) -> Self {
         AddressPointer {
+            address_type: value.address_type,
             is_internal: value.is_internal,
             pointer: value.pointer,
         }
@@ -244,8 +238,9 @@ impl From<&WalletAddress> for AddressPointer {
 }
 
 pub struct Data {
-    app_active: bool,
+    policy_asset: AssetId,
     active_page: proto::ActivePage,
+    app_active: bool,
     amp_active: bool,
     amp_connected: bool,
     ws_connected: bool,
@@ -259,314 +254,29 @@ pub struct Data {
     ws_sender: UnboundedSender<ws::WrappedRequest>,
     ws_hint: UnboundedSender<()>,
     resp_receiver: mpsc::Receiver<ServerResp>,
+    async_requests: AsyncRequests,
     params: StartParams,
     timers: BTreeMap<Instant, TimerEvent>,
 
-    sync_complete: bool,
-    wallet_loaded_sent: bool,
-    confirmed_txids: BTreeMap<AccountId, HashSet<elements::Txid>>,
-    unconfirmed_txids: BTreeMap<AccountId, HashSet<elements::Txid>>,
-    wallets: BTreeMap<AccountId, Wallet>,
-    wallet_data: WalletData,
-
-    active_extern_peg: Option<ActivePeg>,
-    sent_txhash: Option<elements::Txid>,
-    peg_out_server_amounts: Option<LastPegOutAmount>,
-    active_submits: BTreeMap<OrderId, api::LinkResponse>,
-    active_sign: Option<api::SignNotification>,
+    wallet_data: Option<WalletData>,
 
     settings: settings::Settings,
     push_token: Option<String>,
-    policy_asset: AssetId,
-    last_blocks: BTreeMap<AccountId, gdk_json::NotificationBlock>,
-    used_addresses: UsedAddresses,
 
     jade_mng: jade_mng::JadeMng,
 
-    async_requests: AsyncRequests,
-
     network_settings: proto::to::NetworkSettings,
     proxy_settings: proto::to::ProxySettings,
-
     wallet_event_callback: wallet::EventCallback,
 }
 
 pub enum Message {
     Ui(ffi::ToMsg),
     Ws(ws::WrappedResponse),
-    WalletEvent(AccountId, wallet::Event),
-    WalletNotif(AccountId, gdk_json::Notification),
+    WalletEvent(Account, wallet::Event),
+    WalletNotif(Account, WalletNotif),
     BackgroundMessage(String, mpsc::Sender<()>),
     Quit,
-}
-
-const XPUB_PATH_ROOT: [u32; 0] = [];
-const XPUB_PATH_PASS: [u32; 1] = [0xF0617373];
-
-fn redact_str(v: &mut String) {
-    *v = format!("<{} bytes>", v.len());
-}
-
-fn redact_to_msg(mut msg: proto::to::Msg) -> proto::to::Msg {
-    match &mut msg {
-        proto::to::Msg::Login(v) => {
-            if let Some(proto::to::login::Wallet::Mnemonic(mnemonic)) = v.wallet.as_mut() {
-                redact_str(mnemonic);
-            }
-        }
-        proto::to::Msg::EncryptPin(v) => {
-            redact_str(&mut v.pin);
-            redact_str(&mut v.mnemonic);
-        }
-        proto::to::Msg::DecryptPin(v) => {
-            redact_str(&mut v.pin);
-            redact_str(&mut v.encrypted_data);
-        }
-        _ => {}
-    }
-    msg
-}
-
-fn redact_from_msg(mut msg: proto::from::Msg) -> proto::from::Msg {
-    match &mut msg {
-        proto::from::Msg::DecryptPin(v) => {
-            if let Some(proto::from::decrypt_pin::Result::Mnemonic(v)) = v.result.as_mut() {
-                redact_str(v);
-            }
-        }
-        proto::from::Msg::EncryptPin(v) => {
-            if let Some(proto::from::encrypt_pin::Result::Data(v)) = v.result.as_mut() {
-                redact_str(&mut v.encrypted_data);
-            }
-        }
-        proto::from::Msg::NewAsset(v) => {
-            redact_str(&mut v.icon);
-        }
-        _ => {}
-    }
-    msg
-}
-
-pub fn get_account(id: AccountId) -> proto::Account {
-    proto::Account { id }
-}
-
-fn convert_chart_point(point: api::ChartPoint) -> proto::ChartPoint {
-    proto::ChartPoint {
-        time: point.time,
-        open: point.open,
-        close: point.close,
-        high: point.high,
-        low: point.low,
-        volume: point.volume,
-    }
-}
-
-fn confirmed_tx(tx_block: u32, top_block: u32) -> bool {
-    tx_block != 0
-        && top_block != 0
-        && tx_block <= top_block
-        && top_block + 1 - tx_block >= TX_CONF_COUNT_LIQUID
-}
-
-fn get_tx_item_confs(tx_block: u32, top_block: u32) -> Option<proto::Confs> {
-    // Because of race condition reported transaction mined height might be more than last block height
-    let tx_block = if tx_block > top_block { 0 } else { tx_block };
-    if !confirmed_tx(tx_block, top_block) {
-        let count = if tx_block == 0 {
-            0
-        } else {
-            top_block + 1 - tx_block
-        };
-        Some(proto::Confs {
-            count,
-            total: TX_CONF_COUNT_LIQUID,
-        })
-    } else {
-        None
-    }
-}
-
-fn tx_txitem_id(account_id: AccountId, txid: &elements::Txid) -> String {
-    format!("{}/{}", account_id, txid)
-}
-
-fn peg_txitem_id(send_txid: &Hash32, send_vout: i32) -> String {
-    format!("{}/{}", send_txid, send_vout)
-}
-
-fn get_peg_item(peg: &api::PegStatus, tx: &api::TxStatus) -> proto::TransItem {
-    let peg_details = proto::Peg {
-        is_peg_in: peg.peg_in,
-        amount_send: tx.amount,
-        amount_recv: tx.payout.unwrap_or_default(),
-        addr_send: peg.addr.clone(),
-        addr_recv: peg.addr_recv.clone(),
-        txid_send: tx.tx_hash.to_string(),
-        txid_recv: tx.payout_txid.map(|hash| hash.to_string()),
-    };
-    let confs = tx.detected_confs.and_then(|count| {
-        tx.total_confs.map(|total| proto::Confs {
-            count: count as u32,
-            total: total as u32,
-        })
-    });
-    let id = peg_txitem_id(&tx.tx_hash, tx.vout);
-
-    proto::TransItem {
-        id,
-        created_at: tx.created_at,
-        confs,
-        account: get_account(ACCOUNT_ID_REG), // TODO: This is not accurate for peg-outs from the AMP wallet
-        item: Some(proto::trans_item::Item::Peg(peg_details)),
-    }
-}
-
-fn derive_single_sig_address(
-    account_xpub: &bip32::Xpub,
-    network: Network,
-    is_internal: bool,
-    pointer: u32,
-    master_blinding_key: Option<&MasterBlindingKey>,
-) -> elements::Address {
-    let pub_key = account_xpub
-        .derive_pub(
-            SECP256K1,
-            &[
-                ChildNumber::from_normal_idx(is_internal as u32).unwrap(),
-                ChildNumber::from_normal_idx(pointer).unwrap(),
-            ],
-        )
-        .unwrap()
-        .to_pub();
-    let pub_key = elements::bitcoin::PublicKey::new(pub_key.0);
-    let address = elements::Address::p2shwpkh(&pub_key, None, network.d().elements_params);
-
-    match master_blinding_key {
-        Some(master_blinding_key) => {
-            let blinding_pubkey =
-                master_blinding_key.blinding_key(SECP256K1, &address.script_pubkey());
-            address.to_confidential(blinding_pubkey)
-        }
-        None => address,
-    }
-}
-
-fn derive_multi_sig_address(
-    multi_sig_service_xpub: &bip32::Xpub,
-    multi_sig_user_xpub: &bip32::Xpub,
-    network: Network,
-    pointer: u32,
-    master_blinding_key: Option<&MasterBlindingKey>,
-) -> elements::Address {
-    let pub_key_green = multi_sig_service_xpub
-        .derive_pub(SECP256K1, &[ChildNumber::from_normal_idx(pointer).unwrap()])
-        .unwrap()
-        .to_pub();
-    let pub_key_user = multi_sig_user_xpub
-        .derive_pub(SECP256K1, &[ChildNumber::from_normal_idx(pointer).unwrap()])
-        .unwrap()
-        .to_pub();
-
-    let script = elements::script::Builder::new()
-        .push_opcode(elements::opcodes::all::OP_PUSHNUM_2)
-        .push_slice(&pub_key_green.to_bytes())
-        .push_slice(&pub_key_user.to_bytes())
-        .push_opcode(elements::opcodes::all::OP_PUSHNUM_2)
-        .push_opcode(elements::opcodes::all::OP_CHECKMULTISIG)
-        .into_script();
-
-    let script = elements::script::Builder::new()
-        .push_int(0)
-        .push_slice(&elements::WScriptHash::hash(script.as_bytes())[..])
-        .into_script();
-
-    let script_hash = elements::ScriptHash::hash(script.as_bytes());
-
-    let payload = elements::address::Payload::ScriptHash(script_hash);
-
-    let address = elements::Address {
-        params: network.d().elements_params,
-        payload,
-        blinding_pubkey: None,
-    };
-
-    match master_blinding_key {
-        Some(master_blinding_key) => {
-            let blinding_pubkey =
-                master_blinding_key.blinding_key(SECP256K1, &address.script_pubkey());
-            address.to_confidential(blinding_pubkey)
-        }
-        None => address,
-    }
-}
-
-fn load_all_addresses(
-    wallet: &Wallet,
-    is_internal: bool,
-    last_known_pointer: Option<u32>,
-) -> Result<(u32, Vec<AddressInfo>), anyhow::Error> {
-    let mut result = Vec::new();
-    let mut result_pointer = 0;
-    let mut last_pointer = None;
-    loop {
-        debug!(
-            "load prev addresses, account_id: {}, is_internal: {}, last_pointer: {:?}",
-            wallet.login_info.account_id, is_internal, last_pointer,
-        );
-
-        let list = wallet::call_wallet(wallet, move |data| {
-            data.ses.get_previous_addresses(last_pointer, is_internal)
-        })?;
-
-        let min_pointer = list
-            .list
-            .iter()
-            .map(|addr| addr.pointer)
-            .min()
-            .unwrap_or_default();
-        let max_pointer = list
-            .list
-            .iter()
-            .map(|addr| addr.pointer)
-            .max()
-            .unwrap_or_default();
-        debug!(
-            "loaded prev addresses, last_pointer: {:?}, loaded: {}-{}",
-            list.last_pointer, min_pointer, max_pointer
-        );
-        result_pointer = u32::max(result_pointer, max_pointer);
-        let mut new_list = list
-            .list
-            .into_iter()
-            .filter(|addr| {
-                last_known_pointer.is_none() || addr.pointer > last_known_pointer.unwrap()
-            })
-            .collect::<Vec<_>>();
-        let no_new_addresses = new_list.is_empty();
-        result.append(&mut new_list);
-        if no_new_addresses || list.last_pointer.is_none() {
-            debug!(
-                "total loaded: {}, last_pointer: {}",
-                result.len(),
-                result_pointer
-            );
-            return Ok((result_pointer, result));
-        }
-        last_pointer = list.last_pointer;
-    }
-}
-
-fn convert_to_swap_utxo(utxo: gdk_json::UnspentOutput) -> sideswap_api::Utxo {
-    sideswap_api::Utxo {
-        txid: utxo.txhash,
-        vout: utxo.vout,
-        asset: utxo.asset_id,
-        asset_bf: utxo.assetblinder,
-        value: utxo.satoshi,
-        value_bf: utxo.amountblinder,
-        redeem_script: Some(gdk_ses_impl::get_redeem_script(&utxo)),
-    }
 }
 
 impl UiData {
@@ -592,7 +302,7 @@ struct AssetsCache {
 
 impl Data {
     fn logged_in(&self) -> bool {
-        !self.wallets.is_empty()
+        self.wallet_data.is_some()
     }
 
     fn master_xpub(&mut self) -> bip32::Xpub {
@@ -616,177 +326,145 @@ impl Data {
         assets_registry::get_assets(self.env, self.master_xpub(), asset_ids)
     }
 
-    fn send_new_transactions(
-        &mut self,
-        mut items: Vec<models::Transaction>,
-        account_id: AccountId,
-        top_block: u32,
-    ) {
-        let confirmed_txids = self.confirmed_txids.entry(account_id).or_default();
-        let unconfirmed_txids = self.unconfirmed_txids.entry(account_id).or_default();
+    fn merge_txs(txs: BTreeMap<Account, TransactionList>) -> TransactionList {
+        let mut merged_txs = BTreeMap::<elements::Txid, models::Transaction>::new();
 
-        items.retain(|tx| !confirmed_txids.contains(&tx.txid));
-
-        let updated = items
-            .into_iter()
-            .map(|item| {
-                let balances = item
-                    .balances
-                    .iter()
-                    .filter(|balance| balance.value != 0)
-                    .map(|balance| proto::Balance {
-                        asset_id: balance.asset.to_string(),
-                        amount: balance.value,
-                    })
-                    .collect();
-                let confs = get_tx_item_confs(item.block_height, top_block);
-                let id = tx_txitem_id(account_id, &item.txid);
-                let balances_all = item
-                    .balances_all
-                    .iter()
-                    .map(|balance| proto::Balance {
-                        asset_id: balance.asset.to_string(),
-                        amount: balance.value,
-                    })
-                    .collect();
-                let tx_details = proto::Tx {
-                    balances,
-                    memo: item.memo.clone(),
-                    network_fee: item.network_fee as i64,
-                    txid: item.txid.to_string(),
-                    vsize: item.vsize as i64,
-                    balances_all,
-                };
-                (
-                    item.txid,
-                    proto::TransItem {
-                        id,
-                        created_at: item.created_at,
-                        confs,
-                        account: get_account(account_id),
-                        item: Some(proto::trans_item::Item::Tx(tx_details)),
-                    },
-                )
-            })
-            .collect::<HashMap<_, _>>();
-
-        let removed = unconfirmed_txids
-            .iter()
-            .filter(|txid| !updated.contains_key(*txid))
-            .cloned()
-            .collect::<Vec<_>>();
-
-        let mut queue_msgs = Vec::new();
-
-        if let Some(txid) = self.sent_txhash.as_ref() {
-            let tx = updated.get(txid);
-            if let Some(tx) = tx {
-                let result = proto::from::send_result::Result::TxItem(tx.clone());
-                queue_msgs.push(proto::from::Msg::SendResult(proto::from::SendResult {
-                    result: Some(result),
-                }));
-                self.sent_txhash = None;
-                self.update_sync_interval();
-            }
-        }
-
-        let assets = updated
+        let tip_height = txs
             .values()
-            .flat_map(|item| match item.item.as_ref().unwrap() {
-                proto::trans_item::Item::Tx(tx) => Some(&tx.balances),
-                _ => None,
-            })
-            .flat_map(|balances| balances.iter())
-            .map(|balance| AssetId::from_str(&balance.asset_id).unwrap())
-            .collect::<BTreeSet<_>>();
+            .map(|resp| resp.tip_height)
+            .max()
+            .unwrap_or_default();
 
-        let new_asset_ids = assets
-            .iter()
-            .filter(|asset| self.assets.get(asset).is_none())
-            .cloned()
-            .collect::<BTreeSet<_>>();
+        for txs_list in txs.values() {
+            for tx in txs_list.list.iter() {
+                let merged_tx = merged_txs
+                    .entry(tx.txid)
+                    .or_insert_with(|| models::Transaction {
+                        txid: tx.txid,
+                        network_fee: tx.network_fee,
+                        vsize: tx.vsize,
+                        created_at: tx.created_at,
+                        block_height: tx.block_height,
+                        inputs: tx.inputs.clone(),
+                        outputs: tx.outputs.clone(),
+                    });
 
-        if !new_asset_ids.is_empty() {
-            let new_assets = self
-                .load_gdk_assets(new_asset_ids.iter())
-                .ok()
-                .unwrap_or_default();
-            for asset_id in new_asset_ids.iter() {
-                info!("try add new asset: {}", asset_id);
-                let asset = match new_assets.iter().find(|asset| asset.asset_id == *asset_id) {
-                    Some(asset) => asset.clone(),
-                    None => {
-                        warn!("can't find GDK asset {}", asset_id);
-                        api::Asset {
-                            asset_id: *asset_id,
-                            name: format!("{:0.8}...", &asset_id.to_string()),
-                            ticker: api::Ticker(format!("{:0.4}", &asset_id.to_string())),
-                            icon: None,
-                            precision: AssetPrecision::BITCOIN_PRECISION,
-                            icon_url: None,
-                            instant_swaps: Some(false),
-                            domain: None,
-                            domain_agent: None,
-                            domain_agent_link: None,
-                            always_show: None,
-                            issuance_prevout: None,
-                            issuer_pubkey: None,
-                            contract: None,
-                            market_type: None,
-                            server_fee: None,
-                            amp_asset_restrictions: None,
-                            payjoin: None,
-                        }
+                // Merge both transactions
+
+                for (merged, new) in merged_tx.inputs.iter_mut().zip(tx.inputs.iter()) {
+                    if let Some(unblinded) = new.unblinded {
+                        merged.unblinded = Some(unblinded);
                     }
-                };
-                self.register_asset(asset);
+                }
+
+                for (merged, new) in merged_tx.outputs.iter_mut().zip(tx.outputs.iter()) {
+                    if let Some(unblinded) = new.unblinded {
+                        merged.unblinded = Some(unblinded);
+                    }
+                }
             }
         }
 
-        let confirmed_txids = self.confirmed_txids.get_mut(&account_id).unwrap();
-        let unconfirmed_txids = self.unconfirmed_txids.get_mut(&account_id).unwrap();
+        let mut list = merged_txs.into_values().collect::<Vec<_>>();
 
-        unconfirmed_txids.clear();
-        for (txid, item) in updated.iter() {
-            if item.confs.is_none() {
-                confirmed_txids.insert(*txid);
+        list.sort_by_key(|tx| {
+            if tx.block_height == 0 {
+                0
             } else {
-                unconfirmed_txids.insert(*txid);
+                u32::MAX - tx.block_height
             }
-        }
+        });
 
-        if !updated.is_empty() {
-            let updated = updated.into_values().collect();
-            self.ui
-                .send(proto::from::Msg::UpdatedTxs(proto::from::UpdatedTxs {
-                    items: updated,
-                }));
-        }
-        if !removed.is_empty() {
-            let removed = removed.iter().map(|txid| txid.to_string()).collect();
-            self.ui
-                .send(proto::from::Msg::RemovedTxs(proto::from::RemovedTxs {
-                    txids: removed,
-                }));
-        }
-
-        for msg in queue_msgs.into_iter() {
-            self.ui.send(msg);
-        }
-
-        // self.process_pending_succeed();
+        TransactionList { tip_height, list }
     }
 
-    fn resync_wallet(&mut self, account_id: AccountId) {
-        log::debug!("resync wallet {}", account_id);
+    fn send_pending_txs(&mut self) {
+        let wallet_data = self.wallet_data.as_mut().expect("must be set");
 
-        // Refresh UTXOs before sending balances, some tests may fail otherwise
+        let merged_txs = Self::merge_txs(wallet_data.pending_txs.clone());
+
+        let sent_tx = wallet_data
+            .sent_txhash
+            .as_ref()
+            .and_then(|sent_txhash| merged_txs.list.iter().find(|tx| tx.txid == *sent_txhash));
+
+        if let Some(sent_tx) = sent_tx {
+            let sent_tx = convert_tx(&self.settings.tx_memos, merged_txs.tip_height, sent_tx);
+            let result = proto::from::send_result::Result::TxItem(sent_tx);
+            self.ui
+                .send(proto::from::Msg::SendResult(proto::from::SendResult {
+                    result: Some(result),
+                }));
+            self.wallet_data.as_mut().expect("must be set").sent_txhash = None;
+            self.update_sync_interval();
+        }
+
+        let items = merged_txs
+            .list
+            .into_iter()
+            .map(|tx| convert_tx(&self.settings.tx_memos, merged_txs.tip_height, &tx))
+            .collect::<Vec<_>>();
+
+        self.ui
+            .send(proto::from::Msg::UpdatedTxs(proto::from::UpdatedTxs {
+                items,
+            }));
+    }
+
+    fn sync_wallet(&mut self, account: Account) {
+        log::debug!("sync wallet {account:?}");
+
         wallet::callback(
-            account_id,
+            account,
             self,
-            |data| data.ses.get_utxos(),
+            |ses| ses.get_utxos(),
             move |data, res| match res {
-                Ok(utxos) => market_worker::wallet_utxos(data, account_id, utxos),
+                Ok(utxos) => {
+                    let wallet_data = match data.wallet_data.as_mut() {
+                        Some(wallet_data) => wallet_data,
+                        None => return,
+                    };
+
+                    for list in utxos.values() {
+                        for utxo in list {
+                            let last_used = match utxo.wallet_type {
+                                WalletType::Native => {
+                                    &mut wallet_data.used_addresses.native
+                                        [usize::from(utxo.is_internal)]
+                                }
+                                WalletType::Nested => {
+                                    &mut wallet_data.used_addresses.nested
+                                        [usize::from(utxo.is_internal)]
+                                }
+                                WalletType::AMP => &mut wallet_data.used_addresses.amp,
+                            };
+                            if utxo.pointer > *last_used {
+                                *last_used = utxo.pointer;
+                            }
+                        }
+                    }
+
+                    let balances = utxos
+                        .iter()
+                        .map(|(asset_id, list)| proto::Balance {
+                            asset_id: asset_id.to_string(),
+                            amount: list.iter().map(|utxo| utxo.satoshi).sum::<u64>() as i64,
+                        })
+                        .collect();
+
+                    // Refresh wallet UTXOs in the market API.
+                    // Do it before sending balances, some tests may fail otherwise.
+                    market_worker::wallet_utxos(data, account, utxos);
+
+                    data.ui.send(proto::from::Msg::BalanceUpdate(
+                        proto::from::BalanceUpdate {
+                            account: account.into(),
+                            balances,
+                        },
+                    ));
+
+                    data.update_address_registrations();
+                }
                 Err(err) => {
                     log::error!("loading utxos failed: {err}");
                 }
@@ -794,74 +472,30 @@ impl Data {
         );
 
         wallet::callback(
-            account_id,
+            account,
             self,
-            |data| data.ses.get_balances(),
+            |ses| ses.get_transactions(gdk_ses::GetTransactionsOpt::PendingOnly),
             move |data, res| match res {
-                Ok(balances) => {
-                    let balances = balances
-                        .into_iter()
-                        .map(|(asset_id, amount)| proto::Balance {
-                            asset_id: asset_id.to_string(),
-                            amount,
-                        })
-                        .collect();
-                    data.ui.send(proto::from::Msg::BalanceUpdate(
-                        proto::from::BalanceUpdate {
-                            account: get_account(account_id),
-                            balances,
-                        },
-                    ));
-                }
-                Err(err) => {
-                    log::error!("balance refresh failed: {err}");
-                }
-            },
-        );
-
-        // TODO: Load transactions lazily to speedup wallet startup
-        wallet::callback(
-            account_id,
-            self,
-            |data| data.ses.get_transactions(),
-            move |data, res| match res {
-                Ok(items) => {
-                    if let Some(last_block) = data.last_blocks.get(&account_id) {
-                        let top_block = last_block.block_height;
-                        data.update_used_addresses(account_id, &items);
-                        data.send_new_transactions(items, account_id, top_block);
+                Ok(resp) => {
+                    if let Some(wallet_data) = data.wallet_data.as_mut() {
+                        wallet_data.pending_txs.insert(account, resp);
+                        data.send_pending_txs();
                     }
                 }
                 Err(err) => {
-                    error!("tx refresh failed: {err}");
+                    log::error!("loading pending txs failed: {err}");
                 }
             },
         );
     }
 
     fn send_wallet_loaded(&mut self) {
-        if !self.wallet_loaded_sent {
-            self.wallet_loaded_sent = true;
+        let wallet_data = self.wallet_data.as_mut().expect("must be set");
+        if !wallet_data.wallet_loaded_sent {
+            wallet_data.wallet_loaded_sent = true;
             self.ui
                 .send(proto::from::Msg::WalletLoaded(proto::Empty {}));
         }
-    }
-
-    fn sync_complete(&mut self, account_id: AccountId) {
-        // Single-sig account takes 50..90 seconds to sync even if it's cached
-        debug!("sync_complete, account_id: {account_id}");
-        if !self.sync_complete {
-            self.sync_complete = true;
-            self.send_wallet_loaded();
-            // self.process_pending_requests();
-            self.ui
-                .send(proto::from::Msg::SyncComplete(proto::Empty {}));
-        }
-        self.resync_wallet(account_id);
-    }
-
-    fn sync_failed(&mut self) {
-        self.show_message("electrs connection failed");
     }
 
     fn resume_peg_monitoring(&mut self) {
@@ -917,8 +551,9 @@ impl Data {
                     Ok(api::Response::RegisterDevice(resp)) => {
                         info!("new device_key is registered: {}", resp.device_key);
                         data.settings.device_key = Some(resp.device_key);
-                        data.settings.single_sig_registered = Default::default();
-                        data.settings.multi_sig_registered = Default::default();
+                        data.settings.nested_registered = Default::default();
+                        data.settings.native_registered = Default::default();
+                        data.settings.amp_registered = Default::default();
                         data.save_settings();
 
                         data.finish_ws_connection();
@@ -1175,7 +810,7 @@ impl Data {
         self.ui.send(proto::from::Msg::PriceUpdate(price_update));
     }
 
-    fn process_wallet_event(&mut self, account_id: AccountId, event: wallet::Event) {
+    fn process_wallet_event(&mut self, account_id: Account, event: wallet::Event) {
         let _wallet = match self.get_wallet(account_id) {
             Ok(wallet) => wallet,
             Err(err) => {
@@ -1191,119 +826,80 @@ impl Data {
         }
     }
 
-    fn process_wallet_notif(
-        &mut self,
-        account_id: AccountId,
-        notification: gdk_json::Notification,
-    ) {
-        if self.get_wallet(account_id).is_err() {
-            debug!("ignore notification from a deleted wallet, account_id: {account_id}");
+    fn process_wallet_notif(&mut self, account: Account, notification: WalletNotif) {
+        if self.get_wallet(account).is_err() {
+            debug!("ignore notification from a deleted wallet, account_id: {account:?}");
             return;
         }
 
-        match notification.event.as_str() {
-            "transaction" => self.resync_wallet(account_id),
-            "block" => {
-                let unconfirmed_txs = self
-                    .unconfirmed_txids
-                    .get(&account_id)
-                    .map(|unconfirmed_txids| !unconfirmed_txids.is_empty())
-                    .unwrap_or(false);
-                let old_value = self
-                    .last_blocks
-                    .insert(account_id, notification.block.unwrap());
-                if unconfirmed_txs || old_value.is_none() {
-                    self.resync_wallet(account_id)
-                }
+        let wallet_data = self.wallet_data.as_mut().expect("must be set");
+
+        match notification {
+            WalletNotif::Transaction(_txid) => {
+                self.sync_wallet(account);
+
+                self.ui.send(proto::from::Msg::NewTx(proto::Empty {}));
             }
-            "subaccount" => {
-                if let Some(subaccount) = notification.subaccount {
-                    if subaccount.event_type == "synced" {
-                        self.sync_complete(account_id);
-                    }
+
+            WalletNotif::Block => {
+                let pending = wallet_data
+                    .pending_txs
+                    .values()
+                    .any(|pending_txs| !pending_txs.list.is_empty());
+
+                // GDK rust sends the Block notification when it loads data from the cache.
+                // Send the wallet balance to the UI in this case.
+                let unconfirmed_txs_or_wait_sync = !wallet_data.reg_sync_complete || pending;
+                if unconfirmed_txs_or_wait_sync {
+                    self.sync_wallet(account)
                 }
+
+                self.ui.send(proto::from::Msg::NewBlock(proto::Empty {}));
             }
-            "sync_failed" => self.sync_failed(), // TODO: Not available from GDK
-            _ => {}
-        }
 
-        if let Some(gdk_json::NotificationNetwork {
-            current_state: gdk_json::ConnectionState::Connected,
-            next_state: _,
-            wait_ms: _,
-        }) = &notification.network
-        {
-            debug!(
-                "connection connected, request login, account: {}",
-                account_id
-            );
-
-            wallet::callback(
-                account_id,
-                self,
-                |data| data.ses.login(),
-                move |data, res| match res {
-                    Ok(_) => {
-                        if account_id == ACCOUNT_ID_AMP {
-                            debug!("AMP connected");
-                            // self.process_pending_requests();
-
-                            wallet::callback(
-                                account_id,
-                                data,
-                                |data| data.ses.get_gaid(),
-                                move |data, res| match res {
-                                    Ok(gaid) => {
-                                        data.ui.send(proto::from::Msg::RegisterAmp(
-                                            proto::from::RegisterAmp {
-                                                result: Some(
-                                                    proto::from::register_amp::Result::AmpId(gaid),
-                                                ),
-                                            },
-                                        ));
-                                    }
-                                    Err(err) => log::error!("loading gaid failed: {err}"),
-                                },
-                            );
-
-                            data.amp_connected = true;
-
-                            replace_timers(
-                                data,
-                                AMP_CONNECTION_CHECK_PERIOD,
-                                TimerEvent::AmpConnectionCheck,
-                            );
-                        }
-                        data.resync_wallet(account_id);
-                    }
-                    Err(err) => {
-                        data.show_message(&format!("connection failed: {err}"));
-                    }
-                },
-            );
-        }
-
-        if let Some(gdk_json::NotificationNetwork {
-            current_state: gdk_json::ConnectionState::Disconnected,
-            next_state: _,
-            wait_ms: _,
-        }) = &notification.network
-        {
-            match account_id {
-                ACCOUNT_ID_REG => {
-                    let delay = self.wallet_data.reconnect_delay.next_delay();
-                    replace_timers(self, delay, TimerEvent::ReconnectRegular);
+            WalletNotif::AccountSynced => {
+                // GDK rust takes about 10 seconds to sync even if it's cached
+                debug!("sync_complete, account_id: {account:?}");
+                if !wallet_data.reg_sync_complete {
+                    wallet_data.reg_sync_complete = true;
+                    self.send_wallet_loaded();
+                    // self.process_pending_requests();
+                    self.ui
+                        .send(proto::from::Msg::SyncComplete(proto::Empty {}));
                 }
-                ACCOUNT_ID_AMP => {
-                    debug!("AMP disconnected");
-                    self.amp_connected = false;
-                    remove_timers(self, TimerEvent::AmpConnectionCheck);
-                }
-                account_id => {
-                    log::error!(
-                        "disconnected notification from the unexpected account_id: {account_id}"
-                    );
-                }
+
+                self.sync_wallet(account);
+            }
+
+            WalletNotif::AmpConnected { subaccount, gaid } => {
+                wallet_data.amp_subaccount = Some(subaccount);
+                wallet_data.gaid = Some(gaid.clone());
+
+                self.ui
+                    .send(proto::from::Msg::RegisterAmp(proto::from::RegisterAmp {
+                        result: Some(proto::from::register_amp::Result::AmpId(gaid.clone())),
+                    }));
+
+                log::debug!("AMP connected");
+                self.amp_connected = true;
+                self.update_address_registrations();
+
+                self.sync_wallet(account);
+            }
+
+            WalletNotif::AmpDisconnected => {
+                log::debug!("AMP disconnected");
+                self.amp_connected = false;
+            }
+
+            WalletNotif::AmpFailed { error_msg } => {
+                log::warn!("AMP failed: {error_msg}");
+                self.show_message(&format!("AMP connection failed: {error_msg}"));
+                self.amp_connected = false;
+            }
+
+            WalletNotif::AmpBalanceUpdated => {
+                self.sync_wallet(account);
             }
         }
     }
@@ -1314,13 +910,17 @@ impl Data {
     ) -> Result<proto::from::peg_out_amount::Amounts, anyhow::Error> {
         ensure!(self.ws_connected, "not connected");
 
-        let utxos = wallet::call(req.account.id, self, |data| data.ses.get_utxos())?
-            .unspent_outputs
-            .remove(&self.policy_asset)
-            .unwrap_or_default();
+        let wallet_data = self
+            .wallet_data
+            .as_mut()
+            .ok_or_else(|| anyhow!("no wallet_data"))?;
 
-        let wallet = self.get_wallet(req.account.id)?;
-        assert!(utxos.iter().all(|utxo| utxo.asset_id == self.policy_asset));
+        let utxos = wallet_data
+            .wallet_utxos
+            .values()
+            .flat_map(|account| account.get(&self.policy_asset))
+            .flatten()
+            .collect::<Vec<_>>();
 
         let server_status = self
             .server_status
@@ -1328,33 +928,29 @@ impl Data {
             .ok_or(anyhow!("server_status is not known"))?;
 
         let amount = if req.is_send_entered {
-            // TODO: Replace this
-            let coin_select = send_tx::coin_select::normal_tx::try_coin_select(
-                send_tx::coin_select::normal_tx::Args {
-                    multisig_wallet: !wallet.login_info.single_sig,
-                    policy_asset: self.policy_asset,
-                    use_all_utxos: false,
-                    wallet_utxos: utxos
-                        .iter()
-                        .map(|utxo| InOut {
-                            asset_id: utxo.asset_id,
-                            value: utxo.satoshi,
-                        })
-                        .collect(),
-                    user_outputs: vec![InOut {
-                        asset_id: self.policy_asset,
-                        value: req.amount as u64,
-                    }],
-                    deduct_fee: Some(0),
-                },
-            )?;
+            let utxo_select_res = utxo_select::select(utxo_select::Args {
+                policy_asset: self.policy_asset,
+                utxos: utxos
+                    .iter()
+                    .map(|utxo| utxo_select::Utxo {
+                        wallet: utxo.wallet_type,
+                        txid: utxo.txhash,
+                        vout: utxo.vout,
+                        asset_id: utxo.asset_id,
+                        value: utxo.satoshi,
+                    })
+                    .collect(),
+                recipients: vec![utxo_select::Recipient {
+                    address: utxo_select::RecipientAddress::Unknown(WalletType::Nested),
+                    asset_id: self.policy_asset,
+                    amount: req.amount as u64,
+                }],
+                deduct_fee: Some(0),
+                force_change_wallets: BTreeMap::from([(self.policy_asset, WalletType::Native)]),
+                use_all_utxos: false,
+            })?;
 
-            ensure!(
-                req.amount as u64 > coin_select.network_fee.value,
-                "amount is too low"
-            );
-
-            req.amount as u64 - coin_select.network_fee.value
+            req.amount as u64 - utxo_select_res.network_fee
         } else {
             req.amount as u64
         };
@@ -1370,7 +966,7 @@ impl Data {
             peg_out_bitcoin_tx_vsize: server_status.peg_out_bitcoin_tx_vsize,
         })?;
 
-        self.peg_out_server_amounts = Some(LastPegOutAmount {
+        wallet_data.peg_out_server_amounts = Some(LastPegOutAmount {
             req_amount: req.amount,
             send_amount: amounts.send_amount,
             recv_amount: amounts.recv_amount,
@@ -1382,7 +978,6 @@ impl Data {
             send_amount: amounts.send_amount,
             recv_amount: amounts.recv_amount,
             fee_rate: req.fee_rate,
-            account: req.account,
             is_send_entered: req.is_send_entered,
         })
     }
@@ -1404,6 +999,7 @@ impl Data {
         req: proto::to::PegOutRequest,
     ) -> Result<OrderId, anyhow::Error> {
         ensure!(self.ws_connected, "not connected");
+
         let server_status = self
             .server_status
             .as_ref()
@@ -1416,7 +1012,12 @@ impl Data {
                 .to_string()
         );
 
-        let peg_out_server_amounts = self
+        let wallet_data = self
+            .wallet_data
+            .as_ref()
+            .ok_or_else(|| anyhow!("no wallet_data"))?;
+
+        let peg_out_server_amounts = wallet_data
             .peg_out_server_amounts
             .clone()
             .ok_or_else(|| anyhow!("peg_out_server_amounts is None"))?;
@@ -1450,16 +1051,26 @@ impl Data {
 
         self.add_peg_monitoring(resp.order_id, settings::PegDir::Out);
 
-        let payment = wallet::PegoutPayment {
-            req_amount: peg_out_server_amounts.req_amount,
-            is_send_entered: peg_out_server_amounts.is_send_entered,
-            policy_asset: self.policy_asset,
-            send_amount: peg_out_server_amounts.send_amount,
-            peg_addr: resp.peg_addr,
+        let (send_amount, deduct_fee_output) = if peg_out_server_amounts.is_send_entered {
+            (peg_out_server_amounts.req_amount, Some(0))
+        } else {
+            (peg_out_server_amounts.send_amount, None)
         };
-        wallet::call(req.account.id, self, move |data| {
-            wallet::process_peg_out_payment(data.ses.as_mut(), payment)
+
+        let created_tx = self.try_create_tx(proto::CreateTx {
+            addressees: vec![proto::AddressAmount {
+                address: resp.peg_addr,
+                amount: send_amount,
+                asset_id: self.policy_asset.to_string(),
+            }],
+            utxos: Vec::new(),
+            fee_asset_id: None,
+            deduct_fee_output,
         })?;
+
+        // TODO: Verify that the network fee did not change
+
+        self.try_send_tx(proto::to::SendTx { id: created_tx.id })?;
 
         Ok(resp.order_id)
     }
@@ -1468,7 +1079,8 @@ impl Data {
         let result = self.try_process_pegout_request(req);
         match result {
             Ok(order_id) => {
-                self.active_extern_peg = Some(ActivePeg { order_id });
+                let wallet_data = self.wallet_data.as_mut().expect("must bet set");
+                wallet_data.active_extern_peg = Some(ActivePeg { order_id });
             }
             Err(e) => {
                 error!("starting peg-out failed: {}", e.to_string());
@@ -1487,10 +1099,9 @@ impl Data {
             .ok_or_else(|| anyhow!("device_key is None"))?
             .clone();
 
-        let account_id = ACCOUNT_ID_REG;
+        let account = Account::Reg;
 
-        let recv_addr =
-            wallet::call(account_id, self, |data| data.ses.get_receive_address())?.address;
+        let recv_addr = wallet::call(account, self, |ses| ses.get_receive_address())?.address;
 
         let resp = send_request!(
             self,
@@ -1514,7 +1125,8 @@ impl Data {
             recv_addr: recv_addr.to_string(),
         };
 
-        self.active_extern_peg = Some(ActivePeg {
+        let wallet_data = self.wallet_data.as_mut().expect("must bet set");
+        wallet_data.active_extern_peg = Some(ActivePeg {
             order_id: resp.order_id,
         });
         Ok(msg)
@@ -1534,11 +1146,11 @@ impl Data {
     }
 
     fn process_get_recv_address(&mut self, account: proto::Account) {
-        let account_id = account.id;
+        let account_id = account;
         wallet::callback(
             account_id,
             self,
-            |data| data.ses.get_receive_address(),
+            |ses| ses.get_receive_address(),
             move |data, res| match res {
                 Ok(addr_info) => {
                     data.ui
@@ -1546,7 +1158,7 @@ impl Data {
                             addr: proto::Address {
                                 addr: addr_info.address.to_string(),
                             },
-                            account: get_account(account_id),
+                            account: account_id.into(),
                         }));
                 }
                 Err(err) => data.show_message(&err.to_string()),
@@ -1554,46 +1166,467 @@ impl Data {
         );
     }
 
-    fn process_create_tx(&mut self, req: proto::CreateTx) {
-        let account_id = req.account.id;
-        wallet::callback(
-            account_id,
-            self,
-            |data| data.ses.create_tx(&mut data.created_tx_cache, req),
-            move |data, res| {
-                let res = match res {
-                    Ok(created_tx) => proto::from::create_tx_result::Result::CreatedTx(created_tx),
-                    Err(err) => proto::from::create_tx_result::Result::ErrorMsg(err.to_string()),
-                };
-                data.ui.send(proto::from::Msg::CreateTxResult(
-                    proto::from::CreateTxResult { result: Some(res) },
-                ));
-            },
+    fn get_selected_utxos<'a>(
+        utxos: impl Iterator<Item = &'a models::Utxo>,
+        selected: &[ffi::proto::OutPoint],
+    ) -> Result<Vec<models::Utxo>, anyhow::Error> {
+        let selected_outpoints = selected
+            .iter()
+            .map(|outpoint| -> Result<elements::OutPoint, anyhow::Error> {
+                Ok(elements::OutPoint {
+                    txid: outpoint.txid.parse()?,
+                    vout: outpoint.vout,
+                })
+            })
+            .collect::<Result<BTreeSet<_>, _>>()?;
+        ensure!(selected_outpoints.len() == selected.len());
+
+        let mut inputs = Vec::new();
+        for utxo in utxos {
+            if selected_outpoints.contains(&elements::OutPoint {
+                txid: utxo.txhash,
+                vout: utxo.vout,
+            }) {
+                inputs.push(utxo.clone());
+            }
+        }
+        ensure!(
+            selected.len() == inputs.len(),
+            "Not all UTXOs found, please try again"
         );
+
+        Ok(inputs)
+    }
+
+    fn get_change_address(&self) -> Result<models::AddressInfo, anyhow::Error> {
+        wallet::call(Account::Reg, self, |ses| ses.get_change_address())
+    }
+
+    fn try_create_tx(&mut self, req: proto::CreateTx) -> Result<proto::CreatedTx, anyhow::Error> {
+        let wallet_data = self
+            .wallet_data
+            .as_ref()
+            .ok_or_else(|| anyhow!("no wallet_data"))?;
+
+        let use_all_utxos = !req.utxos.is_empty();
+        let all_utxos = wallet_data
+            .wallet_utxos
+            .values()
+            .flat_map(|utxos| utxos.values())
+            .flatten();
+        let utxos = if !use_all_utxos {
+            all_utxos.cloned().collect::<Vec<_>>()
+        } else {
+            Self::get_selected_utxos(all_utxos, &req.utxos)?
+        };
+
+        let recipients = req
+            .addressees
+            .iter()
+            .map(|addr| -> Result<Recipient, anyhow::Error> {
+                Ok(Recipient {
+                    asset_id: AssetId::from_str(&addr.asset_id)?,
+                    amount: addr.amount.try_into()?,
+                    address: elements::Address::from_str(&addr.address)?,
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        ensure!(!recipients.is_empty());
+
+        let fee_asset = req
+            .fee_asset_id
+            .as_ref()
+            .map(|asset_id| AssetId::from_str(asset_id))
+            .transpose()?;
+
+        let assets = recipients
+            .iter()
+            .map(|recipient| recipient.asset_id)
+            .chain(fee_asset.iter().copied())
+            .collect::<BTreeSet<_>>();
+
+        if let Some(fee_asset) = fee_asset {
+            let deduct_fee = req.deduct_fee_output.map(|index| index as usize);
+            if let Some(index) = deduct_fee {
+                let recipient = recipients
+                    .get(index)
+                    .ok_or_else(|| anyhow!("no output with index {index}"))?;
+                ensure!(
+                    recipient.asset_id == fee_asset,
+                    "can't deduct fee from the specified output"
+                );
+            }
+
+            let payjoin_utxos = utxos
+                .iter()
+                .map(|utxo| sideswap_payjoin::Utxo {
+                    wallet_type: utxo.wallet_type,
+                    txid: utxo.txhash,
+                    vout: utxo.vout,
+                    script_pub_key: utxo.script_pub_key.clone(),
+                    asset_id: utxo.asset_id,
+                    value: utxo.satoshi,
+                    asset_bf: utxo.assetblinder,
+                    value_bf: utxo.amountblinder,
+                })
+                .collect::<Vec<_>>();
+
+            let network = self.env.d().network;
+            let base_url = self.env.base_server_http_url();
+
+            let mut change_addresses = Vec::<models::AddressInfo>::new();
+
+            let mut change_cb = || {
+                let address_info = self.get_change_address()?;
+                let address = address_info.address.clone();
+                change_addresses.push(address_info);
+                Ok(address)
+            };
+
+            let resp = sideswap_payjoin::create_payjoin(
+                &mut change_cb,
+                sideswap_payjoin::CreatePayjoin {
+                    network,
+                    base_url,
+                    user_agent: USER_AGENT.to_owned(),
+                    utxos: payjoin_utxos,
+                    use_all_utxos,
+                    recipients,
+                    deduct_fee,
+                    fee_asset,
+                },
+            )?;
+
+            let tx = resp.pset.extract_tx()?;
+
+            let id = tx.txid().to_string();
+
+            let TxSize {
+                input_count,
+                output_count,
+                size,
+                vsize,
+                discount_vsize,
+                network_fee,
+                fee_per_byte,
+            } = get_tx_size(tx, &self.policy_asset, &utxos);
+
+            let outpoints = resp
+                .pset
+                .inputs()
+                .iter()
+                .map(|input| elements::OutPoint {
+                    txid: input.previous_txid,
+                    vout: input.previous_output_index,
+                })
+                .collect::<BTreeSet<_>>();
+
+            let selected_utxos = utxos
+                .into_iter()
+                .filter(|utxo| {
+                    outpoints.contains(&elements::OutPoint {
+                        txid: utxo.txhash,
+                        vout: utxo.vout,
+                    })
+                })
+                .collect::<Vec<_>>();
+
+            let wallet_data = self.wallet_data.as_mut().expect("must bet set");
+            wallet_data.created_txs.insert(
+                id.clone(),
+                CreatedTx {
+                    pset: resp.pset,
+                    selected_utxos,
+                    change_addresses,
+                    blinding_nonces: resp.blinding_nonces,
+                    assets,
+                },
+            );
+
+            let mut addressees = req.addressees.clone();
+            if let Some(index) = req.deduct_fee_output {
+                addressees[index as usize].amount -= resp.asset_fee as i64;
+            }
+
+            Ok(ffi::proto::CreatedTx {
+                id,
+                req,
+                input_count,
+                output_count,
+                size,
+                vsize,
+                discount_vsize,
+                network_fee,
+                server_fee: Some(resp.asset_fee as i64),
+                fee_per_byte,
+                addressees,
+            })
+        } else {
+            // Prefer to receive stablecoin and L-BTC change to the native segwit account
+            let force_change_wallets = self
+                .assets
+                .values()
+                .filter_map(|asset| {
+                    (asset.market_type == Some(MarketType::Stablecoin)
+                        || asset.asset_id == self.policy_asset)
+                        .then_some((asset.asset_id, WalletType::Native))
+                })
+                .collect::<BTreeMap<_, _>>();
+
+            let utxo_select_res = utxo_select::select(utxo_select::Args {
+                policy_asset: self.policy_asset,
+                utxos: utxos
+                    .iter()
+                    .map(|utxo| utxo_select::Utxo {
+                        wallet: utxo.wallet_type,
+                        txid: utxo.txhash,
+                        vout: utxo.vout,
+                        asset_id: utxo.asset_id,
+                        value: utxo.satoshi,
+                    })
+                    .collect(),
+                recipients: recipients
+                    .into_iter()
+                    .map(|addr| utxo_select::Recipient {
+                        address: utxo_select::RecipientAddress::Known(addr.address),
+                        asset_id: addr.asset_id,
+                        amount: addr.amount,
+                    })
+                    .collect(),
+                deduct_fee: req.deduct_fee_output.map(|index| index as usize),
+                force_change_wallets,
+                use_all_utxos,
+            })?;
+
+            let utxo_select::Res {
+                inputs,
+                updated_recipients,
+                change,
+                network_fee,
+            } = utxo_select_res;
+
+            let selected_utxos = inputs
+                .iter()
+                .map(|selected| {
+                    utxos
+                        .iter()
+                        .find(|utxo| utxo.txhash == selected.txid && utxo.vout == selected.vout)
+                        .expect("UTXO must exist")
+                })
+                .collect::<Vec<_>>();
+
+            let inputs = selected_utxos
+                .iter()
+                .map(|utxo| PsetInput {
+                    txid: utxo.txhash,
+                    vout: utxo.vout,
+                    script_pub_key: utxo.script_pub_key.clone(),
+                    asset_commitment: utxo.asset_commitment,
+                    value_commitment: utxo.value_commitment,
+                    tx_out_sec: TxOutSecrets {
+                        asset: utxo.asset_id,
+                        asset_bf: utxo.assetblinder,
+                        value: utxo.satoshi,
+                        value_bf: utxo.amountblinder,
+                    },
+                })
+                .collect::<Vec<_>>();
+
+            let mut outputs = Vec::<PsetOutput>::new();
+            for recipient in updated_recipients.iter() {
+                outputs.push(PsetOutput {
+                    address: recipient.address.known().expect("must be know").clone(),
+                    asset_id: recipient.asset_id,
+                    amount: recipient.amount,
+                });
+            }
+
+            let mut change_addresses = Vec::new();
+            for output in change {
+                let account = get_wallet_account(output.wallet);
+                let change_address = market_worker::get_address(
+                    self,
+                    account,
+                    market_worker::AddressType::Change,
+                    market_worker::CachePolicy::Skip,
+                )?;
+                outputs.push(PsetOutput {
+                    address: change_address.address.clone(),
+                    asset_id: output.asset_id,
+                    amount: output.value,
+                });
+                change_addresses.push(change_address);
+            }
+
+            let ConstructedPset {
+                blinded_pset: pset,
+                blinded_outputs,
+            } = construct_pset(ConstructPsetArgs {
+                policy_asset: self.policy_asset,
+                offlines: Vec::new(),
+                inputs,
+                outputs,
+                network_fee,
+            })?;
+
+            let tx = pset.extract_tx()?;
+            let id = tx.txid().to_string();
+
+            let wallet_data = self
+                .wallet_data
+                .as_mut()
+                .ok_or_else(|| anyhow!("wallet not found"))?;
+
+            let TxSize {
+                input_count,
+                output_count,
+                size,
+                vsize,
+                discount_vsize,
+                network_fee,
+                fee_per_byte,
+            } = get_tx_size(tx, &self.policy_asset, &utxos);
+
+            let outpoints = pset
+                .inputs()
+                .iter()
+                .map(|input| elements::OutPoint {
+                    txid: input.previous_txid,
+                    vout: input.previous_output_index,
+                })
+                .collect::<BTreeSet<_>>();
+
+            let selected_utxos = utxos
+                .into_iter()
+                .filter(|utxo| {
+                    outpoints.contains(&elements::OutPoint {
+                        txid: utxo.txhash,
+                        vout: utxo.vout,
+                    })
+                })
+                .collect::<Vec<_>>();
+
+            wallet_data.created_txs.insert(
+                id.clone(),
+                CreatedTx {
+                    pset,
+                    selected_utxos,
+                    change_addresses,
+                    blinding_nonces: get_blinding_nonces(&blinded_outputs),
+                    assets,
+                },
+            );
+
+            let mut addressees = req.addressees.clone();
+            assert!(addressees.len() == updated_recipients.len());
+            if let Some(index) = req.deduct_fee_output {
+                addressees[index as usize].amount =
+                    updated_recipients[index as usize].amount as i64;
+            }
+
+            Ok(proto::CreatedTx {
+                id,
+                req,
+                input_count,
+                output_count,
+                size,
+                vsize,
+                discount_vsize,
+                network_fee,
+                server_fee: None,
+                fee_per_byte,
+                addressees,
+            })
+        }
+    }
+
+    fn process_create_tx(&mut self, req: proto::CreateTx) {
+        let res = self.try_create_tx(req);
+
+        let res = match res {
+            Ok(created_tx) => proto::from::create_tx_result::Result::CreatedTx(created_tx),
+            Err(err) => proto::from::create_tx_result::Result::ErrorMsg(err.to_string()),
+        };
+        self.ui.send(proto::from::Msg::CreateTxResult(
+            proto::from::CreateTxResult { result: Some(res) },
+        ));
+    }
+
+    fn try_send_tx(&mut self, req: proto::to::SendTx) -> Result<elements::Txid, anyhow::Error> {
+        let wallet_data = self
+            .wallet_data
+            .as_mut()
+            .ok_or_else(|| anyhow!("wallet not found"))?;
+
+        let created_tx = wallet_data
+            .created_txs
+            .remove(&req.id)
+            .ok_or_else(|| anyhow!("can't find created tx"))?;
+
+        let selected_utxos = created_tx.selected_utxos.iter().collect::<Vec<_>>();
+        let change_addresses = created_tx.change_addresses.iter().collect::<Vec<_>>();
+
+        // FIXME: We should not show L-BTC output to the server for review on Jade with payjoins
+        let pset = if market_worker::is_jade(self) {
+            market_worker::try_sign_pset_jade(
+                self,
+                &selected_utxos,
+                &[],
+                &change_addresses,
+                None,
+                created_tx.pset,
+                created_tx.assets,
+                Some(&created_tx.blinding_nonces),
+                jade_mng::TxType::Normal,
+            )?
+        } else {
+            market_worker::try_sign_pset_software(self, created_tx.pset)?
+        };
+
+        let need_green_signature = selected_utxos.iter().any(|utxo| match utxo.wallet_type {
+            WalletType::Native | WalletType::Nested => false,
+            WalletType::AMP => true,
+        });
+
+        let pset = if need_green_signature {
+            let wallet_data = self
+                .wallet_data
+                .as_mut()
+                .ok_or_else(|| anyhow!("wallet not found"))?;
+
+            wallet_data
+                .wallet_amp
+                .green_backend_sign(pset, created_tx.blinding_nonces)?
+        } else {
+            pset
+        };
+
+        let tx = pset.extract_tx()?;
+        let txid = tx.txid();
+        let tx = elements::encode::serialize_hex(&tx);
+
+        wallet::call(Account::Reg, self, move |ses| {
+            ses.broadcast_tx(&tx)?;
+            Ok(())
+        })?;
+
+        Ok(txid)
     }
 
     fn process_send_tx(&mut self, req: proto::to::SendTx) {
-        let account_id = req.account.id;
-        let assets = self.assets.clone();
-        wallet::callback(
-            account_id,
-            self,
-            move |data| {
-                data.ses
-                    .send_tx(&mut data.created_tx_cache, &req.id, &assets)
-            },
-            move |data, res| match res {
-                Ok(txid) => {
-                    data.sent_txhash = Some(txid);
-                    data.update_sync_interval();
-                }
-                Err(err) => data
-                    .ui
-                    .send(proto::from::Msg::SendResult(proto::from::SendResult {
-                        result: Some(proto::from::send_result::Result::ErrorMsg(err.to_string())),
-                    })),
-            },
-        );
+        let res = self.try_send_tx(req);
+
+        match res {
+            Ok(txid) => {
+                self.wallet_data.as_mut().expect("must be set").sent_txhash = Some(txid);
+                self.update_sync_interval();
+            }
+            Err(err) => self
+                .ui
+                .send(proto::from::Msg::SendResult(proto::from::SendResult {
+                    result: Some(proto::from::send_result::Result::ErrorMsg(err.to_string())),
+                })),
+        }
     }
 
     fn process_blinded_values(
@@ -1603,20 +1636,36 @@ impl Data {
         let txid = elements::Txid::from_str(&txid).expect("must be valid txid");
 
         let mut res_receivers = Vec::new();
-        for wallet in self.wallets.values() {
-            let txid = txid.clone();
-            let res_receiver =
-                wallet::send_wallet(wallet, move |data| data.ses.get_blinded_values(&txid));
-            res_receivers.push(res_receiver);
+        if let Some(wallet_data) = self.wallet_data.as_mut() {
+            let wallets: [Arc<dyn GdkSes>; 2] = [
+                wallet_data.wallet_reg.clone(),
+                wallet_data.wallet_amp.clone(),
+            ];
+            for wallet in wallets {
+                let res_receiver = wallet::send_wallet(&wallet, move |ses| {
+                    ses.get_transactions(gdk_ses::GetTransactionsOpt::All)
+                });
+                res_receivers.push(res_receiver);
+            }
         }
 
-        let blinding_values = res_receivers
+        let blinded_values = res_receivers
             .iter()
             .filter_map(|res_receiver| res_receiver.recv().expect("channel must be open").ok())
-            .flatten()
+            .filter_map(|tx_list| tx_list.list.into_iter().find(|tx| tx.txid == txid))
+            .flat_map(|tx| tx.inputs.into_iter().chain(tx.outputs.into_iter()))
+            .filter_map(|input_output| input_output.unblinded)
+            .flat_map(|unblinded| {
+                [
+                    unblinded.value.to_string(),
+                    unblinded.asset.to_string(),
+                    unblinded.value_bf.to_string(),
+                    unblinded.asset_bf.to_string(),
+                ]
+            })
             .collect::<Vec<_>>();
 
-        let result = proto::from::blinded_values::Result::BlindedValues(blinding_values.join(","));
+        let result = proto::from::blinded_values::Result::BlindedValues(blinded_values.join(","));
         let blinded_values = proto::from::BlindedValues {
             txid: txid.to_string(),
             result: Some(result),
@@ -1670,96 +1719,95 @@ impl Data {
         }
     }
 
-    fn try_register(
-        &mut self,
-        login: &LoginData,
-        cache_dir: &str,
-    ) -> Result<settings::RegInfo, anyhow::Error> {
-        let wallet_info = match login {
-            LoginData::Mnemonic { mnemonic } => WalletInfo::Mnemonic(mnemonic.to_string()),
-            LoginData::Jade { name, jade } => {
-                gdk_ses_impl::unlock_hw(self.env, &jade)?;
+    fn try_register(&mut self, login: &LoginData) -> Result<settings::RegInfo, anyhow::Error> {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("must not fail");
 
-                let _status = jade.start_status(JadeStatus::MasterBlindingKey);
-                let resp = jade.master_blinding_key()?;
-                let master_blinding_key = hex::encode(resp);
+        let event_callback = Arc::new(|_event| {});
 
-                WalletInfo::HwData(gdk_ses::HwData {
+        let _enter_guard = runtime.enter();
+
+        let amp_wallet = match &login {
+            LoginData::Mnemonic { mnemonic } => {
+                runtime.block_on(sideswap_amp::Wallet::connect_once(
+                    &sideswap_amp::LoginType::Full(Arc::new(SwSigner::new(
+                        self.env.d().network,
+                        mnemonic,
+                    ))),
+                    event_callback,
+                ))?
+            }
+
+            LoginData::Jade { jade } => {
+                utils::unlock_hw(self.env, &jade)?;
+
+                let jade_data = JadeData {
                     env: self.env,
-                    name: name.clone(),
-                    jade: Arc::clone(jade),
+                    jade: jade.clone(),
+                };
+
+                runtime.block_on(sideswap_amp::Wallet::connect_once(
+                    &sideswap_amp::LoginType::Full(Arc::new(jade_data)),
+                    event_callback,
+                ))?
+            }
+        };
+
+        let new_address = runtime.block_on(amp_wallet.receive_address())?;
+        let amp_service_xpub = new_address.service_xpub;
+        let amp_user_path = new_address.user_path[0..3].to_vec();
+
+        let watch_only = match login {
+            LoginData::Mnemonic { mnemonic: _ } => None,
+            LoginData::Jade { jade } => {
+                let credentials = derive_amp_wo_login(amp_wallet.master_blinding_key());
+
+                runtime.block_on(amp_wallet.set_watch_only(credentials))?;
+
+                let jade_data = JadeData {
+                    env: self.env,
+                    jade: jade.clone(),
+                };
+
+                let nested_path = self.env.nd().account_path_sh_wpkh;
+                let native_path = self.env.nd().account_path_wpkh;
+
+                let network = utils::get_jade_network(self.env);
+
+                let root_xpub = jade_data.resolve_xpub(network, &[])?;
+                // let password_xpub = jade_data.resolve_xpub(network, &XPUB_PATH_PASS)?;
+                let nested_xpub = jade_data.resolve_xpub(network, &nested_path)?;
+                let native_xpub = jade_data.resolve_xpub(network, &native_path)?;
+
+                let amp_user_xpub = jade_data.resolve_xpub(network, &amp_user_path)?;
+
+                let master_blinding_key = amp_wallet.master_blinding_key().clone().into();
+
+                let master_xpub_fingerprint = root_xpub.fingerprint();
+
+                Some(WatchOnly {
+                    master_xpub_fingerprint,
                     master_blinding_key,
-                    xpubs: BTreeMap::new(),
+                    native_xpub,
+                    nested_xpub,
+                    amp_user_xpub,
                 })
             }
         };
 
-        let info_amp = gdk_ses::LoginInfo {
-            account_id: ACCOUNT_ID_AMP,
-            env: self.env,
-            cache_dir: cache_dir.to_owned(),
-            wallet_info: wallet_info.clone(),
-            single_sig: false,
-            electrum_server: self.electrum_server(),
-            proxy: self.proxy(),
-        };
-
-        let mut wallet_amp = if self.env != Env::LocalRegtest {
-            gdk_ses_impl::start_processing(info_amp, None)?
-        } else {
-            gdk_ses_stub::start_processing(info_amp)
-        };
-
-        wallet_amp.register()?;
-
-        wallet_amp.login()?;
-
-        let new_address = wallet_amp.get_receive_address()?;
-        let multi_sig_service_xpub = new_address.service_xpub.expect("must be set");
-        let multi_sig_user_path = new_address.user_path[0..3].to_vec();
-
-        let jade_watch_only = if let Some(hw_data) = wallet_info.hw_data() {
-            let username = format!("sswp_{}", hex::encode(rand::thread_rng().gen::<[u8; 10]>()));
-            let password = hex::encode(rand::thread_rng().gen::<[u8; 16]>());
-
-            wallet_amp.set_watch_only(&username, &password)?;
-
-            let single_sig_account_path = self.env.d().network.d().single_sig_account_path.to_vec();
-
-            let network = gdk_ses_impl::get_jade_network(hw_data.env);
-
-            let root_xpub = hw_data.resolve_xpub(network, &XPUB_PATH_ROOT)?;
-            let password_xpub = hw_data.resolve_xpub(network, &XPUB_PATH_PASS)?;
-            let single_sig_account_xpub =
-                hw_data.resolve_xpub(network, &single_sig_account_path)?;
-            let multi_sig_user_xpub = hw_data.resolve_xpub(network, &multi_sig_user_path)?;
-
-            Some(settings::WatchOnly {
-                master_blinding_key: hw_data.master_blinding_key.clone(),
-
-                root_xpub,
-                single_sig_account_xpub,
-                multi_sig_user_xpub,
-                password_xpub,
-
-                username,
-                password,
-            })
-        } else {
-            None
-        };
-
         Ok(settings::RegInfo {
-            jade_watch_only,
-            multi_sig_service_xpub,
-            multi_sig_user_path,
+            watch_only,
+            amp_service_xpub,
+            amp_user_path,
         })
     }
 
     fn try_process_login_request(&mut self, req: proto::to::Login) -> Result<(), anyhow::Error> {
         debug!("process login request...");
 
-        let cache_dir = self.cache_path().to_str().unwrap().to_owned();
+        let cache_dir = self.cache_path();
 
         let wallet = req.wallet.ok_or_else(|| anyhow!("empty login request"))?;
 
@@ -1770,107 +1818,85 @@ impl Data {
             }
 
             proto::to::login::Wallet::JadeId(jade_id) => {
-                let name = format!("Jade {}", jade_id);
                 let jade = self.jade_mng.open(&jade_id)?;
                 LoginData::Jade {
-                    name,
                     jade: Arc::new(jade),
                 }
             }
         };
 
-        let reg_info = match self.settings.reg_info_v3.clone() {
+        let reg_info = match self.settings.reg_info.clone() {
             Some(reg_info) => reg_info,
             None => {
-                let reg_info = self.try_register(&login_data, &cache_dir)?;
-                self.settings.reg_info_v3 = Some(reg_info.clone());
+                let reg_info = self.try_register(&login_data)?;
+                self.settings.reg_info = Some(reg_info.clone());
                 self.save_settings();
                 reg_info
             }
         };
 
         let wallet_info = match login_data {
-            LoginData::Mnemonic { mnemonic } => WalletInfo::Mnemonic(mnemonic.to_string()),
-            LoginData::Jade { name, jade } => {
-                let jade_watch_only = reg_info
-                    .jade_watch_only
+            LoginData::Mnemonic { mnemonic } => WalletInfo::Mnemonic(mnemonic.clone()),
+
+            LoginData::Jade { jade } => {
+                let watch_only = reg_info
+                    .watch_only
                     .as_ref()
-                    .ok_or_else(|| anyhow!("jade_watch_only is not set"))?;
+                    .ok_or_else(|| anyhow!("watch_only is not set"))?
+                    .clone();
 
-                let xpubs = BTreeMap::from([
-                    (XPUB_PATH_ROOT.to_vec(), jade_watch_only.root_xpub),
-                    (XPUB_PATH_PASS.to_vec(), jade_watch_only.password_xpub),
-                    (
-                        self.env.d().network.d().single_sig_account_path.to_vec(),
-                        jade_watch_only.single_sig_account_xpub,
-                    ),
-                    (
-                        reg_info.multi_sig_user_path.clone(),
-                        jade_watch_only.multi_sig_user_xpub,
-                    ),
-                ]);
-
-                WalletInfo::HwData(gdk_ses::HwData {
-                    env: self.env,
-                    name,
-                    jade,
-                    master_blinding_key: jade_watch_only.master_blinding_key.clone(),
-                    xpubs,
-                })
+                WalletInfo::Jade(
+                    gdk_ses::JadeData {
+                        env: self.env,
+                        jade,
+                    },
+                    watch_only,
+                )
             }
         };
 
         let wallet_reg = {
             let info_reg = gdk_ses::LoginInfo {
-                account_id: ACCOUNT_ID_REG,
+                account: Account::Reg,
                 env: self.env,
                 cache_dir: cache_dir.clone(),
                 wallet_info: wallet_info.clone(),
-                single_sig: true,
                 electrum_server: self.electrum_server(),
                 proxy: self.proxy(),
             };
 
-            gdk_ses_impl::start_processing(info_reg, Some(self.get_notif_callback()))?
+            gdk_ses_rust::start_processing(info_reg, self.get_notif_callback())
         };
 
-        let wallet_amp_res = {
+        let wallet_amp = {
             let info_amp = gdk_ses::LoginInfo {
-                account_id: ACCOUNT_ID_AMP,
+                account: Account::Amp,
                 env: self.env,
-                cache_dir,
+                cache_dir: cache_dir.clone(),
                 wallet_info: wallet_info.clone(),
-                single_sig: false,
                 electrum_server: self.electrum_server(),
                 proxy: self.proxy(),
             };
 
-            if let Some(watch_only) = reg_info.clone().jade_watch_only {
-                gdk_ses_jade::start_processing(info_amp, self.get_notif_callback(), watch_only)
-            } else if self.env != Env::LocalRegtest {
-                gdk_ses_impl::start_processing(info_amp, Some(self.get_notif_callback()))
-            } else {
-                Ok(gdk_ses_stub::start_processing(info_amp))
-            }
+            gdk_ses_amp::start_processing(info_amp, self.get_notif_callback())
         };
 
-        let single_sig_account_path = self.env.d().network.d().single_sig_account_path;
-        let multi_sig_service_xpub =
-            bip32::Xpub::from_str(&reg_info.multi_sig_service_xpub).expect("must be valid");
-        let multi_sig_user_path = reg_info.multi_sig_user_path.clone();
+        let nested_account_path = self.env.nd().account_path_sh_wpkh;
+        let native_account_path = self.env.nd().account_path_wpkh;
+        let amp_service_xpub =
+            bip32::Xpub::from_str(&reg_info.amp_service_xpub).expect("must be valid");
+        let amp_user_path = reg_info.amp_user_path.clone();
 
-        let (single_sig_account, multi_sig_user_xpub, master_blinding_key) =
-            if let Some(watch_only) = reg_info.jade_watch_only.as_ref() {
-                let master_blinding_key =
-                    MasterBlindingKey::from_hex(&watch_only.master_blinding_key)?;
+        let (nested_account, native_account, amp_user_xpub, master_blinding_key) =
+            if let Some(watch_only) = reg_info.watch_only.as_ref() {
                 (
-                    watch_only.single_sig_account_xpub,
-                    watch_only.multi_sig_user_xpub,
-                    master_blinding_key,
+                    watch_only.nested_xpub,
+                    watch_only.native_xpub,
+                    watch_only.amp_user_xpub,
+                    watch_only.master_blinding_key.into_inner(),
                 )
             } else {
                 let mnemonic = wallet_info.mnemonic().expect("mnemonic must be set");
-                let mnemonic = bip39::Mnemonic::parse(mnemonic)?;
                 let seed = mnemonic.to_seed("");
                 let bitcoin_network = self.env.d().network.d().bitcoin_network;
                 let master_key = bip32::Xpriv::new_master(bitcoin_network, &seed).unwrap();
@@ -1886,19 +1912,28 @@ impl Data {
                     )
                     .unwrap()
                     .private_key;
-                let single_sig_xpriv = master_key
+                let nested_xpriv = master_key
                     .derive_priv(
                         SECP256K1,
-                        &single_sig_account_path
+                        &nested_account_path
                             .iter()
                             .map(|num| ChildNumber::from(*num))
                             .collect::<Vec<_>>(),
                     )
                     .unwrap();
-                let multi_sig_xpriv = master_key
+                let native_xpriv = master_key
                     .derive_priv(
                         SECP256K1,
-                        &multi_sig_user_path
+                        &native_account_path
+                            .iter()
+                            .map(|num| ChildNumber::from(*num))
+                            .collect::<Vec<_>>(),
+                    )
+                    .unwrap();
+                let amp_xpriv = master_key
+                    .derive_priv(
+                        SECP256K1,
+                        &amp_user_path
                             .iter()
                             .map(|num| ChildNumber::from(*num))
                             .collect::<Vec<_>>(),
@@ -1921,8 +1956,9 @@ impl Data {
                     self,
                     market_worker::Xprivs {
                         register_priv,
-                        single_sig_xpriv,
-                        multi_sig_xpriv,
+                        nested_xpriv,
+                        native_xpriv,
+                        amp_xpriv,
                         event_proofs,
                         ack_succeed: false,
                         expected_nonce: None,
@@ -1930,55 +1966,38 @@ impl Data {
                 );
 
                 (
-                    bip32::Xpub::from_priv(SECP256K1, &single_sig_xpriv),
-                    bip32::Xpub::from_priv(SECP256K1, &multi_sig_xpriv),
+                    bip32::Xpub::from_priv(SECP256K1, &nested_xpriv),
+                    bip32::Xpub::from_priv(SECP256K1, &native_xpriv),
+                    bip32::Xpub::from_priv(SECP256K1, &amp_xpriv),
                     master_blinding_key,
                 )
             };
 
         let xpubs = XPubInfo {
-            single_sig_account,
-            multi_sig_service_xpub,
-            multi_sig_user_xpub,
+            nested_account,
+            native_account,
+            amp_service_xpub,
+            amp_user_xpub,
             master_blinding_key,
         };
 
-        let (command_sender, command_receiver) = mpsc::channel();
-        self.wallets.insert(
-            wallet_reg.login_info().account_id,
-            Wallet {
-                login_info: wallet_reg.login_info().clone(),
-                command_sender,
-                xpubs: xpubs.clone(),
-            },
-        );
-        wallet::start(
+        self.wallet_data = Some(WalletData {
+            xpubs,
             wallet_reg,
-            command_receiver,
-            self.wallet_event_callback.clone(),
-        );
-
-        match wallet_amp_res {
-            Ok(wallet_amp) => {
-                let (command_sender, command_receiver) = mpsc::channel();
-                self.wallets.insert(
-                    wallet_amp.login_info().account_id,
-                    Wallet {
-                        login_info: wallet_amp.login_info().clone(),
-                        command_sender,
-                        xpubs,
-                    },
-                );
-                wallet::start(
-                    wallet_amp,
-                    command_receiver,
-                    self.wallet_event_callback.clone(),
-                );
-            }
-            Err(err) => {
-                self.show_message(&format!("AMP connection failed: {err}"));
-            }
-        }
+            wallet_amp,
+            address_registration_active: false,
+            wallet_utxos: BTreeMap::new(),
+            created_txs: BTreeMap::new(),
+            sent_txhash: None,
+            used_addresses: Default::default(),
+            pending_txs: BTreeMap::new(),
+            gaid: None,
+            amp_subaccount: None,
+            reg_sync_complete: false,
+            wallet_loaded_sent: false,
+            active_extern_peg: None,
+            peg_out_server_amounts: None,
+        });
 
         if self.skip_wallet_sync() {
             info!("skip wallet sync delay");
@@ -2010,20 +2029,7 @@ impl Data {
     fn process_logout_request(&mut self) {
         debug!("process logout request...");
 
-        self.wallets.clear();
-        self.wallet_data = WalletData::new();
-
-        // TODO: Clear other fields
-        self.sync_complete = false;
-        self.wallet_loaded_sent = false;
-        self.confirmed_txids.clear();
-        self.unconfirmed_txids.clear();
-        self.active_extern_peg = None;
-        self.sent_txhash = None;
-        self.peg_out_server_amounts = None;
-        self.active_submits = BTreeMap::new();
-        self.active_sign = None;
-        self.used_addresses = Default::default();
+        self.wallet_data = None;
         self.market = market_worker::new();
 
         self.settings = settings::Settings::default();
@@ -2037,35 +2043,61 @@ impl Data {
     }
 
     fn recreate_wallets(&mut self) {
-        let mut wallets = std::mem::take(&mut self.wallets);
+        let wallet_data = match self.wallet_data.take() {
+            Some(wallet_data) => wallet_data,
+            None => return,
+        };
 
-        for wallet in wallets.values_mut() {
-            let mut new_login_info = wallet.login_info.clone();
-            new_login_info.electrum_server = self.electrum_server();
-            new_login_info.proxy = self.proxy();
+        let WalletData {
+            xpubs,
+            wallet_reg,
+            wallet_amp,
+            address_registration_active,
+            wallet_utxos,
+            created_txs,
+            sent_txhash,
+            used_addresses,
+            pending_txs,
+            gaid,
+            amp_subaccount,
+            reg_sync_complete,
+            wallet_loaded_sent,
+            active_extern_peg,
+            peg_out_server_amounts,
+        } = wallet_data;
 
-            let wallet_res = gdk_ses_impl::start_processing(
-                new_login_info.clone(),
-                Some(self.get_notif_callback()),
-            );
-            match wallet_res {
-                Ok(new_wallet) => {
-                    let (command_sender, command_receiver) = mpsc::channel();
-                    wallet::start(
-                        new_wallet,
-                        command_receiver,
-                        self.wallet_event_callback.clone(),
-                    );
-                    wallet.login_info = new_login_info;
-                    wallet.command_sender = command_sender;
-                }
-                Err(err) => {
-                    self.show_message(&format!("changing network failed: {err}"));
-                }
-            }
-        }
+        let mut login_info_reg = wallet_reg.login_info().clone();
+        let mut login_info_amp = wallet_amp.login_info().clone();
 
-        self.wallets = wallets;
+        login_info_reg.electrum_server = self.electrum_server();
+        login_info_reg.proxy = self.proxy();
+
+        login_info_amp.electrum_server = self.electrum_server();
+        login_info_amp.proxy = self.proxy();
+
+        drop(wallet_reg);
+        drop(wallet_amp);
+
+        let wallet_reg = gdk_ses_rust::start_processing(login_info_reg, self.get_notif_callback());
+        let wallet_amp = gdk_ses_amp::start_processing(login_info_amp, self.get_notif_callback());
+
+        self.wallet_data = Some(WalletData {
+            xpubs,
+            wallet_reg,
+            wallet_amp,
+            address_registration_active,
+            wallet_utxos,
+            created_txs,
+            sent_txhash,
+            used_addresses,
+            pending_txs,
+            gaid,
+            amp_subaccount,
+            reg_sync_complete,
+            wallet_loaded_sent,
+            active_extern_peg,
+            peg_out_server_amounts,
+        });
     }
 
     fn process_network_settings(&mut self, req: proto::to::NetworkSettings) {
@@ -2223,12 +2255,17 @@ impl Data {
 
         let mut queue_msgs = Vec::new();
 
-        if let Some(peg) = self.active_extern_peg.as_ref() {
+        let wallet_data = match self.wallet_data.as_mut() {
+            Some(wallet_data) => wallet_data,
+            None => return,
+        };
+
+        if let Some(peg) = wallet_data.active_extern_peg.as_ref() {
             if peg.order_id == status.order_id {
                 if let Some(first_peg) = status.list.first() {
                     let peg_item = get_peg_item(&status, first_peg);
                     queue_msgs.push(proto::from::Msg::SwapSucceed(peg_item));
-                    self.active_extern_peg = None;
+                    wallet_data.active_extern_peg = None;
                 }
             }
         }
@@ -2260,74 +2297,38 @@ impl Data {
     }
 
     fn process_set_memo(&mut self, req: proto::to::SetMemo) {
-        wallet::callback(
-            req.account.id,
-            self,
-            move |data| data.ses.set_memo(&req.txid, &req.memo),
-            move |_data, res| {
-                if let Err(err) = res {
-                    log::error!("setting memo failed: {err}");
-                }
-            },
-        );
+        let txid = elements::Txid::from_str(&req.txid).expect("must be valid txid");
+        self.settings.tx_memos.insert(txid, req.memo);
+        self.save_settings();
     }
 
     fn try_load_all_addresses(
         &mut self,
-        account: &proto::Account,
+        account: proto::Account,
     ) -> Result<Vec<WalletAddress>, anyhow::Error> {
-        if account.id == ACCOUNT_ID_AMP {
-            let wallet = self.get_wallet(account.id)?;
-            let latest = wallet::call_wallet(wallet, move |data| {
-                data.ses.get_previous_addresses(None, false)
-            })?;
+        let wallet = self.get_wallet(account)?;
+        let resp = wallet::call_wallet(&wallet, move |ses| ses.get_previous_addresses())?;
 
-            let end_index = latest
-                .list
-                .iter()
-                .map(|item| item.pointer)
-                .max()
-                .ok_or_else(|| anyhow!("get_previous_addresses is empty"))?;
+        let list = resp
+            .list
+            .into_iter()
+            .map(|addr| WalletAddress {
+                address_type: addr.address_type,
+                address: addr.address,
+                pointer: addr.pointer,
+                is_internal: addr.is_internal.unwrap_or(false),
+            })
+            .collect();
 
-            let list = (0..=end_index)
-                .rev()
-                .map(|pointer| {
-                    let address = derive_multi_sig_address(
-                        &wallet.xpubs.multi_sig_service_xpub,
-                        &wallet.xpubs.multi_sig_user_xpub,
-                        self.env.d().network,
-                        pointer,
-                        Some(&wallet.xpubs.master_blinding_key),
-                    );
-                    WalletAddress {
-                        address,
-                        pointer,
-                        is_internal: false,
-                    }
-                })
-                .collect::<Vec<_>>();
-            Ok(list)
-        } else {
-            let wallet = self.get_wallet(account.id)?;
-            // Loading single-sig addresses is fast, load them from GDK
-            let external = load_all_addresses(wallet, false, None)?.1;
-            let internal = load_all_addresses(wallet, true, None)?.1;
-            let list = external
-                .iter()
-                .chain(internal.iter())
-                .map(WalletAddress::from)
-                .collect();
-            Ok(list)
-        }
+        Ok(list)
     }
 
     fn try_process_load_utxos(
         &mut self,
-        account: &proto::Account,
+        account: proto::Account,
     ) -> Result<Vec<proto::from::load_utxos::Utxo>, anyhow::Error> {
         // Load utxos before loading address (to prevent a race)
-        let inputs = wallet::call(account.id, self, |data| data.ses.get_utxos())?
-            .unspent_outputs
+        let inputs = wallet::call(account, self, |ses| ses.get_utxos())?
             .into_values()
             .flat_map(|utxos| utxos.into_iter())
             .collect::<Vec<_>>();
@@ -2343,8 +2344,9 @@ impl Data {
         for input in inputs {
             let address = addresses
                 .get(&AddressPointer {
-                    pointer: input.pointer,
+                    address_type: input.wallet_type.into(),
                     is_internal: input.is_internal,
+                    pointer: input.pointer,
                 })
                 .ok_or_else(|| {
                     anyhow!("address {}/{} not found", input.pointer, input.is_internal)
@@ -2357,7 +2359,7 @@ impl Data {
                 amount: input.satoshi,
                 address: address.address.to_string(),
                 is_internal: input.is_internal,
-                is_confidential: input.is_confidential.unwrap_or_default(),
+                is_confidential: input.is_blinded,
             });
         }
 
@@ -2365,7 +2367,7 @@ impl Data {
     }
 
     fn process_load_utxos(&mut self, account: proto::Account) {
-        let result = self.try_process_load_utxos(&account);
+        let result = self.try_process_load_utxos(account);
         let (utxos, error_msg) = match result {
             Ok(utxos) => (utxos, None),
             Err(e) => {
@@ -2375,7 +2377,7 @@ impl Data {
         };
         self.ui
             .send(proto::from::Msg::LoadUtxos(proto::from::LoadUtxos {
-                account,
+                account: account.into(),
                 utxos,
                 error_msg,
             }));
@@ -2383,17 +2385,24 @@ impl Data {
 
     fn try_process_load_addresses(
         &mut self,
-        account: &proto::Account,
+        account: proto::Account,
     ) -> Result<Vec<proto::from::load_addresses::Address>, anyhow::Error> {
         let addresses = self.try_load_all_addresses(account)?;
 
         let addresses = addresses
             .into_iter()
-            .map(|addr| proto::from::load_addresses::Address {
-                address: addr.address.to_string(),
-                unconfidential_address: addr.address.to_unconfidential().to_string(),
-                index: addr.pointer,
-                is_internal: addr.is_internal,
+            .map(|addr| {
+                let script_type = match addr.address_type {
+                    AddressType::P2wpkh => proto::ScriptType::P2wpkh,
+                    AddressType::P2shP2wpkh | AddressType::P2wsh => proto::ScriptType::P2sh,
+                };
+                proto::from::load_addresses::Address {
+                    address: addr.address.to_string(),
+                    unconfidential_address: addr.address.to_unconfidential().to_string(),
+                    index: addr.pointer,
+                    is_internal: addr.is_internal,
+                    script_type: script_type.into(),
+                }
             })
             .collect();
 
@@ -2401,7 +2410,7 @@ impl Data {
     }
 
     fn process_load_addresses(&mut self, account: proto::Account) {
-        let result = self.try_process_load_addresses(&account);
+        let result = self.try_process_load_addresses(account);
         let (addresses, error_msg) = match result {
             Ok(utxos) => (utxos, None),
             Err(e) => {
@@ -2411,10 +2420,53 @@ impl Data {
         };
         self.ui.send(proto::from::Msg::LoadAddresses(
             proto::from::LoadAddresses {
-                account,
+                account: account.into(),
                 addresses,
                 error_msg,
             },
+        ));
+    }
+
+    fn try_process_load_transactions(&mut self) -> Result<Vec<proto::TransItem>, anyhow::Error> {
+        let mut res_receivers = Vec::new();
+        if let Some(wallet_data) = self.wallet_data.as_mut() {
+            let wallets: [Arc<dyn GdkSes>; 2] = [
+                wallet_data.wallet_reg.clone(),
+                wallet_data.wallet_amp.clone(),
+            ];
+            for wallet in wallets {
+                let res_receiver = wallet::send_wallet(&wallet, move |ses| {
+                    ses.get_transactions(gdk_ses::GetTransactionsOpt::All)
+                });
+                res_receivers.push((wallet.login_info().account, res_receiver));
+            }
+        }
+
+        let mut txs = BTreeMap::new();
+        for (account, res_receiver) in res_receivers {
+            let list = res_receiver.recv()??;
+            txs.insert(account, list);
+        }
+
+        let merged_txs = Self::merge_txs(txs);
+
+        let merged_list = merged_txs
+            .list
+            .into_iter()
+            .map(|tx| convert_tx(&self.settings.tx_memos, merged_txs.tip_height, &tx))
+            .collect::<Vec<_>>();
+
+        Ok(merged_list)
+    }
+
+    fn process_load_transactions(&mut self) {
+        let result = self.try_process_load_transactions();
+        let (txs, error_msg) = match result {
+            Ok(txs) => (txs, None),
+            Err(e) => (Vec::new(), Some(e.to_string())),
+        };
+        self.ui.send(proto::from::Msg::LoadTransactions(
+            proto::from::LoadTransactions { txs, error_msg },
         ));
     }
 
@@ -2426,61 +2478,53 @@ impl Data {
     fn find_own_amp_address_info(
         &mut self,
         addr: &elements::Address,
-    ) -> Result<AddressInfo, anyhow::Error> {
-        let wallet = self.get_wallet(ACCOUNT_ID_AMP)?;
+    ) -> Result<models::AddressInfo, anyhow::Error> {
+        let wallet_data = self
+            .wallet_data
+            .as_ref()
+            .ok_or_else(|| anyhow!("no wallet_data"))?;
 
-        let registered = u32::max(
-            self.settings.multi_sig_registered,
-            self.used_addresses.multi_sig,
-        );
-        let max_pointer = registered + 1000; // Some big value just in case
+        let registered = u32::max(self.settings.amp_registered, wallet_data.used_addresses.amp);
+        let max_pointer = registered + 10000; // Some big value just in case
 
         // The address is probably somewhere in the range [registered - 100, registered).
         // This will iterate all addresses in the range [0..max_pointer), but starting at the most likely position.
-        let pointer = (0..registered)
+        let amp_address = (0..registered)
             .rev()
             .chain(registered..max_pointer)
-            .find(|pointer| {
-                let address = derive_multi_sig_address(
-                    &wallet.xpubs.multi_sig_service_xpub,
-                    &wallet.xpubs.multi_sig_user_xpub,
+            .find_map(|pointer| {
+                let amp_address = derive_amp_address(
+                    &wallet_data.xpubs.amp_service_xpub,
+                    &wallet_data.xpubs.amp_user_xpub,
                     self.env.d().network,
-                    *pointer,
-                    Some(&wallet.xpubs.master_blinding_key),
+                    pointer,
+                    Some(&wallet_data.xpubs.master_blinding_key),
                 );
-                address == *addr
+                (amp_address.address == *addr).then_some(amp_address)
             })
             .ok_or_else(|| {
                 anyhow!("can't find own AMP address {addr}, max_pointer: {max_pointer}")
             })?;
 
-        if let Some(address_info) = self.wallet_data.multi_sig_address_cache.get(&pointer) {
-            assert!(address_info.address == *addr);
-            return Ok(address_info.clone());
-        }
+        let subaccount = wallet_data
+            .amp_subaccount
+            .ok_or_else(|| anyhow!("no amp_subaccount"))?;
 
-        // GDK will return 10 results in one call
-        const GDK_RESP_SIZE: u32 = 10;
-        // This will return addresses in the range [pointer, pointer + GDK_RESP_SIZE).
-        // Load the next addresses so we can cache them.
-        let list = wallet::call_wallet(wallet, move |data| {
-            data.ses
-                .get_previous_addresses(Some(pointer + GDK_RESP_SIZE), false)
-        })?;
+        let user_path = sideswap_amp::address_user_path(subaccount, amp_address.pointer)
+            .into_iter()
+            .map(u32::from)
+            .collect();
 
-        for item in list.list {
-            self.wallet_data
-                .multi_sig_address_cache
-                .insert(item.pointer, item);
-        }
-
-        let address_info = self
-            .wallet_data
-            .multi_sig_address_cache
-            .get(&pointer)
-            .expect("the address must exist in multi_sig_address_cache");
-        assert!(address_info.address == *addr);
-        Ok(address_info.clone())
+        Ok(models::AddressInfo {
+            address: amp_address.address,
+            address_type: AddressType::P2wsh,
+            pointer: amp_address.pointer,
+            user_path,
+            is_internal: None,
+            public_key: None,
+            prevout_script: Some(amp_address.prevout_script),
+            service_xpub: Some(wallet_data.xpubs.amp_service_xpub.to_string()),
+        })
     }
 
     fn process_asset_details(&mut self, req: proto::AssetId) {
@@ -2623,43 +2667,6 @@ impl Data {
         }
     }
 
-    fn check_amp_connection(&mut self) {
-        if !self.amp_connected {
-            return;
-        }
-
-        wallet::callback(
-            ACCOUNT_ID_AMP,
-            self,
-            |data| {
-                if data.ses.get_previous_addresses(None, false).is_ok() {
-                    debug!("AMP connection check succeed");
-                    return Ok(true);
-                }
-                warn!("AMP connection check failed");
-                data.ses.disconnect();
-                data.ses.connect();
-                Ok(false)
-            },
-            move |data, res| match res {
-                Ok(is_connected) => {
-                    data.amp_connected = is_connected;
-
-                    if is_connected {
-                        replace_timers(
-                            data,
-                            AMP_CONNECTION_CHECK_PERIOD,
-                            TimerEvent::AmpConnectionCheck,
-                        );
-                    }
-                }
-                Err(err) => {
-                    log::error!("AMP connection check failed unexpectedly: {err}");
-                }
-            },
-        );
-    }
-
     fn send_ws_connect(&self) {
         // TODO: Add a new env type
         let (host, port, use_tls) = if self.network_settings.selected.as_ref()
@@ -2683,7 +2690,6 @@ impl Data {
     }
 
     fn update_amp_connection(&mut self) {
-        // let amp_active = self.app_active || self.pending_amp_sign_requests();
         let amp_active = self.app_active;
 
         if self.amp_active == amp_active {
@@ -2691,21 +2697,21 @@ impl Data {
         }
         self.amp_active = amp_active;
 
-        wallet::callback(
-            ACCOUNT_ID_AMP,
-            self,
-            move |data| {
-                if amp_active {
-                    log::debug!("request AMP connect");
-                    data.ses.connect();
-                } else {
-                    log::debug!("request AMP disconnect");
-                    data.ses.disconnect();
-                }
-                Ok(())
-            },
-            move |_data, _res| {},
-        );
+        // wallet::callback(
+        //     ACCOUNT_ID_AMP,
+        //     self,
+        //     move |data| {
+        //         if amp_active {
+        //             log::debug!("request AMP connect");
+        //             data.ses.connect();
+        //         } else {
+        //             log::debug!("request AMP disconnect");
+        //             data.ses.disconnect();
+        //         }
+        //         Ok(())
+        //     },
+        //     move |_data, _res| {},
+        // );
     }
 
     fn process_push_message(&mut self, req: String, _pending_sign: Option<mpsc::Sender<()>>) {
@@ -2740,13 +2746,20 @@ impl Data {
             proto::to::Msg::PegInRequest(_) => self.process_pegin_request(),
             proto::to::Msg::PegOutAmount(req) => self.process_pegout_amount(req),
             proto::to::Msg::PegOutRequest(req) => self.process_pegout_request(req),
-            proto::to::Msg::GetRecvAddress(req) => self.process_get_recv_address(req),
+            proto::to::Msg::GetRecvAddress(req) => {
+                self.process_get_recv_address(Account::try_from(req).expect("must be valid"))
+            }
             proto::to::Msg::CreateTx(req) => self.process_create_tx(req),
             proto::to::Msg::SendTx(req) => self.process_send_tx(req),
             proto::to::Msg::BlindedValues(req) => self.process_blinded_values(req),
             proto::to::Msg::SetMemo(req) => self.process_set_memo(req),
-            proto::to::Msg::LoadUtxos(req) => self.process_load_utxos(req),
-            proto::to::Msg::LoadAddresses(req) => self.process_load_addresses(req),
+            proto::to::Msg::LoadUtxos(req) => {
+                self.process_load_utxos(Account::try_from(req).expect("must be valid"))
+            }
+            proto::to::Msg::LoadAddresses(req) => {
+                self.process_load_addresses(Account::try_from(req).expect("must be valid"))
+            }
+            proto::to::Msg::LoadTransactions(_req) => self.process_load_transactions(),
             proto::to::Msg::UpdatePushToken(req) => self.process_update_push_token(req),
             proto::to::Msg::AssetDetails(req) => self.process_asset_details(req),
             proto::to::Msg::PortfolioPrices(_) => self.process_portfolio_prices(),
@@ -3041,31 +3054,13 @@ impl Data {
         };
     }
 
-    fn update_used_addresses(
-        &mut self,
-        account_id: AccountId,
-        transactions: &[models::Transaction],
-    ) {
-        let pointer_external = transactions
-            .iter()
-            .map(|tx| tx.max_pointer_external)
-            .max()
-            .unwrap_or_default();
-        let pointer_internal = transactions
-            .iter()
-            .map(|tx| tx.max_pointer_internal)
-            .max()
-            .unwrap_or_default();
-        if account_id == ACCOUNT_ID_REG {
-            self.used_addresses.single_sig = [pointer_external, pointer_internal];
-        } else if account_id == ACCOUNT_ID_AMP {
-            self.used_addresses.multi_sig = pointer_external;
-        }
-        self.update_address_registrations();
-    }
-
     fn update_address_registrations(&mut self) {
-        if self.wallet_data.address_registration_active || !self.ws_connected {
+        let wallet_data = match self.wallet_data.as_mut() {
+            Some(wallet_data) => wallet_data,
+            None => return,
+        };
+
+        if wallet_data.address_registration_active || !self.ws_connected {
             return;
         }
 
@@ -3077,47 +3072,48 @@ impl Data {
         let count_in_advance = 100;
         let limit_one_request = 100;
 
+        // Nested account
         for is_internal in [false, true] {
-            if let Some(wallet) = self.wallets.get(&ACCOUNT_ID_REG) {
-                let first = self.settings.single_sig_registered[is_internal as usize];
-                let last_max =
-                    self.used_addresses.single_sig[is_internal as usize] + count_in_advance;
-                let last = u32::min(first + limit_one_request, last_max);
+            let first = self.settings.nested_registered[usize::from(is_internal)];
+            let last_max =
+                wallet_data.used_addresses.nested[usize::from(is_internal)] + count_in_advance;
+            let last = u32::min(first + limit_one_request, last_max);
 
-                let addresses = (first..last)
-                    .map(|pointer| {
-                        derive_single_sig_address(
-                            &wallet.xpubs.single_sig_account,
-                            self.env.d().network,
-                            is_internal,
-                            pointer,
-                            None,
-                        )
-                        .to_string()
-                    })
-                    .collect::<Vec<_>>();
-
-                if !addresses.is_empty() {
-                    log::debug!(
-                        "register single-sig addresses, is_internal: {}, first: {}, last: {}, count: {}...",
+            let addresses = (first..last)
+                .map(|pointer| {
+                    derive_nested_address(
+                        &wallet_data.xpubs.nested_account,
+                        self.env.d().network,
                         is_internal,
-                        first,
-                        last,
-                        addresses.len(),
-                    );
+                        pointer,
+                        None,
+                    )
+                    .to_string()
+                })
+                .collect::<Vec<_>>();
 
-                    self.wallet_data.address_registration_active = true;
-                    self.make_async_request(
-                        api::Request::RegisterAddresses(api::RegisterAddressesRequest {
-                            device_key,
-                            addresses,
-                        }),
-                        move |data, res| {
-                            data.wallet_data.address_registration_active = false;
+            if !addresses.is_empty() {
+                log::debug!(
+                    "register nested addresses, is_internal: {}, first: {}, last: {}, count: {}...",
+                    is_internal,
+                    first,
+                    last,
+                    addresses.len(),
+                );
+
+                wallet_data.address_registration_active = true;
+                self.make_async_request(
+                    api::Request::RegisterAddresses(api::RegisterAddressesRequest {
+                        device_key,
+                        addresses,
+                    }),
+                    move |data, res| {
+                        if let Some(wallet_data) = data.wallet_data.as_mut() {
+                            wallet_data.address_registration_active = false;
                             match res {
                                 Ok(_) => {
                                     log::debug!("address registration succeed");
-                                    data.settings.single_sig_registered.as_mut()
+                                    data.settings.nested_registered.as_mut()
                                         [is_internal as usize] = last;
                                     data.save_settings();
                                     data.update_address_registrations();
@@ -3127,27 +3123,87 @@ impl Data {
                                     error!("addresses registration failed: {}", err.message);
                                 }
                             }
-                        },
-                    );
-                    return;
-                }
+                        }
+                    },
+                );
+                return;
             }
         }
 
-        if let Some(wallet) = self.wallets.get(&ACCOUNT_ID_AMP) {
-            let first = self.settings.multi_sig_registered;
-            let last_max = self.used_addresses.multi_sig + count_in_advance;
+        // Native account
+        for is_internal in [false, true] {
+            let first = self.settings.native_registered[is_internal as usize];
+            let last_max =
+                wallet_data.used_addresses.native[usize::from(is_internal)] + count_in_advance;
             let last = u32::min(first + limit_one_request, last_max);
 
             let addresses = (first..last)
                 .map(|pointer| {
-                    derive_multi_sig_address(
-                        &wallet.xpubs.multi_sig_service_xpub,
-                        &wallet.xpubs.multi_sig_user_xpub,
+                    derive_native_address(
+                        &wallet_data.xpubs.native_account,
+                        self.env.d().network,
+                        is_internal,
+                        pointer,
+                        None,
+                    )
+                    .to_string()
+                })
+                .collect::<Vec<_>>();
+
+            if !addresses.is_empty() {
+                log::debug!(
+                    "register native addresses, is_internal: {}, first: {}, last: {}, count: {}...",
+                    is_internal,
+                    first,
+                    last,
+                    addresses.len(),
+                );
+
+                wallet_data.address_registration_active = true;
+                self.make_async_request(
+                    api::Request::RegisterAddresses(api::RegisterAddressesRequest {
+                        device_key,
+                        addresses,
+                    }),
+                    move |data, res| {
+                        if let Some(wallet_data) = data.wallet_data.as_mut() {
+                            wallet_data.address_registration_active = false;
+                            match res {
+                                Ok(_) => {
+                                    log::debug!("address registration succeed");
+                                    data.settings.native_registered.as_mut()
+                                        [is_internal as usize] = last;
+                                    data.save_settings();
+                                    data.update_address_registrations();
+                                }
+
+                                Err(err) => {
+                                    error!("addresses registration failed: {}", err.message);
+                                }
+                            }
+                        }
+                    },
+                );
+                return;
+            }
+        }
+
+        // AMP account
+        if self.amp_connected {
+            let first = self.settings.amp_registered;
+            let last_max = wallet_data.used_addresses.amp + count_in_advance;
+            let last = u32::min(first + limit_one_request, last_max);
+
+            let addresses = (first..last)
+                .map(|pointer| {
+                    derive_amp_address(
+                        &wallet_data.xpubs.amp_service_xpub,
+                        &wallet_data.xpubs.amp_user_xpub,
                         self.env.d().network,
                         pointer,
                         None,
                     )
+                    .address
                     .to_string()
                 })
                 .collect::<Vec<_>>();
@@ -3160,24 +3216,26 @@ impl Data {
                     addresses.len(),
                 );
 
-                self.wallet_data.address_registration_active = true;
+                wallet_data.address_registration_active = true;
                 self.make_async_request(
                     api::Request::RegisterAddresses(api::RegisterAddressesRequest {
                         device_key,
                         addresses,
                     }),
                     move |data, res| {
-                        data.wallet_data.address_registration_active = false;
-                        match res {
-                            Ok(_) => {
-                                log::debug!("address registration succeed");
-                                data.settings.multi_sig_registered = last;
-                                data.save_settings();
-                                data.update_address_registrations();
-                            }
+                        if let Some(wallet_data) = data.wallet_data.as_mut() {
+                            wallet_data.address_registration_active = false;
+                            match res {
+                                Ok(_) => {
+                                    log::debug!("address registration succeed");
+                                    data.settings.amp_registered = last;
+                                    data.save_settings();
+                                    data.update_address_registrations();
+                                }
 
-                            Err(err) => {
-                                error!("addresses registration failed: {}", err.message);
+                                Err(err) => {
+                                    error!("addresses registration failed: {}", err.message);
+                                }
                             }
                         }
                     },
@@ -3209,10 +3267,16 @@ impl Data {
         self.process_push_message(data, Some(pending_sign));
     }
 
-    fn get_wallet(&self, account_id: AccountId) -> Result<&Wallet, anyhow::Error> {
-        self.wallets
-            .get(&account_id)
-            .ok_or_else(|| anyhow!("wallet not found"))
+    fn get_wallet(&self, account: Account) -> Result<Arc<dyn GdkSes>, anyhow::Error> {
+        let wallet_data = self
+            .wallet_data
+            .as_ref()
+            .ok_or_else(|| anyhow!("wallet not found"))?;
+        let wallet: Arc<dyn GdkSes> = match account {
+            Account::Reg => wallet_data.wallet_reg.clone(),
+            Account::Amp => wallet_data.wallet_amp.clone(),
+        };
+        Ok(wallet)
     }
 
     fn process_jade_rescan_request(&mut self) {
@@ -3236,18 +3300,14 @@ impl Data {
     }
 
     fn try_jade_unlock(&mut self) -> Result<(), anyhow::Error> {
-        let wallet = self.wallets.get(&ACCOUNT_ID_REG).expect("must exist");
+        let wallet_data = self
+            .wallet_data
+            .as_mut()
+            .ok_or_else(|| anyhow!("no wallet_data"))?;
 
-        match &wallet.login_info.wallet_info {
+        match &wallet_data.wallet_reg.login_info().wallet_info {
             WalletInfo::Mnemonic(_mnemonic) => Ok(()),
-
-            WalletInfo::HwData(hw_data) => {
-                gdk_ses_impl::unlock_hw(self.env, &hw_data.jade)?;
-
-                Ok(())
-            }
-
-            WalletInfo::WatchOnly(_) => unreachable!(),
+            WalletInfo::Jade(jade_data, _watch_only) => utils::unlock_hw(self.env, &jade_data.jade),
         }
     }
 
@@ -3286,10 +3346,6 @@ impl Data {
 fn process_timer_event(data: &mut Data, event: TimerEvent) {
     log::debug!("process timer event: {event:?}");
     match event {
-        TimerEvent::AmpConnectionCheck => {
-            data.check_amp_connection();
-        }
-
         TimerEvent::SyncUtxos => {
             market_worker::sync_utxos(data);
         }
@@ -3300,19 +3356,6 @@ fn process_timer_event(data: &mut Data, event: TimerEvent) {
 
         TimerEvent::CleanQuotes => {
             market_worker::clean_quotes(data);
-        }
-
-        TimerEvent::ReconnectRegular => {
-            wallet::callback(
-                ACCOUNT_ID_REG,
-                data,
-                move |data| {
-                    log::debug!("request regular wallet reconnect");
-                    data.ses.connect();
-                    Ok(())
-                },
-                move |_data, _res| {},
-            );
         }
     }
 }
@@ -3457,27 +3500,15 @@ pub fn start_processing(
         resp_receiver,
         params,
         timers: BTreeMap::new(),
-        sync_complete: false,
-        wallet_loaded_sent: false,
-        confirmed_txids: BTreeMap::new(),
-        unconfirmed_txids: BTreeMap::new(),
-        wallets: BTreeMap::new(),
-        active_extern_peg: None,
-        sent_txhash: None,
-        peg_out_server_amounts: None,
-        active_submits: BTreeMap::new(),
-        active_sign: None,
         settings,
         push_token: None,
         policy_asset,
-        last_blocks: BTreeMap::new(),
-        used_addresses: Default::default(),
         jade_mng: jade_mng::JadeMng::new(jade_status_callback),
         async_requests: BTreeMap::new(),
         network_settings: Default::default(),
         proxy_settings: Default::default(),
         wallet_event_callback,
-        wallet_data: WalletData::new(),
+        wallet_data: None,
     };
 
     debug!("proxy: {:?}", data.proxy());

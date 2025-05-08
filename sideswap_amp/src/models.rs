@@ -10,7 +10,7 @@ pub struct Subaccount {
     pub receiving_id: String,
     #[serde(rename = "type")]
     pub type_: String,
-    pub required_ca: u32,
+    pub required_ca: Option<u32>, // Empty for "simple" account types
 }
 
 #[derive(Deserialize)]
@@ -20,6 +20,13 @@ pub struct AuthenticateResult {
     pub subaccounts: Vec<Subaccount>,
     pub block_height: u32,
     pub block_hash: String,
+}
+
+#[derive(Deserialize)]
+pub struct PreviousAddress {
+    pub branch: u32,
+    pub pointer: u32,
+    pub script: elements::Script,
 }
 
 #[derive(Deserialize)]
@@ -100,7 +107,7 @@ pub struct Transaction {
     pub block_height: u32,
     pub created_at_ts: TimestampUs,
     pub txhash: elements::Txid,
-    pub transaction_vsize: u32,
+    pub transaction_vsize: usize,
     pub fee: u64,
     pub rbf_optin: bool,
 }

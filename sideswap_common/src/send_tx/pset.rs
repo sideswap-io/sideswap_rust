@@ -5,6 +5,7 @@ use sideswap_api::{AssetBlindingFactor, ValueBlindingFactor};
 
 use crate::pset_blind::OptBlindedOutputs;
 
+#[derive(Debug)]
 pub struct PsetInput {
     pub txid: Txid,
     pub vout: u32,
@@ -14,6 +15,7 @@ pub struct PsetInput {
     pub tx_out_sec: TxOutSecrets,
 }
 
+#[derive(Debug)]
 pub struct PsetOutput {
     pub address: elements::Address,
     pub asset_id: AssetId,

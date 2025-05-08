@@ -1,5 +1,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
+    str::FromStr,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -11,9 +12,9 @@ use bitcoin::{
 };
 use elements::{
     pset::{serialize::Serialize, PartiallySignedTransaction},
-    secp256k1_zkp, AssetId, EcdsaSighashType, OutPoint, Transaction, TxOutSecrets, Txid,
+    secp256k1_zkp, AssetId, EcdsaSighashType, OutPoint, Transaction, TxOut, TxOutSecrets, Txid,
+    UnblindError,
 };
-use elements_miniscript::slip77::MasterBlindingKey;
 use rand::Rng;
 use secp256k1::{SecretKey, SECP256K1};
 use serde_bytes::ByteBuf;
@@ -34,38 +35,31 @@ use sideswap_common::{
     send_tx::pset::{construct_pset, ConstructPsetArgs, ConstructedPset, PsetInput, PsetOutput},
     target_os::TargetOs,
     types::{asset_float_amount_, asset_int_amount_, asset_scale},
-    utxo_select,
+    utxo_select::{self, WalletType},
 };
-use sideswap_jade::{
-    byte_array::{ByteArray, ByteArray32},
-    jade_mng,
-};
+use sideswap_jade::jade_mng::{self, AE_STUB_DATA};
 use sideswap_types::{
     duration_ms::DurationMs, hex_encoded::HexEncoded, normal_float::NormalFloat,
     timestamp_ms::TimestampMs,
 };
 
 use crate::{
-    ffi::proto,
-    gdk_json,
-    gdk_ses::{HwData, SignWith, WalletInfo},
-    gdk_ses_impl::{
-        decode_pset, encode_pset, get_jade_asset_info, get_jade_network, get_redeem_script,
-        get_witness, unlock_hw,
-    },
+    ffi::proto::{self, Account},
+    gdk_ses::{JadeData, WalletInfo},
+    models,
     settings::{AddressCacheEntry, AddressWallet},
-    worker::{self, convert_to_swap_utxo, wallet},
+    utils::{
+        convert_chart_point, convert_to_swap_utxo, decode_pset, derive_amp_address,
+        derive_native_address, derive_nested_address, encode_pset, get_jade_asset_info,
+        get_jade_network, get_script_sig, get_witness, unlock_hw,
+    },
+    worker::{self, wallet},
 };
 
-use super::{
-    convert_chart_point, derive_multi_sig_address, derive_single_sig_address, AccountId, CallError,
-    ACCOUNT_ID_AMP, ACCOUNT_ID_REG, SERVER_REQUEST_TIMEOUT_LONG,
-};
+use super::{CallError, SERVER_REQUEST_TIMEOUT_LONG};
 
 // Some random path (not hardened)
 pub const REGISTER_PATH: [u32; 1] = [0x4ec71ae];
-
-const AE_STUB_DATA: ByteArray32 = ByteArray([1u8; 32]);
 
 struct StartedQuote {
     quote_sub_id: QuoteSubId,
@@ -79,15 +73,16 @@ struct StartedQuote {
     instant_swap: bool,
     ind_price: bool,
 
-    utxos: Vec<gdk_json::UnspentOutput>,
-    receive_address: gdk_json::AddressInfo,
-    change_address: gdk_json::AddressInfo,
+    utxos: Vec<models::Utxo>,
+    receive_address: models::AddressInfo,
+    change_address: models::AddressInfo,
 }
 
 pub struct Xprivs {
     pub register_priv: secp256k1::SecretKey,
-    pub single_sig_xpriv: Xpriv,
-    pub multi_sig_xpriv: Xpriv,
+    pub native_xpriv: Xpriv,
+    pub nested_xpriv: Xpriv,
+    pub amp_xpriv: Xpriv,
     pub event_proofs: EventProofs,
     pub ack_succeed: bool,
     pub expected_nonce: Option<u32>,
@@ -97,9 +92,9 @@ struct SwapInfo {
     send_asset: AssetId,
     recv_asset: AssetId,
     recv_amp_asset: bool,
-    utxo_wallets: BTreeSet<AccountId>,
-    receive_wallet: AccountId,
-    change_wallet: AccountId,
+    utxo_wallets: BTreeSet<Account>,
+    receive_wallet: Account,
+    change_wallet: Account,
 }
 
 struct ReceivedQuote {
@@ -116,7 +111,6 @@ struct ReceivedQuote {
 pub struct Data {
     selected_market: Option<AssetPair>,
     own_orders: BTreeMap<OrdId, OwnOrder>,
-    wallet_utxos: BTreeMap<AccountId, gdk_json::UnspentOutputs>,
     server_utxos: BTreeSet<OutPoint>,
     started_quote: Option<Arc<StartedQuote>>,
     received_quotes: BTreeMap<QuoteId, ReceivedQuote>,
@@ -131,7 +125,6 @@ pub fn new() -> Data {
     Data {
         selected_market: None,
         own_orders: BTreeMap::new(),
-        wallet_utxos: BTreeMap::new(),
         server_utxos: BTreeSet::new(),
         started_quote: None,
         received_quotes: BTreeMap::new(),
@@ -372,18 +365,11 @@ fn get_send_recv_amount(
     }
 }
 
-fn get_address_wallet(address: gdk_json::AddressType) -> utxo_select::WalletType {
-    match address {
-        gdk_json::AddressType::P2shP2wpkh => utxo_select::WalletType::Nested,
-        gdk_json::AddressType::P2wsh => utxo_select::WalletType::AMP,
-    }
-}
-
-fn get_wallet_account(wallet: utxo_select::WalletType) -> AccountId {
+pub fn get_wallet_account(wallet: WalletType) -> Account {
     match wallet {
-        utxo_select::WalletType::Native => unreachable!("we don't support native segwit yet"),
-        utxo_select::WalletType::Nested => ACCOUNT_ID_REG,
-        utxo_select::WalletType::AMP => ACCOUNT_ID_AMP,
+        WalletType::Native => Account::Reg,
+        WalletType::Nested => Account::Reg,
+        WalletType::AMP => Account::Amp,
     }
 }
 
@@ -461,18 +447,20 @@ fn try_get_wallet_key_software(
 }
 
 fn try_get_wallet_key_jade(
-    hw_data: &HwData,
+    hw_data: &JadeData,
     register_path: Vec<ChildNumber>,
     message: String,
 ) -> Result<mkt::WalletKey, anyhow::Error> {
-    let root_xpub = hw_data.xpubs.get(&vec![]).expect("must exist").clone();
+    let network = get_jade_network(hw_data.env);
+
+    unlock_hw(hw_data.env, &hw_data.jade)?;
+
+    let root_xpub = hw_data.resolve_xpub(network, &[])?;
 
     let public_key = root_xpub
         .derive_pub(SECP256K1, &register_path)
         .expect("must not fail")
         .public_key;
-
-    unlock_hw(hw_data.env, &hw_data.jade)?;
 
     let _status = hw_data.jade.start_status(jade_mng::JadeStatus::SignMessage);
     let _resp = hw_data
@@ -510,7 +498,7 @@ fn try_get_wallet_key(
     worker: &super::Data,
     challenge: String,
 ) -> Result<mkt::WalletKey, anyhow::Error> {
-    let wallet = worker.wallets.get(&ACCOUNT_ID_REG).expect("must exist");
+    let wallet = worker.get_wallet(Account::Reg).expect("must exist");
 
     let message = sideswap_common::registration::get_message(&challenge);
     log::debug!("sign message: {message}");
@@ -521,12 +509,12 @@ fn try_get_wallet_key(
         .map(ChildNumber::from)
         .collect::<Vec<_>>();
 
-    match &wallet.login_info.wallet_info {
+    match &wallet.login_info().wallet_info {
         WalletInfo::Mnemonic(_mnemonic) => try_get_wallet_key_software(worker, message),
 
-        WalletInfo::HwData(hw_data) => try_get_wallet_key_jade(hw_data, register_path, message),
-
-        WalletInfo::WatchOnly(_) => unreachable!(),
+        WalletInfo::Jade(hw_data, _watch_only) => {
+            try_get_wallet_key_jade(hw_data, register_path, message)
+        }
     }
 }
 
@@ -737,17 +725,15 @@ pub fn ws_disconnected(worker: &mut super::Data) {
         }));
 }
 
-pub fn wallet_utxos(
-    worker: &mut super::Data,
-    account_id: AccountId,
-    utxos: gdk_json::UnspentOutputs,
-) {
+pub fn wallet_utxos(worker: &mut super::Data, account_id: Account, utxos: models::UtxoList) {
     log::debug!(
-        "loaded utxos: {}, account_id: {}",
-        utxos.unspent_outputs.len(),
+        "loaded utxos: {}, account_id: {:?}",
+        utxos.len(),
         account_id,
     );
-    worker.market.wallet_utxos.insert(account_id, utxos);
+    if let Some(wallet_data) = worker.wallet_data.as_mut() {
+        wallet_data.wallet_utxos.insert(account_id, utxos);
+    }
 
     sync_utxos(worker);
     sync_market_list(worker);
@@ -758,6 +744,11 @@ pub fn sync_utxos(worker: &mut super::Data) {
         // Jade can't be online maker, no need to sync UTXOs
         return;
     }
+
+    let wallet_data = match worker.wallet_data.as_ref() {
+        Some(wallet_data) => wallet_data,
+        None => return,
+    };
 
     let required_online_assets = worker
         .market
@@ -777,8 +768,8 @@ pub fn sync_utxos(worker: &mut super::Data) {
     // Submit UTXOs from the both wallets
 
     let mut new_utxos = Vec::new();
-    for wallet_utxos in worker.market.wallet_utxos.values() {
-        for (asset_id, utxo_list) in wallet_utxos.unspent_outputs.iter() {
+    for wallet_utxos in wallet_data.wallet_utxos.values() {
+        for (asset_id, utxo_list) in wallet_utxos.iter() {
             if required_online_assets.contains(asset_id) {
                 for utxo in utxo_list.iter() {
                     let outpoint = OutPoint {
@@ -1054,10 +1045,15 @@ fn process_ws_quote(worker: &mut super::Data, notif: mkt::QuoteNotif) {
     clean_quotes(worker);
 }
 
-fn try_sign_pset_software(
+pub fn try_sign_pset_software(
     worker: &super::Data,
     mut pset: PartiallySignedTransaction,
 ) -> Result<PartiallySignedTransaction, anyhow::Error> {
+    let wallet_data = worker
+        .wallet_data
+        .as_ref()
+        .ok_or_else(|| anyhow!("no wallet_data"))?;
+
     let tx = pset.extract_tx()?;
     let mut sighash_cache = elements::sighash::SighashCache::new(&tx);
     let bytes_to_grind = 1;
@@ -1068,8 +1064,8 @@ fn try_sign_pset_software(
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("xprivs are not set"))?;
 
-    for (&_account_id, wallet) in worker.market.wallet_utxos.iter() {
-        for list in wallet.unspent_outputs.values() {
+    for (&_account_id, wallet) in wallet_data.wallet_utxos.iter() {
+        for list in wallet.values() {
             for utxo in list.iter() {
                 let input = pset
                     .inputs_mut()
@@ -1083,12 +1079,7 @@ fn try_sign_pset_software(
                 if let Some((input_index, pset_input)) = input {
                     let priv_key = derive_priv_key(xprivs, utxo);
 
-                    let redeem_script = get_redeem_script(&utxo);
-                    pset_input.final_script_sig = Some(
-                        elements::script::Builder::new()
-                            .push_slice(redeem_script.as_bytes())
-                            .into_script(),
-                    );
+                    pset_input.final_script_sig = get_script_sig(&utxo);
 
                     pset_input.final_script_witness = Some(get_witness(
                         &mut sighash_cache,
@@ -1106,14 +1097,59 @@ fn try_sign_pset_software(
     Ok(pset)
 }
 
-fn try_sign_pset_jade(
+/// Unblinds a transaction output, if it is confidential.
+///
+/// It returns the secret elements of the value and asset Pedersen commitments.
+pub fn unblind(txout: &TxOut, shared_secret: SecretKey) -> Result<TxOutSecrets, UnblindError> {
+    let (commitment, additional_generator) = match (txout.value, txout.asset) {
+        (
+            elements::confidential::Value::Confidential(com),
+            elements::confidential::Asset::Confidential(gen),
+        ) => (com, gen),
+        _ => return Err(UnblindError::NotConfidential),
+    };
+
+    let rangeproof = txout
+        .witness
+        .rangeproof
+        .as_ref()
+        .ok_or(UnblindError::MissingRangeproof)?;
+
+    let (opening, _) = rangeproof.rewind(
+        SECP256K1,
+        commitment,
+        shared_secret,
+        txout.script_pubkey.as_bytes(),
+        additional_generator,
+    )?;
+
+    let (asset, asset_bf) = opening.message.as_ref().split_at(32);
+    let asset = AssetId::from_slice(asset)?;
+    let asset_bf = AssetBlindingFactor::from_slice(&asset_bf[..32])?;
+
+    let value = opening.value;
+    let value_bf = opening.blinding_factor.as_ref();
+    let value_bf = ValueBlindingFactor::from_slice(value_bf).expect("must not fail");
+
+    Ok(TxOutSecrets {
+        asset,
+        asset_bf,
+        value,
+        value_bf,
+    })
+}
+
+/// Set blinding_nonces only with normal tx sending
+pub fn try_sign_pset_jade(
     worker: &super::Data,
-    utxos: &[&gdk_json::UnspentOutput],
-    receive_addresses: &[&gdk_json::AddressInfo],
-    change_addresses: &[&gdk_json::AddressInfo],
+    utxos: &[&models::Utxo],
+    receive_addresses: &[&models::AddressInfo],
+    change_addresses: &[&models::AddressInfo],
     additional_info: Option<sideswap_jade::models::ReqSignTxAdditionalInfo>,
     mut pset: PartiallySignedTransaction,
     asset_ids: BTreeSet<AssetId>,
+    blinding_nonces: Option<&Vec<String>>,
+    tx_type: jade_mng::TxType,
 ) -> Result<PartiallySignedTransaction, anyhow::Error> {
     let network = get_jade_network(worker.env);
 
@@ -1123,8 +1159,8 @@ fn try_sign_pset_jade(
     // We can use any account here, jade instance will be the same
     let jade = Arc::clone(
         &worker
-            .get_wallet(ACCOUNT_ID_REG)?
-            .login_info
+            .get_wallet(Account::Reg)?
+            .login_info()
             .wallet_info
             .hw_data()
             .ok_or_else(|| anyhow!("jade is not set"))?
@@ -1133,79 +1169,110 @@ fn try_sign_pset_jade(
 
     unlock_hw(worker.env, &jade)?;
 
-    let _status = jade.start_status(jade_mng::JadeStatus::SignTx(jade_mng::TxType::Swap));
+    let _status = jade.start_status(jade_mng::JadeStatus::SignTx(tx_type));
 
     let mut trusted_commitments = Vec::new();
     let mut change = Vec::new();
 
-    let reg_info_v3 = worker
+    let watch_only = worker
         .settings
-        .reg_info_v3
+        .reg_info
         .as_ref()
-        .ok_or_else(|| anyhow!("can't find reg_info_v3"))?;
-    let watch_only = reg_info_v3
-        .jade_watch_only
+        .ok_or_else(|| anyhow!("no reg_info"))?
+        .watch_only
         .as_ref()
-        .ok_or_else(|| anyhow!("can't find jade_watch_only"))?;
-    let master_blinding_key = watch_only
-        .master_blinding_key
-        .parse::<MasterBlindingKey>()?;
+        .ok_or_else(|| anyhow!("no jade"))?;
+    let master_blinding_key = watch_only.master_blinding_key.into_inner();
 
-    for (pset_output, tx_output) in pset.outputs().iter().zip(tx.output.iter()) {
+    for (index, (pset_output, tx_output)) in pset.outputs().iter().zip(tx.output.iter()).enumerate()
+    {
         let receive_address = receive_addresses
             .iter()
-            .find(|address| pset_output.script_pubkey == address.scriptpubkey);
+            .find(|address| pset_output.script_pubkey == address.address.script_pubkey());
         let change_address = change_addresses
             .iter()
-            .find(|address| pset_output.script_pubkey == address.scriptpubkey);
+            .find(|address| pset_output.script_pubkey == address.address.script_pubkey());
 
-        match receive_address.or(change_address) {
+        let own_address = receive_address.or(change_address);
+
+        let shared_secret = if let Some(_own_address) = own_address {
+            let blinding_key = master_blinding_key.blinding_private_key(&tx_output.script_pubkey);
+            let shared_secret = tx_output
+                .nonce
+                .shared_secret(&blinding_key)
+                .ok_or(UnblindError::MissingNonce)?;
+            Some(shared_secret)
+        } else {
+            match blinding_nonces {
+                Some(blinding_nonces) => {
+                    let blinding_nonce = blinding_nonces.get(index).ok_or_else(|| {
+                        anyhow!("blinding_nonces size is less than the tx output len")
+                    })?;
+                    if !blinding_nonce.is_empty() {
+                        let shared_secret = SecretKey::from_str(blinding_nonce)?;
+                        Some(shared_secret)
+                    } else {
+                        None
+                    }
+                }
+                None => None,
+            }
+        };
+
+        let trusted_commitment = if let Some(shared_secret) = shared_secret {
+            let tx_sec = unblind(&tx_output, shared_secret)
+                .map_err(|err| anyhow!("unblinding output failed: {err}, index: {index}"))?;
+
+            let output_blinding_pk = pset_output
+                .blinding_key
+                .as_ref()
+                .ok_or_else(|| anyhow!("no blinding_key in PSET"))?;
+
+            Some(sideswap_jade::models::TrustedCommitment {
+                asset_id: tx_sec.asset.into(),
+                value: tx_sec.value,
+                asset_generator: tx_output
+                    .asset
+                    .commitment()
+                    .ok_or_else(|| anyhow!("can't find asset_generator"))?,
+                value_commitment: tx_output
+                    .value
+                    .commitment()
+                    .ok_or_else(|| anyhow!("can't find value_commitment"))?,
+                blinding_key: output_blinding_pk.inner.into(),
+                abf: tx_sec.asset_bf,
+                vbf: tx_sec.value_bf,
+            })
+        } else {
+            None
+        };
+
+        let change_output = match own_address {
             Some(address_info) => {
                 let variant = match address_info.address_type {
-                    gdk_json::AddressType::P2shP2wpkh => {
+                    models::AddressType::P2wpkh => {
+                        Some(sideswap_jade::models::OutputVariant::P2wpkh)
+                    }
+                    models::AddressType::P2shP2wpkh => {
                         Some(sideswap_jade::models::OutputVariant::P2wpkhP2sh)
                     }
-                    gdk_json::AddressType::P2wsh => None,
+                    models::AddressType::P2wsh => None,
                 };
-
-                let blinding_key =
-                    master_blinding_key.blinding_private_key(&tx_output.script_pubkey);
-                let tx_sec = tx_output.unblind(SECP256K1, blinding_key)?;
-                let output_blinding_pk = address_info
-                    .address
-                    .blinding_pubkey
-                    .expect("blinding_pubkey must be set");
 
                 let is_change = change_address.is_some();
 
-                trusted_commitments.push(Some(sideswap_jade::models::TrustedCommitment {
-                    asset_id: tx_sec.asset.into(),
-                    value: tx_sec.value,
-                    asset_generator: tx_output
-                        .asset
-                        .commitment()
-                        .ok_or_else(|| anyhow!("can't find asset_generator"))?,
-                    value_commitment: tx_output
-                        .value
-                        .commitment()
-                        .ok_or_else(|| anyhow!("can't find value_commitment"))?,
-                    blinding_key: output_blinding_pk.into(),
-                    abf: tx_sec.asset_bf,
-                    vbf: tx_sec.value_bf,
-                }));
-
-                change.push(Some(sideswap_jade::models::Output {
+                Some(sideswap_jade::models::Output {
                     variant,
                     path: address_info.user_path.clone(),
                     recovery_xpub: None,
                     is_change,
-                }));
+                })
             }
-            None => {
-                trusted_commitments.push(None);
-                change.push(None);
-            }
-        }
+            None => None,
+        };
+
+        trusted_commitments.push(trusted_commitment);
+        change.push(change_output);
     }
 
     let sign_tx = sideswap_jade::models::ReqSignTx {
@@ -1219,7 +1286,7 @@ fn try_sign_pset_jade(
         additional_info,
     };
 
-    let resp = jade.sign_tx(sign_tx)?;
+    let resp = jade.sign_liquid_tx(sign_tx)?;
     ensure!(resp, "sign_tx failed");
 
     for input in pset.inputs_mut() {
@@ -1229,18 +1296,18 @@ fn try_sign_pset_jade(
 
         match utxo {
             Some(utxo) => {
-                let user_path = match utxo.address_type {
-                    gdk_json::AddressType::P2shP2wpkh => utxo
+                let user_path = match utxo.wallet_type {
+                    WalletType::Nested | WalletType::Native => utxo
                         .user_path
                         .as_ref()
                         .ok_or_else(|| anyhow!("can't find user_path in UTXO"))?
                         .clone(),
-                    gdk_json::AddressType::P2wsh => worker
+                    WalletType::AMP => worker
                         .settings
-                        .reg_info_v3
+                        .reg_info
                         .as_ref()
-                        .ok_or_else(|| anyhow!("can't find reg_info_v3"))?
-                        .multi_sig_user_path
+                        .ok_or_else(|| anyhow!("can't find reg_info"))?
+                        .amp_user_path
                         .iter()
                         .copied()
                         .chain(std::iter::once(utxo.pointer))
@@ -1257,13 +1324,11 @@ fn try_sign_pset_jade(
                     abf: utxo.assetblinder,
                     vbf: utxo.amountblinder,
                     value_commitment: utxo
-                        .commitment
-                        .as_ref()
+                        .value_commitment
                         .commitment()
                         .ok_or_else(|| anyhow!("the input must be blinded"))?,
                     asset_generator: utxo
-                        .asset_tag
-                        .as_ref()
+                        .asset_commitment
                         .commitment()
                         .ok_or_else(|| anyhow!("the input must be blinded"))?,
                     ae_host_commitment: AE_STUB_DATA,
@@ -1285,14 +1350,14 @@ fn try_sign_pset_jade(
             Some(utxo) => {
                 let signature = jade.get_signature(Some(AE_STUB_DATA))?.unwrap();
 
-                let witness = match utxo.address_type {
-                    gdk_json::AddressType::P2shP2wpkh => {
+                let witness = match utxo.wallet_type {
+                    WalletType::Nested | WalletType::Native => {
                         let public_key = utxo
                             .public_key
                             .ok_or_else(|| anyhow!("can't find public_key in UTXO"))?;
                         vec![signature, public_key.serialize()]
                     }
-                    gdk_json::AddressType::P2wsh => {
+                    WalletType::AMP => {
                         vec![
                             vec![],
                             GREEN_DUMMY_SIG.to_vec(),
@@ -1302,13 +1367,7 @@ fn try_sign_pset_jade(
                     }
                 };
 
-                let redeem_script = get_redeem_script(&utxo);
-                input.final_script_sig = Some(
-                    elements::script::Builder::new()
-                        .push_slice(redeem_script.as_bytes())
-                        .into_script(),
-                );
-
+                input.final_script_sig = get_script_sig(utxo);
                 input.final_script_witness = Some(witness);
             }
             None => {
@@ -1503,13 +1562,12 @@ fn process_ws_new_event(worker: &mut super::Data, notif: mkt::NewEventNotif) {
 }
 
 pub fn process_ws_tx_broadcast(worker: &mut super::Data, notif: mkt::TxBroadcastNotif) {
-    let accounts = worker.wallets.keys().copied().collect::<Vec<_>>();
-    for account_id in accounts {
+    for account_id in [Account::Reg, Account::Amp] {
         let tx = notif.tx.clone();
         wallet::callback(
             account_id,
             worker,
-            move |data| data.ses.broadcast_tx(&tx),
+            move |ses| ses.broadcast_tx(&tx),
             |_data, res| match res {
                 Ok(()) => {
                     log::debug!("tx broadcast succeed");
@@ -1546,7 +1604,7 @@ fn try_online_order_submit(
     worker: &mut super::Data,
     msg: proto::to::OrderSubmit,
     swap_info: &SwapInfo,
-    receive_address: gdk_json::AddressInfo,
+    receive_address: models::AddressInfo,
 ) -> Result<OwnOrder, anyhow::Error> {
     // TODO: Allow submitting online orders from mobile (if desktop is connected)
     ensure!(
@@ -1630,12 +1688,15 @@ fn try_create_funding_tx(
     worker: &mut super::Data,
     asset_id: &AssetId,
     target: u64,
-) -> Result<(gdk_json::UnspentOutput, Transaction), anyhow::Error> {
-    let utxos = worker
-        .market
+) -> Result<(models::Utxo, Transaction), anyhow::Error> {
+    let wallet_data = worker
+        .wallet_data
+        .as_ref()
+        .ok_or_else(|| anyhow!("no wallet_data"))?;
+    let utxos = wallet_data
         .wallet_utxos
         .values()
-        .flat_map(|utxos| utxos.unspent_outputs.values())
+        .flat_map(|utxos| utxos.values())
         .flatten()
         .cloned()
         .collect::<Vec<_>>();
@@ -1652,9 +1713,9 @@ fn try_create_funding_tx(
     };
 
     let wallet_type = if worker.amp_assets.contains(&asset_id) {
-        utxo_select::WalletType::AMP
+        WalletType::AMP
     } else {
-        utxo_select::WalletType::Nested
+        WalletType::Native
     };
 
     // It's not really necessary, but we prefer to receive non-AMP change to the nested Segwit wallet
@@ -1663,7 +1724,7 @@ fn try_create_funding_tx(
         .values()
         .filter_map(|asset| {
             (asset.market_type != Some(MarketType::Amp))
-                .then_some((asset.asset_id, utxo_select::WalletType::Nested))
+                .then_some((asset.asset_id, WalletType::Nested))
         })
         .collect::<BTreeMap<_, _>>();
 
@@ -1672,7 +1733,7 @@ fn try_create_funding_tx(
         utxos: utxos
             .iter()
             .map(|utxo| utxo_select::Utxo {
-                wallet: get_address_wallet(utxo.address_type),
+                wallet: utxo.wallet_type,
                 txid: utxo.txhash,
                 vout: utxo.vout,
                 asset_id: utxo.asset_id,
@@ -1711,12 +1772,9 @@ fn try_create_funding_tx(
         .map(|utxo| PsetInput {
             txid: utxo.txhash,
             vout: utxo.vout,
-            script_pub_key: utxo
-                .script
-                .clone()
-                .unwrap_or_else(|| p2pkh_script(&utxo.public_key.unwrap())),
-            asset_commitment: utxo.asset_tag.into_inner(),
-            value_commitment: utxo.commitment.into_inner(),
+            script_pub_key: utxo.script_pub_key.clone(),
+            asset_commitment: utxo.asset_commitment,
+            value_commitment: utxo.value_commitment,
             tx_out_sec: TxOutSecrets {
                 asset: utxo.asset_id,
                 asset_bf: utxo.assetblinder,
@@ -1770,37 +1828,35 @@ fn try_create_funding_tx(
             None,
             blinded_pset,
             BTreeSet::from([*asset_id]),
+            None,
+            jade_mng::TxType::Swap,
         )?
     } else {
         try_sign_pset_software(worker, blinded_pset)?
     };
 
-    let need_green_signature = selected_utxos.iter().any(|utxo| match utxo.address_type {
-        gdk_json::AddressType::P2shP2wpkh => false,
-        gdk_json::AddressType::P2wsh => true,
+    let need_green_signature = selected_utxos.iter().any(|utxo| match utxo.wallet_type {
+        WalletType::Native | WalletType::Nested => false,
+        WalletType::AMP => true,
     });
     let pset = if need_green_signature {
-        let pset = encode_pset(&pset);
+        let wallet_data = worker
+            .wallet_data
+            .as_ref()
+            .ok_or_else(|| anyhow!("no wallet_data"))?;
+
         let blinding_nonces = get_blinding_nonces(&blinded_outputs);
-        let pset = wallet::call(ACCOUNT_ID_AMP, worker, move |data| {
-            let utxos = data.ses.get_utxos()?;
-            data.ses.sign_pset(
-                &utxos,
-                &pset,
-                &blinding_nonces,
-                &BTreeMap::new(),
-                jade_mng::TxType::MakerUtxo,
-                SignWith::GreenBackend,
-            )
-        })?;
-        decode_pset(&pset)?
+
+        wallet_data
+            .wallet_amp
+            .green_backend_sign(pset, blinding_nonces)?
     } else {
         pset
     };
 
     let tx = pset.extract_tx()?;
 
-    let prevout_script = if let Some(script) = receive_address.script.clone() {
+    let prevout_script = if let Some(script) = receive_address.prevout_script.clone() {
         script
     } else if let Some(public_key) = receive_address.public_key {
         p2pkh_script(&public_key)
@@ -1817,8 +1873,8 @@ fn try_create_funding_tx(
 
     let blinded_output = blinded_outputs.get(vout).expect("").as_ref().expect("");
 
-    let utxo = gdk_json::UnspentOutput {
-        address_type: receive_address.address_type,
+    let utxo = models::Utxo {
+        wallet_type,
         txhash: tx.txid(),
         pointer: receive_address.pointer,
         vout: vout as u32,
@@ -1826,21 +1882,15 @@ fn try_create_funding_tx(
         satoshi: updated_recipient.amount,
         amountblinder: blinded_output.vbf,
         assetblinder: blinded_output.abf,
-        subaccount: receive_address.subaccount,
         is_internal: receive_address.is_internal.unwrap_or_default(),
-        user_sighash: None,
         prevout_script,
         is_blinded: true,
-        is_confidential: Some(true),
         public_key: receive_address.public_key,
         user_path: Some(receive_address.user_path),
-        block_height: None,
-        script: receive_address.script,
-        subtype: receive_address.subtype,
-        user_status: None,
-        asset_tag: user_tx_output.asset.into(),
-        commitment: user_tx_output.value.into(),
-        nonce_commitment: user_tx_output.nonce.commitment().unwrap().to_string(),
+        block_height: 0,
+        script_pub_key: receive_address.address.script_pubkey(),
+        asset_commitment: user_tx_output.asset,
+        value_commitment: user_tx_output.value,
     };
 
     Ok((utxo, tx))
@@ -1850,7 +1900,7 @@ fn try_offline_order_submit(
     worker: &mut super::Data,
     msg: proto::to::OrderSubmit,
     swap_info: &SwapInfo,
-    receive_address: gdk_json::AddressInfo,
+    receive_address: models::AddressInfo,
 ) -> Result<OwnOrder, anyhow::Error> {
     let trade_dir = TradeDir::from(msg.trade_dir());
     let asset_pair = AssetPair::from(&msg.asset_pair);
@@ -1880,12 +1930,15 @@ fn try_offline_order_submit(
         TradeDir::Buy => (quote_amount, base_amount),
     };
 
-    let utxo = worker
-        .market
+    let wallet_data = worker
+        .wallet_data
+        .as_ref()
+        .ok_or_else(|| anyhow!("no wallet_data"))?;
+    let utxo = wallet_data
         .wallet_utxos
         .iter()
         .filter(|(account, _utxos)| swap_info.utxo_wallets.contains(*account))
-        .flat_map(|(_account, utxos)| utxos.unspent_outputs.values())
+        .flat_map(|(_account, utxos)| utxos.values())
         .flatten()
         .find(|utxo| {
             utxo.asset_id == swap_info.send_asset
@@ -1954,8 +2007,6 @@ fn try_offline_order_submit(
         witness: Default::default(),
     };
 
-    let redeem_script = get_redeem_script(&utxo);
-
     let tx = Transaction {
         version: 2,
         lock_time: elements::LockTime::ZERO,
@@ -1965,9 +2016,7 @@ fn try_offline_order_submit(
                 vout: utxo.vout,
             },
             is_pegin: false,
-            script_sig: elements::script::Builder::new()
-                .push_slice(redeem_script.as_bytes())
-                .into_script(),
+            script_sig: get_script_sig(&utxo).unwrap_or_default(),
             sequence: Default::default(),
             asset_issuance: Default::default(),
             witness: Default::default(),
@@ -1976,14 +2025,14 @@ fn try_offline_order_submit(
     };
 
     let input_witness = if is_jade(worker) {
-        let wallet = worker.get_wallet(ACCOUNT_ID_REG)?;
+        let wallet = worker.get_wallet(Account::Reg)?;
         let network = get_jade_network(worker.env);
 
         let tx_bin = elements::encode::serialize(&tx);
 
         let jade = Arc::clone(
             &wallet
-                .login_info
+                .login_info()
                 .wallet_info
                 .hw_data()
                 .ok_or_else(|| anyhow!("jade is not set"))?
@@ -2016,10 +2065,11 @@ fn try_offline_order_submit(
         })];
 
         let variant = match receive_address.address_type {
-            gdk_json::AddressType::P2shP2wpkh => {
+            models::AddressType::P2wpkh => Some(sideswap_jade::models::OutputVariant::P2wpkh),
+            models::AddressType::P2shP2wpkh => {
                 Some(sideswap_jade::models::OutputVariant::P2wpkhP2sh)
             }
-            gdk_json::AddressType::P2wsh => None,
+            models::AddressType::P2wsh => None,
         };
 
         let change = vec![Some(sideswap_jade::models::Output {
@@ -2040,21 +2090,21 @@ fn try_offline_order_submit(
             additional_info: Some(additional_info),
         };
 
-        let resp = jade.sign_tx(sign_tx)?;
+        let resp = jade.sign_liquid_tx(sign_tx)?;
         ensure!(resp, "sign_tx failed");
 
-        let user_path = match utxo.address_type {
-            gdk_json::AddressType::P2shP2wpkh => utxo
+        let user_path = match utxo.wallet_type {
+            WalletType::Native | WalletType::Nested => utxo
                 .user_path
                 .as_ref()
                 .ok_or_else(|| anyhow!("can't find user_path in UTXO"))?
                 .clone(),
-            gdk_json::AddressType::P2wsh => worker
+            WalletType::AMP => worker
                 .settings
-                .reg_info_v3
+                .reg_info
                 .as_ref()
-                .ok_or_else(|| anyhow!("can't find reg_info_v3"))?
-                .multi_sig_user_path
+                .ok_or_else(|| anyhow!("can't find reg_info"))?
+                .amp_user_path
                 .iter()
                 .copied()
                 .chain(std::iter::once(utxo.pointer))
@@ -2071,13 +2121,11 @@ fn try_offline_order_submit(
             abf: utxo.assetblinder,
             vbf: utxo.amountblinder,
             value_commitment: utxo
-                .commitment
-                .as_ref()
+                .value_commitment
                 .commitment()
                 .ok_or_else(|| anyhow!("input must be blinded"))?,
             asset_generator: utxo
-                .asset_tag
-                .as_ref()
+                .asset_commitment
                 .commitment()
                 .ok_or_else(|| anyhow!("input must be blinded"))?,
             ae_host_commitment: AE_STUB_DATA,
@@ -2086,14 +2134,14 @@ fn try_offline_order_submit(
 
         let signature = jade.get_signature(Some(AE_STUB_DATA))?.unwrap();
 
-        match utxo.address_type {
-            gdk_json::AddressType::P2shP2wpkh => {
+        match utxo.wallet_type {
+            WalletType::Native | WalletType::Nested => {
                 let public_key = utxo
                     .public_key
                     .ok_or_else(|| anyhow!("can't find public_key in UTXO"))?;
                 vec![signature, public_key.serialize()]
             }
-            gdk_json::AddressType::P2wsh => {
+            WalletType::AMP => {
                 vec![
                     vec![],
                     GREEN_DUMMY_SIG.to_vec(),
@@ -2152,33 +2200,32 @@ fn try_offline_order_submit(
 
 #[derive(Debug)]
 enum ResolveRes {
-    Success { address_info: gdk_json::AddressInfo },
+    Success { address_info: models::AddressInfo },
     UnregisteredGaid { domain_agent: String },
 }
 
 #[derive(Copy, Clone)]
-enum CachePolicy {
+pub enum CachePolicy {
     Use,
     Skip,
 }
 
-#[derive(Copy, Clone)]
-enum AddressType {
+#[derive(Copy, Clone, PartialEq, Eq)]
+pub enum AddressType {
     Receive,
     Change,
 }
 
-fn get_address(
+pub fn get_address(
     worker: &mut super::Data,
-    account_id: AccountId,
-    address: AddressType,
+    account_id: Account,
+    address_type: AddressType,
     cache_policy: CachePolicy,
-) -> Result<gdk_json::AddressInfo, anyhow::Error> {
-    let address_wallet = match (account_id, address) {
-        (ACCOUNT_ID_REG, AddressType::Receive) => AddressWallet::NestedReceive,
-        (ACCOUNT_ID_REG, AddressType::Change) => AddressWallet::NestedChange,
-        (ACCOUNT_ID_AMP, _) => AddressWallet::Amp,
-        _ => unreachable!("unexpected account_id: {account_id}"),
+) -> Result<models::AddressInfo, anyhow::Error> {
+    let address_wallet = match (account_id, address_type) {
+        (Account::Reg, AddressType::Receive) => AddressWallet::NativeReceive,
+        (Account::Reg, AddressType::Change) => AddressWallet::NativeChange,
+        (Account::Amp, _) => AddressWallet::Amp,
     };
 
     match cache_policy {
@@ -2189,25 +2236,40 @@ fn get_address(
                 .iter()
                 .find(|address| address.address_wallet == address_wallet);
             if let Some(address) = cached_address {
-                let wallet = worker.get_wallet(account_id)?;
+                let wallet_data = worker
+                    .wallet_data
+                    .as_ref()
+                    .ok_or_else(|| anyhow!("no wallet_data"))?;
 
                 let expected_address = match address_wallet {
-                    AddressWallet::NestedReceive | AddressWallet::NestedChange => {
-                        derive_single_sig_address(
-                            &wallet.xpubs.single_sig_account,
+                    AddressWallet::NativeReceive | AddressWallet::NativeChange => {
+                        derive_native_address(
+                            &wallet_data.xpubs.native_account,
                             worker.env.d().network,
-                            address_wallet == AddressWallet::NestedChange,
+                            address_type == AddressType::Change,
                             address.address.pointer,
-                            Some(&wallet.xpubs.master_blinding_key),
+                            Some(&wallet_data.xpubs.master_blinding_key),
                         )
                     }
-                    AddressWallet::Amp => derive_multi_sig_address(
-                        &wallet.xpubs.multi_sig_service_xpub,
-                        &wallet.xpubs.multi_sig_user_xpub,
-                        worker.env.d().network,
-                        address.address.pointer,
-                        Some(&wallet.xpubs.master_blinding_key),
-                    ),
+                    AddressWallet::NestedReceive | AddressWallet::NestedChange => {
+                        derive_nested_address(
+                            &wallet_data.xpubs.nested_account,
+                            worker.env.d().network,
+                            address_type == AddressType::Change,
+                            address.address.pointer,
+                            Some(&wallet_data.xpubs.master_blinding_key),
+                        )
+                    }
+                    AddressWallet::Amp => {
+                        derive_amp_address(
+                            &wallet_data.xpubs.amp_service_xpub,
+                            &wallet_data.xpubs.amp_user_xpub,
+                            worker.env.d().network,
+                            address.address.pointer,
+                            Some(&wallet_data.xpubs.master_blinding_key),
+                        )
+                        .address
+                    }
                 };
                 assert_eq!(
                     expected_address, address.address.address,
@@ -2220,9 +2282,9 @@ fn get_address(
         CachePolicy::Skip => {}
     }
 
-    let address = wallet::call(account_id, worker, move |data| match address {
-        AddressType::Receive => data.ses.get_receive_address(),
-        AddressType::Change => data.ses.get_change_address(),
+    let address = wallet::call(account_id, worker, move |ses| match address_type {
+        AddressType::Receive => ses.get_receive_address(),
+        AddressType::Change => ses.get_change_address(),
     })?;
 
     match cache_policy {
@@ -2253,7 +2315,13 @@ fn resolve_recv_address(
     cache_policy: CachePolicy,
 ) -> Result<ResolveRes, anyhow::Error> {
     if swap_info.recv_amp_asset {
-        let gaid = wallet::call(ACCOUNT_ID_AMP, worker, |data| data.ses.get_gaid())?;
+        let gaid = worker
+            .wallet_data
+            .as_ref()
+            .ok_or_else(|| anyhow!("no wallet_data"))?
+            .gaid
+            .clone()
+            .ok_or_else(|| anyhow!("no gaid"))?;
 
         let res = send_market_request!(
             worker,
@@ -2433,7 +2501,7 @@ fn try_start_quotes(
     worker: &mut super::Data,
     msg: proto::to::StartQuotes,
     swap_info: SwapInfo,
-    receive_address: gdk_json::AddressInfo,
+    receive_address: models::AddressInfo,
     order_id: Option<u64>,
     private_id: Option<String>,
 ) -> Result<StartedQuote, anyhow::Error> {
@@ -2502,12 +2570,15 @@ fn try_start_quotes(
     let client_sub_id = msg.client_sub_id;
     drop(msg);
 
-    let utxos = worker
-        .market
+    let wallet_data = worker
+        .wallet_data
+        .as_ref()
+        .ok_or_else(|| anyhow!("no wallet_data"))?;
+    let utxos = wallet_data
         .wallet_utxos
         .iter()
         .filter(|(account, _utxos)| swap_info.utxo_wallets.contains(*account) && !ind_price)
-        .flat_map(|(_account, utxos)| utxos.unspent_outputs.values())
+        .flat_map(|(_account, utxos)| utxos.values())
         .flatten()
         .filter(|utxo| utxo.asset_id == swap_info.send_asset)
         .cloned()
@@ -2569,18 +2640,18 @@ fn get_swap_info(
     let recv_amp_asset = worker.amp_assets.contains(&recv_asset);
 
     // Use both wallets, Jade can now sign from both
-    let utxo_wallets = BTreeSet::from([ACCOUNT_ID_REG, ACCOUNT_ID_AMP]);
+    let utxo_wallets = BTreeSet::from([Account::Reg, Account::Amp]);
 
     let receive_wallet = if recv_amp_asset {
-        ACCOUNT_ID_AMP
+        Account::Amp
     } else {
-        ACCOUNT_ID_REG
+        Account::Reg
     };
 
     let change_wallet = if send_amp_asset {
-        ACCOUNT_ID_AMP
+        Account::Amp
     } else {
-        ACCOUNT_ID_REG
+        Account::Reg
     };
 
     SwapInfo {
@@ -2806,6 +2877,8 @@ fn try_accept_quote(
             Some(additional_info),
             pset,
             BTreeSet::from([send_asset, recv_asset]),
+            None,
+            jade_mng::TxType::Swap,
         )?
     } else {
         // FIXME: Verify PSET amounts before signing it
@@ -2923,7 +2996,7 @@ pub fn load_history(worker: &mut super::Data, msg: proto::to::LoadHistory) {
     );
 }
 
-fn is_jade(worker: &super::Data) -> bool {
+pub fn is_jade(worker: &super::Data) -> bool {
     worker.market.xprivs.is_none()
 }
 
@@ -2931,11 +3004,11 @@ pub fn set_xprivs(worker: &mut super::Data, xprivs: Xprivs) {
     worker.market.xprivs = Some(xprivs);
 }
 
-fn derive_priv_key(xprivs: &Xprivs, utxo: &gdk_json::UnspentOutput) -> SecretKey {
-    match utxo.address_type {
-        gdk_json::AddressType::P2shP2wpkh => {
+fn derive_priv_key(xprivs: &Xprivs, utxo: &models::Utxo) -> SecretKey {
+    match utxo.wallet_type {
+        WalletType::Native => {
             xprivs
-                .single_sig_xpriv
+                .native_xpriv
                 .derive_priv(
                     SECP256K1,
                     &[
@@ -2947,9 +3020,23 @@ fn derive_priv_key(xprivs: &Xprivs, utxo: &gdk_json::UnspentOutput) -> SecretKey
                 .expect("must not fail")
                 .private_key
         }
-        gdk_json::AddressType::P2wsh => {
+        WalletType::Nested => {
             xprivs
-                .multi_sig_xpriv
+                .nested_xpriv
+                .derive_priv(
+                    SECP256K1,
+                    &[
+                        ChildNumber::from_normal_idx(utxo.is_internal.into())
+                            .expect("must not fail"),
+                        ChildNumber::from_normal_idx(utxo.pointer).expect("must not fail"),
+                    ],
+                )
+                .expect("must not fail")
+                .private_key
+        }
+        WalletType::AMP => {
+            xprivs
+                .amp_xpriv
                 .derive_priv(
                     SECP256K1,
                     &[ChildNumber::from_normal_idx(utxo.pointer).expect("must not fail")],
@@ -2972,13 +3059,15 @@ fn sync_market_list(worker: &mut super::Data) {
         .flat_map(|market| [market.asset_pair.base, market.asset_pair.quote])
         .collect::<BTreeSet<_>>();
 
-    let wallet_token_assets = worker
-        .market
+    let wallet_data = match worker.wallet_data.as_ref() {
+        Some(wallet_data) => wallet_data,
+        None => return,
+    };
+
+    let wallet_token_assets = wallet_data
         .wallet_utxos
         .iter()
-        .filter_map(|(account, utxos)| {
-            (*account == ACCOUNT_ID_REG).then_some(utxos.unspent_outputs.keys())
-        })
+        .filter_map(|(account, utxos)| (*account == Account::Reg).then_some(utxos.keys()))
         .flatten()
         .copied()
         .collect::<BTreeSet<_>>();

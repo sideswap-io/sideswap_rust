@@ -46,6 +46,13 @@ impl BEScript {
             Self::Elements(script) => Some(script),
         }
     }
+    pub fn into_elements(self) -> elements::Script {
+        // For some reasons the Liquid wallet contains Bitcoin
+        match self {
+            Self::Bitcoin(script) => script.as_bytes().to_vec().into(),
+            Self::Elements(script) => script,
+        }
+    }
 }
 
 impl Default for BEScript {

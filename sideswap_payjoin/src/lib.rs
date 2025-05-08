@@ -8,7 +8,7 @@ use sideswap_common::{
     pset_blind::get_blinding_nonces,
     recipient::Recipient,
     send_tx::pset::{construct_pset, ConstructPsetArgs, ConstructedPset, PsetInput, PsetOutput},
-    utxo_select,
+    utxo_select::{self, WalletType},
 };
 
 use crate::server_api::{SignResponse, StartResponse};
@@ -27,6 +27,7 @@ pub struct AcceptedAssets {
 }
 
 pub struct Utxo {
+    pub wallet_type: WalletType,
     pub txid: elements::Txid,
     pub vout: u32,
     pub asset_id: elements::AssetId,
@@ -41,7 +42,6 @@ pub struct CreatePayjoin {
     pub base_url: String,
     pub user_agent: String,
     pub utxos: Vec<Utxo>,
-    pub multisig_wallet: bool,
     pub use_all_utxos: bool,
     pub recipients: Vec<Recipient>,
     pub deduct_fee: Option<usize>,
@@ -54,10 +54,6 @@ pub struct CreatedPayjoin {
     pub blinding_nonces: Vec<String>,
     pub asset_fee: u64,
     pub network_fee: u64,
-}
-
-pub trait Wallet {
-    fn change_address(&mut self) -> Result<elements::Address, anyhow::Error>;
 }
 
 static AGENT: std::sync::LazyLock<ureq::Agent> = std::sync::LazyLock::new(|| {
@@ -97,7 +93,7 @@ pub fn accepted_assets(req: GetAcceptedAssets) -> Result<AcceptedAssets, anyhow:
 }
 
 pub fn create_payjoin(
-    wallet: &mut impl Wallet,
+    change_cb: &mut dyn FnMut() -> Result<elements::Address, anyhow::Error>,
     req: CreatePayjoin,
 ) -> Result<CreatedPayjoin, anyhow::Error> {
     let CreatePayjoin {
@@ -105,7 +101,6 @@ pub fn create_payjoin(
         base_url,
         user_agent,
         utxos: client_utxos,
-        multisig_wallet,
         use_all_utxos,
         recipients,
         deduct_fee,
@@ -141,12 +136,6 @@ pub fn create_payjoin(
     ensure!(server_change_address.is_blinded());
     ensure!(!server_utxos.is_empty());
 
-    let wallet_type = if multisig_wallet {
-        utxo_select::WalletType::AMP
-    } else {
-        utxo_select::WalletType::Nested
-    };
-
     let policy_asset = network.d().policy_asset.asset_id();
     let args = utxo_select::payjoin::Args {
         policy_asset,
@@ -159,7 +148,7 @@ pub fn create_payjoin(
             .map(|utxo| utxo_select::Utxo {
                 asset_id: utxo.asset_id,
                 value: utxo.value,
-                wallet: wallet_type,
+                wallet: utxo.wallet_type,
                 txid: utxo.txid,
                 vout: utxo.vout,
             })
@@ -202,6 +191,7 @@ pub fn create_payjoin(
     let server_utxos = server_utxos
         .into_iter()
         .map(|utxo| Utxo {
+            wallet_type: WalletType::Native,
             txid: utxo.txid,
             vout: utxo.vout,
             asset_id: utxo.asset_id,
@@ -225,7 +215,7 @@ pub fn create_payjoin(
     }
 
     for output in change.iter() {
-        let address = wallet.change_address()?;
+        let address = change_cb()?;
         outputs.push(PsetOutput {
             asset_id: output.asset_id,
             amount: output.value,

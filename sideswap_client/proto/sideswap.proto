@@ -1,6 +1,18 @@
 syntax = "proto2";
 package sideswap.proto;
 
+enum Account {
+  REG = 1;
+  AMP_ = 2;
+}
+
+enum ScriptType {
+  // Native SegWit
+  P2WPKH = 1;
+  // Nested SegWit/AMP
+  P2SH = 2;
+}
+
 enum ActivePage {
   OTHER = 0;
   PEG_IN = 1;
@@ -26,9 +38,6 @@ enum TradeDir {
 message Empty {
 }
 
-message Account {
-  required int32 id = 1;
-}
 
 message Address {
   required string addr = 1;
@@ -95,7 +104,6 @@ message TransItem {
   required string id = 1;
   required int64 created_at = 2;
   optional Confs confs = 3;
-  required Account account = 4;
 
   oneof item {
     Tx tx = 10;
@@ -132,7 +140,6 @@ message OutPoint {
 
 message CreateTx {
   repeated AddressAmount addressees = 1;
-  required Account account = 2;
   repeated OutPoint utxos = 3;
   optional string fee_asset_id = 4;
   optional uint32 deduct_fee_output = 5;
@@ -280,7 +287,6 @@ message To {
     required int64 amount = 1;
     required bool is_send_entered = 2;
     required double fee_rate = 3;
-    required Account account = 4;
   }
 
   message PegOutRequest {
@@ -290,7 +296,6 @@ message To {
     required double fee_rate = 5;
     required string recv_addr = 6;
     required int32 blocks = 7;
-    required Account account = 8;
   }
 
   message SetMemo {
@@ -300,7 +305,6 @@ message To {
   }
 
   message SendTx {
-    required Account account = 1;
     required string id = 2;
   }
 
@@ -388,6 +392,7 @@ message To {
     BlindedValues blinded_values = 14;
     Account load_utxos = 17;
     Account load_addresses = 18;
+    Empty load_transactions = 20;
 
     PegInRequest peg_in_request = 21;
     PegOutAmount peg_out_amount = 24;
@@ -507,7 +512,6 @@ message From {
       required int64 recv_amount = 2;
       required bool is_send_entered = 4;
       required double fee_rate = 5;
-      required Account account = 6;
     }
 
     oneof result {
@@ -543,10 +547,16 @@ message From {
       required string unconfidential_address = 4;
       required uint32 index = 2;
       required bool is_internal = 3;
+      required ScriptType script_type = 5;
     }
 
     required Account account = 1;
     repeated Address addresses = 2;
+    optional string error_msg = 3;
+  }
+
+  message LoadTransactions {
+    repeated TransItem txs = 1;
     optional string error_msg = 3;
   }
 
@@ -818,6 +828,7 @@ message From {
     BlindedValues blinded_values = 33;
     LoadUtxos load_utxos = 35;
     LoadAddresses load_addresses = 36;
+    LoadTransactions load_transactions = 37;
 
     ShowMessage show_message = 50;
     ShowInsufficientFunds insufficient_funds = 55;
@@ -825,6 +836,8 @@ message From {
     Empty server_connected = 60;
     Empty server_disconnected = 61;
     AssetDetails asset_details = 65;
+    Empty new_block = 62;
+    Empty new_tx = 63;
 
     LocalMessage local_message = 68;
 

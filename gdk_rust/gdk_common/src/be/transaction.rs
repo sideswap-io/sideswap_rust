@@ -1,26 +1,19 @@
 use crate::be::*;
 use crate::error::Error;
 use crate::model::{Balances, TransactionType};
-use crate::scripts::{p2pkh_script, ScriptType};
 use crate::NetworkId;
-use bitcoin::amount::Amount;
-use bitcoin::blockdata::script::Instruction;
 use bitcoin::consensus::encode::deserialize as btc_des;
 use bitcoin::consensus::encode::serialize as btc_ser;
 use bitcoin::hashes::hex::FromHex;
 use bitcoin::hashes::Hash;
-use bitcoin::secp256k1::{self, ecdsa::Signature, Message, Secp256k1};
-use bitcoin::sighash::SighashCache;
-use bitcoin::{CompressedPublicKey, Sequence};
+use bitcoin::Sequence;
+use elements::confidential::{AssetBlindingFactor, ValueBlindingFactor};
 use elements::encode::deserialize as elm_des;
 use elements::encode::serialize as elm_ser;
-use elements::hex::ToHex;
 use log::trace;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};
-
-pub const DUST_VALUE: u64 = 546;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Hash)]
 pub enum BETransaction {
@@ -95,7 +88,7 @@ impl BETransaction {
                 .filter(|i| !i.previous_output.is_null())
                 .map(|i| i.previous_output.txid.into())
                 .collect(),
-            // use elements::OutPoint::is_null once available upstream
+            // FIXME: use elements::OutPoint::is_null once available upstream
             Self::Elements(tx) => tx
                 .input
                 .iter()
@@ -196,11 +189,11 @@ impl BETransaction {
         }
     }
 
-    pub fn output_assetblinder_hex(
+    pub fn output_assetblinder(
         &self,
         vout: u32,
         all_unblinded: &HashMap<elements::OutPoint, elements::TxOutSecrets>,
-    ) -> Option<String> {
+    ) -> Option<AssetBlindingFactor> {
         match self {
             Self::Bitcoin(_) => None,
             Self::Elements(tx) => {
@@ -208,16 +201,16 @@ impl BETransaction {
                     txid: tx.txid(),
                     vout,
                 };
-                all_unblinded.get(&outpoint).map(|unblinded| unblinded.asset_bf.to_hex())
+                all_unblinded.get(&outpoint).map(|unblinded| unblinded.asset_bf)
             }
         }
     }
 
-    pub fn output_amountblinder_hex(
+    pub fn output_amountblinder(
         &self,
         vout: u32,
         all_unblinded: &HashMap<elements::OutPoint, elements::TxOutSecrets>,
-    ) -> Option<String> {
+    ) -> Option<ValueBlindingFactor> {
         match self {
             Self::Bitcoin(_) => None,
             Self::Elements(tx) => {
@@ -225,7 +218,7 @@ impl BETransaction {
                     txid: tx.txid(),
                     vout,
                 };
-                all_unblinded.get(&outpoint).map(|unblinded| unblinded.value_bf.to_hex())
+                all_unblinded.get(&outpoint).map(|unblinded| unblinded.value_bf)
             }
         }
     }
@@ -243,7 +236,7 @@ impl BETransaction {
     pub fn get_weight(&self) -> usize {
         match self {
             Self::Bitcoin(tx) => tx.weight().to_wu() as usize,
-            Self::Elements(tx) => tx.weight(),
+            Self::Elements(tx) => tx.discount_weight(),
         }
     }
 
@@ -375,7 +368,7 @@ impl BETransaction {
                     .filter(|o| all_scripts.contains_key(&o.script_pubkey.clone().into()))
                     .map(|o| o.value.to_sat() as i64)
                     .sum();
-                result.insert("btc".to_string(), my_in - my_out);
+                result.insert(None, my_in - my_out);
                 result
             }
             Self::Elements(tx) => {
@@ -394,8 +387,8 @@ impl BETransaction {
                             outpoint,
                             unblinded.value
                         );
-                        let asset_id_str = unblinded.asset.to_hex();
-                        *result.entry(asset_id_str).or_default() -= unblinded.value as i64;
+                        let asset_id = unblinded.asset;
+                        *result.entry(Some(asset_id)).or_default() -= unblinded.value as i64;
                         // TODO check overflow
                     }
                 }
@@ -411,8 +404,8 @@ impl BETransaction {
                             outpoint,
                             unblinded.value
                         );
-                        let asset_id_str = unblinded.asset.to_hex();
-                        *result.entry(asset_id_str).or_default() += unblinded.value as i64;
+                        let asset_id = unblinded.asset;
+                        *result.entry(Some(asset_id)).or_default() += unblinded.value as i64;
                         // TODO check overflow
                     }
                 }
@@ -438,58 +431,6 @@ impl BETransaction {
         } else {
             TransactionType::Outgoing
         }
-    }
-
-    /// Verify the given transaction input. Only supports the script types that
-    /// can be managed using gdk-rust. Implemented for Bitcoin only.
-    ///
-    /// The `hashcache` argument should be initialized as None for every tx and
-    /// reused for its inputs.
-    pub fn verify_input_sig<'a>(
-        &'a self,
-        secp: &Secp256k1<impl secp256k1::Verification>,
-        hashcache: &mut Option<SighashCache<&'a bitcoin::Transaction>>,
-        inv: usize,
-        public_key: &CompressedPublicKey,
-        value: u64,
-        script_type: ScriptType,
-    ) -> Result<(), Error> {
-        let tx = if let BETransaction::Bitcoin(tx) = self {
-            tx
-        } else {
-            // Signature verification is currently only used on Bitcoin
-            unimplemented!();
-        };
-        let mut sig = match script_type {
-            ScriptType::P2wpkh | ScriptType::P2shP2wpkh => {
-                tx.input[inv].witness.to_vec().get(0).cloned().ok_or(Error::InputValidationFailed)
-            }
-            ScriptType::P2pkh => match tx.input[inv].script_sig.instructions().next() {
-                Some(Ok(Instruction::PushBytes(sig))) => Ok(sig.as_bytes().to_vec()),
-                _ => Err(Error::InputValidationFailed),
-            },
-        }?;
-
-        let sighash = sig.pop().ok_or_else(|| Error::InputValidationFailed)?;
-        let sighash = bitcoin::sighash::EcdsaSighashType::from_standard(sighash as u32)?;
-
-        let hash = if script_type.is_segwit() {
-            let amount = Amount::from_sat(value);
-            let script_pubkey =
-                bitcoin::Address::p2wpkh(&public_key, bitcoin::Network::Bitcoin).script_pubkey();
-            let hashcache = hashcache.get_or_insert_with(|| SighashCache::new(tx));
-            hashcache.p2wpkh_signature_hash(inv, &script_pubkey, amount, sighash)?.to_byte_array()
-        } else {
-            let script_pubkey = p2pkh_script(public_key);
-            let sighash_cache = SighashCache::new(tx);
-            sighash_cache
-                .legacy_signature_hash(inv, &script_pubkey, sighash.to_u32())?
-                .to_byte_array()
-        };
-        let message = Message::from_digest(hash);
-
-        secp.verify_ecdsa(&message, &Signature::from_der(&sig)?, &public_key.0)?;
-        Ok(())
     }
 
     pub fn creates_script_pubkey(&self, script_pubkey: &BEScript) -> bool {
@@ -581,25 +522,25 @@ impl BETransactions {
         }
     }
 
-    pub fn get_previous_output_assetblinder_hex(
+    pub fn get_previous_output_assetblinder(
         &self,
         outpoint: elements::OutPoint,
         all_unblinded: &HashMap<elements::OutPoint, elements::TxOutSecrets>,
-    ) -> Option<String> {
+    ) -> Option<AssetBlindingFactor> {
         match self.0.get(&outpoint.txid.into()) {
             None => None,
-            Some(txe) => txe.tx.output_assetblinder_hex(outpoint.vout, &all_unblinded),
+            Some(txe) => txe.tx.output_assetblinder(outpoint.vout, &all_unblinded),
         }
     }
 
-    pub fn get_previous_output_amountblinder_hex(
+    pub fn get_previous_output_amountblinder(
         &self,
         outpoint: elements::OutPoint,
         all_unblinded: &HashMap<elements::OutPoint, elements::TxOutSecrets>,
-    ) -> Option<String> {
+    ) -> Option<ValueBlindingFactor> {
         match self.0.get(&outpoint.txid.into()) {
             None => None,
-            Some(txe) => txe.tx.output_amountblinder_hex(outpoint.vout, &all_unblinded),
+            Some(txe) => txe.tx.output_amountblinder(outpoint.vout, &all_unblinded),
         }
     }
 }

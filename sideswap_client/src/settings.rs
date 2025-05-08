@@ -1,8 +1,12 @@
-use bitcoin::bip32;
+use std::collections::BTreeMap;
+
+use bitcoin::bip32::{self, Fingerprint};
+use elements_miniscript::slip77::MasterBlindingKey;
 use serde::{Deserialize, Serialize};
 use sideswap_api::{OrderId, SessionId};
+use sideswap_types::str_encoded::StrEncoded;
 
-use crate::gdk_json;
+use crate::models;
 
 #[derive(Eq, PartialEq, Serialize, Deserialize, Copy, Clone)]
 pub enum PegDir {
@@ -19,34 +23,26 @@ pub struct Peg {
 #[derive(Serialize, Deserialize, Default)]
 pub struct SettingsPersistent {}
 
-#[derive(Serialize, Deserialize, Default)]
-pub struct AmpPrevAddrs {
-    pub last_pointer: u32,
-    pub list: Vec<crate::gdk_json::AddressInfo>,
-}
-
 #[derive(Serialize, Deserialize, Clone)]
 pub struct WatchOnly {
-    pub master_blinding_key: String,
-
-    pub root_xpub: bip32::Xpub,
-    pub password_xpub: bip32::Xpub,
-    pub single_sig_account_xpub: bip32::Xpub,
-    pub multi_sig_user_xpub: bip32::Xpub,
-
-    pub username: String,
-    pub password: String,
+    pub master_blinding_key: StrEncoded<MasterBlindingKey>,
+    pub native_xpub: bip32::Xpub,
+    pub nested_xpub: bip32::Xpub,
+    pub amp_user_xpub: bip32::Xpub,
+    pub master_xpub_fingerprint: Fingerprint,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct RegInfo {
-    pub jade_watch_only: Option<WatchOnly>,
-    pub multi_sig_service_xpub: String,
-    pub multi_sig_user_path: Vec<u32>,
+    pub watch_only: Option<WatchOnly>,
+    pub amp_service_xpub: String,
+    pub amp_user_path: Vec<u32>,
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq)]
 pub enum AddressWallet {
+    NativeReceive,
+    NativeChange,
     NestedReceive,
     NestedChange,
     Amp,
@@ -54,7 +50,7 @@ pub enum AddressWallet {
 
 #[derive(Serialize, Deserialize)]
 pub struct AddressCacheEntry {
-    pub address: gdk_json::AddressInfo,
+    pub address: models::AddressInfo,
     pub address_wallet: AddressWallet,
 }
 
@@ -62,19 +58,26 @@ pub struct AddressCacheEntry {
 #[derive(Serialize, Deserialize, Default)]
 pub struct Settings {
     pub pegs: Option<Vec<Peg>>,
+
     pub device_key: Option<String>,
+
     pub market_token: Option<String>,
 
-    #[serde(default)]
-    pub single_sig_registered: [u32; 2],
+    #[serde(default, rename = "single_sig_registered")]
+    pub nested_registered: [u32; 2],
 
-    #[serde(default)]
-    pub multi_sig_registered: u32,
+    #[serde(default, rename = "single_sig_registered_native")]
+    pub native_registered: [u32; 2],
+
+    #[serde(default, rename = "multi_sig_registered")]
+    pub amp_registered: u32,
 
     pub session_id: Option<SessionId>,
+
+    // Random key used with assets_registry to encrypt data on disk
     pub master_pub_key: Option<bip32::Xpub>,
 
-    pub reg_info_v3: Option<RegInfo>,
+    pub reg_info: Option<RegInfo>,
 
     pub event_proofs: Option<serde_json::Value>,
 
@@ -82,6 +85,9 @@ pub struct Settings {
     pub address_cache: Vec<AddressCacheEntry>,
 
     pub min_order_amounts: Option<sideswap_api::mkt::MinOrderAmounts>,
+
+    #[serde(default)]
+    pub tx_memos: BTreeMap<elements::Txid, String>,
 }
 
 const SETTINGS_NAME: &str = "settings.json";

@@ -1,36 +1,40 @@
+// TODO: Switch from JSON to msgpack
+
 use std::{
     collections::{BTreeMap, HashMap},
     fmt::Debug,
+    sync::Arc,
     time::{Duration, Instant},
+    vec,
 };
 
 use bitcoin::{
-    bip32::{ChildNumber, Xpriv, Xpub},
+    bip32::{ChildNumber, Xpub},
     hashes::Hash,
 };
 use elements::{
     confidential::{AssetBlindingFactor, ValueBlindingFactor},
-    pset::{self, PartiallySignedTransaction},
+    pset::PartiallySignedTransaction,
     secp256k1_zkp::global::SECP256K1,
-    Address, AssetId, Transaction, TxOutSecrets, Txid,
+    Address, AssetId, TxOutSecrets, Txid,
 };
 use elements_miniscript::slip77::MasterBlindingKey;
 use futures::{SinkExt, StreamExt};
-use rand::seq::SliceRandom;
-use secp256k1::global::SECP256K1 as secp1;
-use secp256k1_zkp::global::SECP256K1 as secp2;
+use secp256k1::ecdsa::Signature;
+use serde::Serialize;
 use sideswap_common::{
     abort,
     channel_helpers::UncheckedOneshotSender,
-    green_backend::GREEN_DUMMY_SIG,
     network::Network,
     pset_blind::get_blinding_nonces,
     recipient::Recipient,
     retry_delay::RetryDelay,
-    send_tx::coin_select::{self, InOut},
+    send_tx::pset::{construct_pset, ConstructPsetArgs, ConstructedPset, PsetInput, PsetOutput},
+    utxo_select::{self, ChangeWallets, WalletType},
     verify,
 };
 use sideswap_types::{timestamp_us::TimestampUs, utxo_ext::UtxoExt};
+use sw_signer::SwSigner;
 use tokio::sync::{
     mpsc::{UnboundedReceiver, UnboundedSender},
     oneshot,
@@ -48,6 +52,7 @@ use crate::wamp::{
 mod models;
 mod wamp;
 
+pub mod sw_signer;
 pub mod tx_cache;
 
 const DEFAULT_AGENT_STR: &str = "sideswap_amp";
@@ -58,21 +63,32 @@ const AMP_SUBACCOUNT_TYPE: &str = "2of2_no_recovery";
 
 #[derive(Debug)]
 pub enum Event {
-    Connected { gaid: String, block_height: u32 },
+    Connected {
+        gaid: String,
+        subaccount: u32,
+        block_height: u32,
+    },
     Disconnected,
-    BalanceUpdated { balances: BTreeMap<AssetId, u64> },
-    NewBlock { block_height: u32 },
-    NewTx { txid: Txid },
+    BalanceUpdated {
+        balances: BTreeMap<AssetId, u64>,
+    },
+    NewBlock {
+        block_height: u32,
+    },
+    NewTx {
+        txid: Txid,
+    },
 }
 
+#[derive(Clone)]
 pub struct Wallet {
     command_sender: UnboundedSender<Command>,
     policy_asset: AssetId,
     master_blinding_key: MasterBlindingKey,
-    master_xpub: Xpub,
+    watch_only: bool,
 }
 
-enum SignAction {
+pub enum SignAction {
     SignOnly,
     SignAndBroadcast,
 }
@@ -110,16 +126,47 @@ pub enum Error {
         context: &'static str,
         error: String,
     },
-    #[error("script_sig or redeem_script for {0}:{1}")]
-    NoRedeem(Txid, u32),
+    // #[error("script_sig or redeem_script for {0}:{1}")]
+    // NoRedeem(Txid, u32),
     #[error("PSET error: {0}")]
     PsetError(#[from] elements::pset::Error),
     #[error("Request timeout")]
     RequestTimeout,
     #[error("HTTP connection error: {0}")]
     HttpConnectionError(#[from] tungstenite::http::Error),
-    #[error("Coin select error: {0}")]
-    CoinSelect(#[from] coin_select::CoinSelectError),
+    #[error("Signer error: {0}")]
+    Signer(String),
+    #[error("Insufficient funds")]
+    InsufficientFunds,
+    #[error("User not found or invalid password")]
+    WrongWatchOnlyPassword,
+}
+
+impl Error {
+    /// If the error is fatal and reconnect is not needed
+    pub fn is_fatal(&self) -> bool {
+        match self {
+            Error::Signer(_)
+            | Error::WrongWatchOnlyPassword
+            | Error::BackendJsonError(_, _)
+            | Error::BackendUnexpectedCount(_, _) => true,
+
+            Error::SendError(_)
+            | Error::RecvError
+            | Error::ZeroSendAmount
+            | Error::AmountOverflow
+            | Error::NotEnoughAmount { .. }
+            | Error::BlindError(_)
+            | Error::WsError(_)
+            | Error::ProtocolError(_)
+            | Error::WampError { .. }
+            // | Error::NoRedeem(_, _)
+            | Error::PsetError(_)
+            | Error::RequestTimeout
+            | Error::HttpConnectionError(_)
+            | Error::InsufficientFunds => false,
+        }
+    }
 }
 
 impl<T> From<tokio::sync::mpsc::error::SendError<T>> for Error {
@@ -137,7 +184,8 @@ impl From<tokio::sync::oneshot::error::RecvError> for Error {
 type ResSender<T> = UncheckedOneshotSender<Result<T, Error>>;
 
 enum Command {
-    ReceiveAddress(ResSender<Address>),
+    ReceiveAddress(ResSender<AddressInfo>),
+    PreviousAddresses(ResSender<Vec<AddressInfo>>),
     UnspentOutputs(UncheckedOneshotSender<Vec<Utxo>>),
     SignOrSendTx(
         elements::Transaction,
@@ -149,6 +197,10 @@ enum Command {
     BlockHeight(ResSender<u32>),
     UploadCaAddresses(u32, ResSender<()>),
     BroadcastTx(String, ResSender<Txid>),
+    SetWatchOnly {
+        credentials: Credentials,
+        res_sender: ResSender<()>,
+    },
 }
 
 fn parse_args1<T1: serde::de::DeserializeOwned>(mut args: WampArgs) -> Result<T1, Error> {
@@ -177,6 +229,60 @@ fn parse_args2<T1: serde::de::DeserializeOwned, T2: serde::de::DeserializeOwned>
     }
 }
 
+pub struct Credentials {
+    pub username: String,
+    pub password: String,
+}
+
+pub struct AddressInfo {
+    pub address: elements::Address,
+    pub pointer: u32,
+    pub user_path: Vec<u32>,
+    pub prevout_script: elements::Script,
+    pub service_xpub: String,
+}
+
+pub type EventCallback = Arc<dyn Fn(Event) + Sync + Send>;
+
+pub trait Signer: Send + Sync {
+    fn network(&self) -> Network;
+
+    fn get_master_blinding_key(&self) -> Result<MasterBlindingKey, Error>;
+
+    fn get_xpub(&self, path: &[ChildNumber]) -> Result<Xpub, Error>;
+
+    fn sign_message(&self, path: &[ChildNumber], message: String) -> Result<Signature, Error>;
+}
+
+pub enum LoginType {
+    Full(Arc<dyn Signer>),
+    WatchOnly {
+        master_blinding_key: MasterBlindingKey,
+        credentials: Credentials,
+        network: Network,
+        amp_user_xpub: Xpub, // TODO: Can this be removed?
+    },
+}
+
+impl LoginType {
+    fn network(&self) -> Network {
+        match self {
+            LoginType::Full(signer) => signer.network(),
+            LoginType::WatchOnly { network, .. } => *network,
+        }
+    }
+
+    fn get_master_blinding_key(&self) -> Result<MasterBlindingKey, Error> {
+        match self {
+            LoginType::Full(signer) => signer.get_master_blinding_key(),
+            LoginType::WatchOnly {
+                master_blinding_key,
+                ..
+            } => Ok(*master_blinding_key),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct CreatedTx {
     pub pset: PartiallySignedTransaction,
@@ -185,49 +291,54 @@ pub struct CreatedTx {
     pub network_fee: u64,
 }
 
-pub struct SignOffline {
-    pub input_utxo: Utxo,
-    pub output_address: Address,
-    pub output_sec: TxOutSecrets,
-    pub output_ephemeral_sk: secp256k1::SecretKey,
-}
-
-pub struct OfflineTx {
-    pub tx: Transaction,
-}
-
 impl Wallet {
-    pub fn new(mnemonic: bip39::Mnemonic, network: Network) -> (Wallet, UnboundedReceiver<Event>) {
-        let bitcoin_network = match network {
-            Network::Liquid => bitcoin::Network::Bitcoin,
-            Network::LiquidTestnet => bitcoin::Network::Testnet,
-            Network::Regtest => todo!(),
+    pub async fn connect_once(
+        login: &LoginType,
+        event_callback: EventCallback,
+    ) -> Result<Wallet, Error> {
+        let (command_sender, command_receiver) = tokio::sync::mpsc::unbounded_channel();
+
+        let data = tokio::time::timeout(Duration::from_secs(60), connect(login, event_callback))
+            .await
+            .map_err(|_err| Error::ProtocolError("connection timeout"))??;
+
+        let wallet = Wallet {
+            command_sender,
+            policy_asset: data.policy_asset,
+            master_blinding_key: data.master_blinding_key,
+            watch_only: data.watch_only,
         };
 
-        let seed = mnemonic.to_seed("");
-        let master_blinding_key = MasterBlindingKey::from_seed(&seed);
-        let master_key = Xpriv::new_master(bitcoin_network, &seed).expect("must not fail");
-        let master_xpub = Xpub::from_priv(SECP256K1, &master_key);
+        tokio::task::spawn(run_once(data, command_receiver));
 
+        Ok(wallet)
+    }
+
+    pub fn software(
+        mnemonic: &bip39::Mnemonic,
+        network: Network,
+        event_callback: EventCallback,
+    ) -> Wallet {
         let (command_sender, command_receiver) = tokio::sync::mpsc::unbounded_channel();
-        let (event_sender, event_receiver) = tokio::sync::mpsc::unbounded_channel();
 
-        tokio::spawn(run(
-            master_blinding_key,
-            master_key,
-            network,
-            command_receiver,
-            event_sender,
-        ));
+        let login = LoginType::Full(Arc::new(SwSigner::new(network, &mnemonic)));
+
+        let master_blinding_key = login.get_master_blinding_key().expect("must not fail");
 
         let wallet = Wallet {
             command_sender,
             policy_asset: network.d().policy_asset.asset_id(),
             master_blinding_key,
-            master_xpub,
+            watch_only: false,
         };
 
-        (wallet, event_receiver)
+        tokio::task::spawn(run_loop(login, command_receiver, event_callback));
+
+        wallet
+    }
+
+    pub fn watch_only(&self) -> bool {
+        self.watch_only
     }
 
     pub fn master_blinding_key(&self) -> &MasterBlindingKey {
@@ -238,22 +349,10 @@ impl Wallet {
         self.policy_asset
     }
 
-    pub fn master_xpub(&self) -> &Xpub {
-        &self.master_xpub
-    }
-
-    pub async fn receive_address(&self) -> Result<Address, Error> {
+    pub async fn receive_address(&self) -> Result<AddressInfo, Error> {
         let (res_sender, res_receiver) = oneshot::channel();
         self.command_sender
-            .send(Command::ReceiveAddress(res_sender.into()))
-            .expect("must not fail");
-        res_receiver.await?
-    }
-
-    pub async fn upload_ca_addresses(&self, count: u32) -> Result<(), Error> {
-        let (res_sender, res_receiver) = oneshot::channel();
-        self.command_sender
-            .send(Command::UploadCaAddresses(count, res_sender.into()))?;
+            .send(Command::ReceiveAddress(res_sender.into()))?;
         res_receiver.await?
     }
 
@@ -262,7 +361,15 @@ impl Wallet {
         let (res_sender, res_receiver) = oneshot::channel();
         self.command_sender
             .send(Command::ReceiveAddress(res_sender.into()))?;
-        res_receiver.blocking_recv()?
+        let address_info = res_receiver.blocking_recv()??;
+        Ok(address_info.address)
+    }
+
+    pub async fn upload_ca_addresses(&self, count: u32) -> Result<(), Error> {
+        let (res_sender, res_receiver) = oneshot::channel();
+        self.command_sender
+            .send(Command::UploadCaAddresses(count, res_sender.into()))?;
+        res_receiver.await?
     }
 
     pub async fn unspent_outputs(&self) -> Result<Vec<Utxo>, Error> {
@@ -273,180 +380,23 @@ impl Wallet {
         Ok(utxos)
     }
 
-    pub async fn create_tx(
-        &self,
-        mut recipients: Vec<Recipient>,
-        deduct_fee: Option<usize>,
-    ) -> Result<CreatedTx, Error> {
-        let all_utxos = self.unspent_outputs().await?;
-
-        let coin_select::normal_tx::Res {
-            asset_inputs,
-            bitcoin_inputs,
-            user_outputs,
-            change_outputs,
-            fee_change,
-            network_fee,
-        } = coin_select::normal_tx::try_coin_select(coin_select::normal_tx::Args {
-            multisig_wallet: true,
-            policy_asset: self.policy_asset,
-            use_all_utxos: false,
-            wallet_utxos: all_utxos
-                .iter()
-                .map(|utxo| InOut {
-                    asset_id: utxo.tx_out_sec.asset,
-                    value: utxo.tx_out_sec.value,
-                })
-                .collect(),
-            user_outputs: recipients
-                .iter()
-                .map(|recipient| InOut {
-                    asset_id: recipient.asset_id,
-                    value: recipient.amount,
-                })
-                .collect(),
-            deduct_fee,
-        })?;
-
-        let mut pset = pset::PartiallySignedTransaction::new_v2();
-
-        let mut used_utxos =
-            take_utxos(all_utxos, asset_inputs.iter().chain(bitcoin_inputs.iter()));
-
-        assert!(recipients.len() == user_outputs.len());
-        if let Some(index) = deduct_fee {
-            recipients[index].amount = user_outputs[index].value;
-        }
-
-        for change_output in change_outputs.iter().chain(fee_change.iter()) {
-            let change_address = self.receive_address().await?;
-            recipients.push(Recipient {
-                address: change_address,
-                asset_id: change_output.asset_id,
-                amount: change_output.value,
-            });
-        }
-
-        let mut rng = rand::thread_rng();
-        used_utxos.shuffle(&mut rng);
-        recipients.shuffle(&mut rng);
-
-        for utxo in used_utxos.iter() {
-            let mut input = pset::Input::from_prevout(utxo.outpoint);
-            input.redeem_script = Some(utxo.redeem_script.clone());
-            input.witness_utxo = Some(utxo.txout.clone());
-            pset.add_input(input);
-        }
-
-        for recipient in recipients {
-            let output = pset::Output {
-                script_pubkey: recipient.address.script_pubkey(),
-                amount: Some(recipient.amount),
-                asset: Some(recipient.asset_id),
-                blinding_key: recipient
-                    .address
-                    .blinding_pubkey
-                    .map(bitcoin::PublicKey::new),
-                blinder_index: Some(0),
-                ..Default::default()
-            };
-            pset.add_output(output);
-        }
-
-        pset.add_output(pset::Output::new_explicit(
-            elements::Script::default(),
-            network_fee.value,
-            network_fee.asset_id,
-            None,
-        ));
-
-        let inp_txout_sec = used_utxos
-            .iter()
-            .map(|utxo| utxo.tx_out_sec)
-            .collect::<Vec<_>>();
-
-        let blinded_outputs =
-            sideswap_common::pset_blind::blind_pset(&mut pset, &inp_txout_sec, &[])?;
-
-        Ok(CreatedTx {
-            pset,
-            blinding_nonces: get_blinding_nonces(&blinded_outputs),
-            used_utxos,
-            network_fee: network_fee.value,
-        })
+    pub async fn previous_addresses(&self) -> Result<Vec<AddressInfo>, Error> {
+        let (res_sender, res_receiver) = oneshot::channel();
+        self.command_sender
+            .send(Command::PreviousAddresses(res_sender.into()))?;
+        let list = res_receiver.await??;
+        Ok(list)
     }
 
-    fn user_signatures(
+    /// Get call Green backend for signatures.
+    /// The PSET must be already signed by the user.
+    pub async fn green_backend_sign(
         &self,
-        pset: PartiallySignedTransaction,
-        used_utxos: Vec<Utxo>,
-    ) -> Result<Transaction, Error> {
-        let mut tx = pset.extract_tx()?;
-        let tx_copy = tx.clone();
-
-        for (pset_input, tx_input) in pset.inputs().iter().zip(tx.input.iter_mut()) {
-            let redeem_script = used_utxos
-                .iter()
-                .find(|utxo| utxo.outpoint == tx_input.previous_output)
-                .map(|utxo| utxo.redeem_script.clone())
-                .or_else(|| pset_input.redeem_script.clone());
-
-            if let Some(redeem_script) = redeem_script {
-                tx_input.script_sig = elements::script::Builder::new()
-                    .push_slice(redeem_script.as_bytes())
-                    .into_script();
-            } else if let Some(final_script) = pset_input.final_script_sig.clone() {
-                tx_input.script_sig = final_script;
-            } else {
-                // Green backend won't sign without script_sig (it returns "Partial signing of pre-segwit transactions is not supported")
-                // Make sure this works as expected with native segwit (the check will return false positive error).
-                // abort!(Error::NoRedeem(
-                //     pset_input.previous_txid,
-                //     pset_input.previous_output_index
-                // ))
-            }
-        }
-
-        let mut sighash_cache = elements::sighash::SighashCache::new(&tx_copy);
-        for (index, tx_input) in tx.input.iter_mut().enumerate() {
-            if let Some(utxo) = used_utxos
-                .iter()
-                .find(|utxo| utxo.outpoint == tx_input.previous_output)
-            {
-                let hash_ty = elements_miniscript::elements::EcdsaSighashType::All;
-                let sighash = sighash_cache.segwitv0_sighash(
-                    index,
-                    &utxo.prevout_script,
-                    utxo.txout.value,
-                    hash_ty,
-                );
-                let msg =
-                    elements::secp256k1_zkp::Message::from_digest_slice(&sighash[..]).unwrap();
-
-                let user_sig = secp1.sign_ecdsa_low_r(&msg, &utxo.priv_key_user.inner);
-
-                let user_sig = elements_miniscript::elementssig_to_rawsig(&(user_sig, hash_ty));
-
-                tx_input.witness.script_witness = vec![
-                    vec![],
-                    GREEN_DUMMY_SIG.to_vec(),
-                    user_sig,
-                    utxo.prevout_script.to_bytes(),
-                ];
-            }
-        }
-
-        Ok(tx)
-    }
-
-    async fn sign_or_broadcast_pset(
-        &self,
-        pset: PartiallySignedTransaction,
+        mut pset: PartiallySignedTransaction,
         blinding_nonces: Vec<String>,
-        used_utxos: Vec<Utxo>,
         sign_action: SignAction,
-    ) -> Result<Transaction, Error> {
-        let tx = self.user_signatures(pset, used_utxos)?;
+    ) -> Result<PartiallySignedTransaction, Error> {
+        let tx = pset.extract_tx()?;
 
         let (res_sender, res_receiver) = oneshot::channel();
         self.command_sender.send(Command::SignOrSendTx(
@@ -457,60 +407,9 @@ impl Wallet {
         ))?;
         let tx = res_receiver.await??;
 
-        Ok(tx)
-    }
+        sideswap_common::pset::copy_tx_signatures(&tx, &mut pset);
 
-    /// Get user signature
-    pub fn user_sign_swap_pset(
-        &self,
-        pset: PartiallySignedTransaction,
-        used_utxos: Vec<Utxo>,
-    ) -> Result<PartiallySignedTransaction, Error> {
-        // TODO: Verify PSET
-
-        let mut pset_copy = pset.clone();
-
-        let tx = self.user_signatures(pset, used_utxos)?;
-
-        sideswap_common::pset::copy_tx_signatures(&tx, &mut pset_copy);
-
-        Ok(pset_copy)
-    }
-
-    /// Get user signaturs and call Green backend for signatures
-    pub async fn fully_sign_swap_pset(
-        &self,
-        pset: PartiallySignedTransaction,
-        blinding_nonces: Vec<String>,
-        used_utxos: Vec<Utxo>,
-    ) -> Result<PartiallySignedTransaction, Error> {
-        // TODO: Verify PSET
-
-        let mut pset_copy = pset.clone();
-
-        let tx = self
-            .sign_or_broadcast_pset(pset, blinding_nonces, used_utxos, SignAction::SignOnly)
-            .await?;
-
-        sideswap_common::pset::copy_tx_signatures(&tx, &mut pset_copy);
-
-        Ok(pset_copy)
-    }
-
-    /// Make user signatures and call Green backend to broadcast the tx
-    pub async fn sign_and_broadcast_pset(
-        &self,
-        pset: PartiallySignedTransaction,
-        blinding_nonces: Vec<String>,
-        used_utxos: Vec<Utxo>,
-    ) -> Result<Transaction, Error> {
-        self.sign_or_broadcast_pset(
-            pset,
-            blinding_nonces,
-            used_utxos,
-            SignAction::SignAndBroadcast,
-        )
-        .await
+        Ok(pset)
     }
 
     pub async fn broadcast_tx(&self, tx: String) -> Result<Txid, Error> {
@@ -521,88 +420,14 @@ impl Wallet {
         Ok(txid)
     }
 
-    pub fn sign_offline(
-        &self,
-        SignOffline {
-            input_utxo,
-            output_address,
-            output_sec,
-            output_ephemeral_sk,
-        }: SignOffline,
-    ) -> Result<OfflineTx, Error> {
-        let output_script_pubkey = output_address.script_pubkey();
-
-        let output_blinding_pk = output_address.blinding_pubkey.ok_or(Error::ProtocolError(
-            "address does not include a blinding key",
-        ))?;
-
-        let output_gen = secp256k1_zkp::Generator::new_blinded(
-            SECP256K1,
-            output_sec.asset.into_tag(),
-            output_sec.asset_bf.into_inner(),
-        );
-
-        let output_asset = elements::confidential::Asset::Confidential(output_gen);
-
-        let output_value = elements::confidential::Value::new_confidential(
-            SECP256K1,
-            output_sec.value,
-            output_gen,
-            output_sec.value_bf,
-        );
-
-        let (output_nonce, _secret_key) = elements::confidential::Nonce::with_ephemeral_sk(
-            SECP256K1,
-            output_ephemeral_sk,
-            &output_blinding_pk,
-        );
-
-        let txout = elements::TxOut {
-            asset: output_asset,
-            value: output_value,
-            nonce: output_nonce,
-            script_pubkey: output_script_pubkey,
-            witness: Default::default(),
-        };
-
-        let mut tx = Transaction {
-            version: 2,
-            lock_time: elements::LockTime::ZERO,
-            input: vec![elements::TxIn {
-                previous_output: input_utxo.outpoint,
-                is_pegin: false,
-                script_sig: elements::script::Builder::new()
-                    .push_slice(input_utxo.redeem_script.as_bytes())
-                    .into_script(),
-                sequence: Default::default(),
-                asset_issuance: Default::default(),
-                witness: Default::default(),
-            }],
-            output: vec![txout],
-        };
-
-        let mut sighash_cache = elements::sighash::SighashCache::new(&tx);
-
-        let hash_ty = elements_miniscript::elements::EcdsaSighashType::SinglePlusAnyoneCanPay;
-        let sighash = sighash_cache.segwitv0_sighash(
-            0,
-            &input_utxo.prevout_script,
-            input_utxo.txout.value,
-            hash_ty,
-        );
-
-        let msg = elements::secp256k1_zkp::Message::from_digest_slice(&sighash[..]).unwrap();
-        let user_sig = secp1.sign_ecdsa_low_r(&msg, &input_utxo.priv_key_user.inner);
-        let user_sig = elements_miniscript::elementssig_to_rawsig(&(user_sig, hash_ty));
-
-        tx.input[0].witness.script_witness = vec![
-            vec![],
-            GREEN_DUMMY_SIG.to_vec(),
-            user_sig,
-            input_utxo.prevout_script.to_bytes(),
-        ];
-
-        Ok(OfflineTx { tx })
+    pub async fn set_watch_only(&self, credentials: Credentials) -> Result<(), Error> {
+        let (res_sender, res_receiver) = oneshot::channel();
+        self.command_sender.send(Command::SetWatchOnly {
+            credentials,
+            res_sender: res_sender.into(),
+        })?;
+        res_receiver.await??;
+        Ok(())
     }
 
     fn unblind_ep(
@@ -610,13 +435,18 @@ impl Wallet {
         cache: &mut TxCache,
         txid: &Txid,
         ep: models::TransactionEp,
-    ) -> Option<(AssetId, u64)> {
+    ) -> Option<TxOutSecrets> {
         if !ep.is_relevant {
             return None;
         }
 
-        if let (Some(asset_id), Some(value)) = (ep.asset_tag.explicit(), ep.commitment.explicit()) {
-            return Some((asset_id, value));
+        if let (Some(asset), Some(value)) = (ep.asset_tag.explicit(), ep.commitment.explicit()) {
+            return Some(TxOutSecrets {
+                asset,
+                asset_bf: AssetBlindingFactor::zero(),
+                value,
+                value_bf: ValueBlindingFactor::zero(),
+            });
         }
 
         let outpoint = if ep.is_output {
@@ -631,8 +461,8 @@ impl Wallet {
             }
         };
 
-        if let Some(secret) = cache.get_secret(&outpoint) {
-            return Some((secret.asset, secret.value));
+        if let Some(unblinded) = cache.get_secret(&outpoint) {
+            return Some(*unblinded);
         }
 
         let blinding_key = self.master_blinding_key.blinding_private_key(&ep.script);
@@ -648,11 +478,11 @@ impl Wallet {
             },
         };
 
-        let unblinded_res = txout.unblind(secp2, blinding_key);
+        let unblinded_res = txout.unblind(SECP256K1, blinding_key);
         match unblinded_res {
-            Ok(tx_out_sec) => {
-                cache.add_secret(outpoint, tx_out_sec);
-                Some((tx_out_sec.asset, tx_out_sec.value))
+            Ok(unblinded) => {
+                cache.add_secret(outpoint, unblinded);
+                Some(unblinded)
             }
             Err(err) => {
                 log::error!("unblinding failed: {}", err);
@@ -662,36 +492,37 @@ impl Wallet {
     }
 
     fn convert_tx(&self, cache: &mut TxCache, tx: models::Transaction) -> tx_cache::Transaction {
-        let inputs = tx
-            .eps
-            .iter()
-            .filter_map(|ep| match (ep.is_output, ep.prevtxhash, ep.previdx) {
-                (false, Some(txid), Some(vout)) => Some(tx_cache::TransactionInput {
-                    prevtxid: txid,
-                    previdx: vout,
-                }),
-                _ => None,
-            })
-            .collect();
-
-        let outputs = tx
-            .eps
-            .iter()
-            .filter_map(|ep| {
-                if ep.is_output {
-                    Some(tx_cache::TransactionOutput { pt_idx: ep.pt_idx })
-                } else {
-                    None
-                }
-            })
-            .collect();
-
+        let mut inputs = Vec::new();
+        let mut outputs = Vec::new();
         let mut amounts = BTreeMap::new();
+
         for ep in tx.eps {
             let is_output = ep.is_output;
-            if let Some((asset_id, value)) = self.unblind_ep(cache, &tx.txhash, ep) {
+            let pt_idx = ep.pt_idx;
+            let prevtxhash = ep.prevtxhash;
+            let previdx: Option<u32> = ep.previdx;
+
+            let unblinded = if ep.is_relevant {
+                self.unblind_ep(cache, &tx.txhash, ep)
+            } else {
+                None
+            };
+
+            if let Some(unblinded) = unblinded {
                 let sign = if is_output { 1 } else { -1 };
-                *amounts.entry(asset_id).or_default() += (value as i64) * sign;
+                *amounts.entry(unblinded.asset).or_default() += (unblinded.value as i64) * sign;
+            }
+
+            if is_output {
+                outputs.push(tx_cache::TransactionOutput { pt_idx, unblinded });
+            } else {
+                if let (Some(prevtxid), Some(previdx)) = (prevtxhash, previdx) {
+                    inputs.push(tx_cache::TransactionInput {
+                        prevtxid,
+                        previdx,
+                        unblinded,
+                    });
+                }
             }
         }
 
@@ -705,6 +536,7 @@ impl Wallet {
             network_fee: tx.fee,
             inputs,
             outputs,
+            vsize: tx.transaction_vsize,
         }
     }
 
@@ -778,6 +610,131 @@ impl Wallet {
 
         Some(blinded_values.join(","))
     }
+
+    pub async fn create_tx(
+        &self,
+        recipients: Vec<Recipient>,
+        deduct_fee: Option<usize>,
+    ) -> Result<CreatedTx, Error> {
+        let utxos = self.unspent_outputs().await?;
+
+        let utxo_select = utxo_select::select(utxo_select::Args {
+            policy_asset: self.policy_asset,
+            utxos: utxos
+                .iter()
+                .map(|utxo| utxo_select::Utxo {
+                    wallet: WalletType::AMP,
+                    txid: utxo.outpoint.txid,
+                    vout: utxo.outpoint.vout,
+                    asset_id: utxo.tx_out_sec.asset,
+                    value: utxo.tx_out_sec.value,
+                })
+                .collect(),
+            recipients: recipients
+                .iter()
+                .map(|addr| utxo_select::Recipient {
+                    address: utxo_select::RecipientAddress::Known(addr.address.clone()),
+                    asset_id: addr.asset_id,
+                    amount: addr.amount,
+                })
+                .collect(),
+            deduct_fee,
+            force_change_wallets: ChangeWallets::new(),
+            use_all_utxos: false,
+        })
+        .map_err(|err| match err {
+            utxo_select::Error::InvalidArgs(err) => Error::ProtocolError(err),
+            utxo_select::Error::InsufficientFunds => Error::InsufficientFunds,
+        })?;
+
+        let selected_utxos = utxo_select
+            .inputs
+            .iter()
+            .map(|selected| {
+                utxos
+                    .iter()
+                    .find(|utxo| {
+                        utxo.outpoint.txid == selected.txid && utxo.outpoint.vout == selected.vout
+                    })
+                    .expect("UTXO must exist")
+                    .clone()
+            })
+            .collect::<Vec<_>>();
+
+        let inputs = selected_utxos
+            .iter()
+            .map(|utxo| {
+                let asset_commitment = if utxo.tx_out_sec.asset_bf != AssetBlindingFactor::zero() {
+                    elements::confidential::Asset::new_confidential(
+                        SECP256K1,
+                        utxo.tx_out_sec.asset,
+                        utxo.tx_out_sec.asset_bf,
+                    )
+                } else {
+                    elements::confidential::Asset::Explicit(utxo.tx_out_sec.asset)
+                };
+
+                let value_commitment = if utxo.tx_out_sec.value_bf != ValueBlindingFactor::zero() {
+                    elements::confidential::Value::new_confidential_from_assetid(
+                        SECP256K1,
+                        utxo.tx_out_sec.value,
+                        utxo.tx_out_sec.asset,
+                        utxo.tx_out_sec.value_bf,
+                        utxo.tx_out_sec.asset_bf,
+                    )
+                } else {
+                    elements::confidential::Value::Explicit(utxo.tx_out_sec.value)
+                };
+
+                PsetInput {
+                    txid: utxo.outpoint.txid,
+                    vout: utxo.outpoint.vout,
+                    script_pub_key: utxo.script_pub_key.clone(),
+                    asset_commitment,
+                    value_commitment,
+                    tx_out_sec: utxo.tx_out_sec,
+                }
+            })
+            .collect::<Vec<_>>();
+
+        let mut outputs = Vec::<PsetOutput>::new();
+
+        for recipient in utxo_select.updated_recipients.iter() {
+            outputs.push(PsetOutput {
+                address: recipient.address.known().expect("must be know").clone(),
+                asset_id: recipient.asset_id,
+                amount: recipient.amount,
+            });
+        }
+
+        for change in utxo_select.change {
+            let change_address = self.receive_address().await?;
+            outputs.push(PsetOutput {
+                address: change_address.address,
+                asset_id: change.asset_id,
+                amount: change.value,
+            });
+        }
+
+        let ConstructedPset {
+            blinded_pset: pset,
+            blinded_outputs,
+        } = construct_pset(ConstructPsetArgs {
+            policy_asset: self.policy_asset,
+            offlines: Vec::new(),
+            inputs,
+            outputs,
+            network_fee: utxo_select.network_fee,
+        })
+        .map_err(|_| Error::ProtocolError("unexpected construct_pset error"))?;
+
+        Ok(CreatedTx {
+            pset,
+            blinding_nonces: get_blinding_nonces(&blinded_outputs),
+            used_utxos: selected_utxos,
+            network_fee: utxo_select.network_fee,
+        })
+    }
 }
 
 // If the callback returns an error, the wallet connection is restarted
@@ -797,32 +754,36 @@ struct PendingRequest {
 type PendingRequests = BTreeMap<WampId, PendingRequest>;
 
 struct Data {
+    policy_asset: AssetId,
     connection: Connection,
     pending_requests: PendingRequests,
     network: Network,
     master_blinding_key: MasterBlindingKey,
     subaccount: u32,
-    user_xpriv: Xpriv,
+    user_xpub: Xpub,
     service_xpub: Xpub,
-    event_sender: UnboundedSender<Event>,
+    event_callback: EventCallback,
     pending_subscribe: HashMap<WampId, SubscribeCallback>,
     active_subscribe: HashMap<WampId, SubscribeCallback>,
     utxos: Vec<Utxo>,
     reload_utxos: bool,
     ca_addresses: Vec<Address>,
     block_height: u32,
+    watch_only: bool,
+    gaid: String,
 }
 
 #[derive(Debug, Clone)]
 pub struct Utxo {
+    pub block_height: Option<u32>,
+    pub subaccount: u32,
     pub pointer: u32,
     pub txout: elements::TxOut,
     pub outpoint: elements::OutPoint,
     pub tx_out_sec: TxOutSecrets,
-    pub priv_key_user: bitcoin::PrivateKey,
-    // Example: 522103cab1a2a707d13ff3fcc9d08f888724e01c37d54ad8e8d9b274cb33eaebe3461321037888f798b59ff4e1122bdf52ad4c541be32ca755311746b67af2bc5e58df188b52ae
-    pub prevout_script: elements::Script,
-    pub redeem_script: elements::Script,
+    pub prevout_script: elements::Script, // Example: 522103cab1a2a707d13ff3fcc9d08f888724e01c37d54ad8e8d9b274cb33eaebe3461321037888f798b59ff4e1122bdf52ad4c541be32ca755311746b67af2bc5e58df188b52ae
+    pub redeem_script: elements::Script, // Example: 0020953851a48d22e33a16eb11e9fb89ce1a410db6f0f681ec5b834b036fb84264c9
+    pub script_pub_key: elements::Script,
 }
 
 impl UtxoExt for Utxo {
@@ -851,34 +812,36 @@ fn redeem_script(prevout_script: &elements::Script) -> elements::Script {
         .into_script()
 }
 
-fn derive_ga_path(master_key: &Xpriv) -> Vec<u8> {
-    let register_key = master_key
-        .derive_priv(secp2, &[ChildNumber::Hardened { index: 0x4741 }])
-        .expect("must not fail");
+fn derive_ga_path(signer: &dyn Signer) -> Result<Vec<u8>, Error> {
+    let login_xpub = signer.get_xpub(&[ChildNumber::Hardened { index: 0x4741 }])?;
 
-    let pub_key = register_key.private_key.public_key(SECP256K1).serialize();
-
+    let pub_key = login_xpub.public_key.serialize();
     let ga_key = "GreenAddress.it HD wallet path";
-
-    let data = [register_key.chain_code.as_bytes(), pub_key.as_slice()].concat();
+    let data = [login_xpub.chain_code.as_bytes(), pub_key.as_slice()].concat();
 
     use hmac::Mac;
     let mut mac =
         hmac::Hmac::<sha2::Sha512>::new_from_slice(ga_key.as_bytes()).expect("must not fail");
     mac.update(&data);
     let result = mac.finalize();
-    result.into_bytes().to_vec()
+
+    Ok(result.into_bytes().to_vec())
 }
 
 impl Data {
-    fn derive_address(&self, pointer: u32) -> Address {
-        get_address(
-            &self.user_xpriv,
-            &self.service_xpub,
-            &self.master_blinding_key,
+    fn derive_address(&self, pointer: u32) -> DerivedAddress {
+        let prevout_script = derive_prevout_script(&self.user_xpub, &self.service_xpub, pointer);
+
+        let address = get_address(
+            &prevout_script,
+            Some(&self.master_blinding_key),
             self.network,
-            pointer,
-        )
+        );
+
+        DerivedAddress {
+            address,
+            prevout_script,
+        }
     }
 
     fn unblind_utxos(&self, utxos: Vec<models::Utxo>) -> Vec<Utxo> {
@@ -917,7 +880,7 @@ impl Data {
                         elements::confidential::Asset::Confidential(_),
                         elements::confidential::Value::Confidential(_),
                     ) => {
-                        let unblinded_res = txout.unblind(secp2, blinding_key);
+                        let unblinded_res = txout.unblind(SECP256K1, blinding_key);
                         match unblinded_res {
                             Ok(tx_out_sec) => tx_out_sec,
                             Err(err) => {
@@ -935,43 +898,45 @@ impl Data {
                     }
                 };
 
-                let DerivedKeys {
-                    priv_key_user,
+                let DerivedAddress {
+                    address,
                     prevout_script,
-                } = derive_keys(&self.user_xpriv, &self.service_xpub, utxo.pointer);
+                } = self.derive_address(utxo.pointer);
 
                 let redeem_script = redeem_script(&prevout_script);
 
+                let script_pub_key = address.script_pubkey();
+
                 Some(Utxo {
+                    block_height: utxo.block_height,
+                    subaccount: utxo.subaccount,
                     txout,
                     tx_out_sec,
                     outpoint: out_point,
                     pointer: utxo.pointer,
-                    priv_key_user,
                     prevout_script,
                     redeem_script,
+                    script_pub_key,
                 })
             })
             .collect()
     }
 }
 
-struct DerivedKeys {
-    priv_key_user: bitcoin::PrivateKey,
-    prevout_script: elements::Script,
-}
-
-fn derive_keys(user_xpriv: &Xpriv, service_xpub: &Xpub, pointer: u32) -> DerivedKeys {
+pub fn derive_prevout_script(
+    user_xpub: &Xpub,
+    service_xpub: &Xpub,
+    pointer: u32,
+) -> elements::Script {
     let pub_key_green = service_xpub
-        .derive_pub(secp1, &[ChildNumber::Normal { index: pointer }])
+        .derive_pub(SECP256K1, &[ChildNumber::Normal { index: pointer }])
         .expect("should not fail")
         .to_pub();
-    let priv_key_user = user_xpriv
-        .derive_priv(secp1, &[ChildNumber::Normal { index: pointer }])
-        .expect("should not fail")
-        .to_priv();
 
-    let pub_key_user = priv_key_user.public_key(secp1);
+    let pub_key_user = user_xpub
+        .derive_pub(SECP256K1, &[ChildNumber::Normal { index: pointer }])
+        .expect("should not fail")
+        .to_pub();
 
     let prevout_script = elements::script::Builder::new()
         .push_opcode(elements::opcodes::all::OP_PUSHNUM_2)
@@ -981,24 +946,19 @@ fn derive_keys(user_xpriv: &Xpriv, service_xpub: &Xpub, pointer: u32) -> Derived
         .push_opcode(elements::opcodes::all::OP_CHECKMULTISIG)
         .into_script();
 
-    DerivedKeys {
-        priv_key_user,
-        prevout_script,
-    }
+    prevout_script
+}
+
+struct DerivedAddress {
+    address: elements::Address,
+    prevout_script: elements::Script,
 }
 
 fn get_address(
-    user_xpriv: &Xpriv,
-    service_xpub: &Xpub,
-    master_blinding_key: &MasterBlindingKey,
+    prevout_script: &elements::Script,
+    master_blinding_key: Option<&MasterBlindingKey>,
     network: Network,
-    pointer: u32,
-) -> Address {
-    let DerivedKeys {
-        priv_key_user: _,
-        prevout_script,
-    } = derive_keys(user_xpriv, service_xpub, pointer);
-
+) -> elements::Address {
     let script = elements::script::Builder::new()
         .push_int(0)
         .push_slice(&elements::WScriptHash::hash(prevout_script.as_bytes())[..])
@@ -1006,15 +966,21 @@ fn get_address(
 
     let script_hash = elements::ScriptHash::hash(script.as_bytes());
 
-    let address = Address {
+    let unconfidential_address = Address {
         params: network.d().elements_params,
         payload: elements::address::Payload::ScriptHash(script_hash),
         blinding_pubkey: None,
     };
 
-    let blinder = master_blinding_key.blinding_key(secp2, &address.script_pubkey());
-
-    address.to_confidential(blinder)
+    match master_blinding_key {
+        Some(master_blinding_key) => {
+            let blinder = master_blinding_key
+                .blinding_key(SECP256K1, &unconfidential_address.script_pubkey());
+            let confidential_address = unconfidential_address.to_confidential(blinder);
+            confidential_address
+        }
+        None => unconfidential_address,
+    }
 }
 
 fn parse_gait_path(gait_path: &str) -> Result<Vec<u32>, Error> {
@@ -1031,27 +997,22 @@ fn parse_gait_path(gait_path: &str) -> Result<Vec<u32>, Error> {
     Ok(value)
 }
 
-fn derive_subaccount_xpriv(master_key: &Xpriv, subaccount: u32) -> Xpriv {
-    // harden(3), harden(subaccount), 1
-    let user_path = [
+pub fn address_user_path(subaccount: u32, pointer: u32) -> [ChildNumber; 4] {
+    [
         ChildNumber::Hardened { index: 3 },
         ChildNumber::Hardened { index: subaccount },
-    ];
-    master_key
-        .derive_priv(secp1, &user_path)
-        .expect("should not fail")
+        ChildNumber::Normal { index: 1 },
+        ChildNumber::Normal { index: pointer },
+    ]
 }
 
-fn derive_user_xpriv(master_key: &Xpriv, subaccount: u32) -> Xpriv {
-    // harden(3), harden(subaccount), 1
+fn derive_user_xpub(signer: &dyn Signer, subaccount: u32) -> Result<Xpub, Error> {
     let user_path = [
         ChildNumber::Hardened { index: 3 },
         ChildNumber::Hardened { index: subaccount },
         ChildNumber::Normal { index: 1 },
     ];
-    master_key
-        .derive_priv(secp1, &user_path)
-        .expect("should not fail")
+    signer.get_xpub(&user_path)
 }
 
 fn derive_service_xpub(network: Network, gait_path: &str, subaccount: u32) -> Result<Xpub, Error> {
@@ -1080,14 +1041,22 @@ fn derive_service_xpub(network: Network, gait_path: &str, subaccount: u32) -> Re
         .map(Into::into)
         .collect::<Vec<ChildNumber>>();
 
-    let mut subaccount_xpub = root_xpub.derive_pub(secp1, &path).expect("should not fail");
+    let mut subaccount_xpub = root_xpub
+        .derive_pub(SECP256K1, &path)
+        .expect("should not fail");
     subaccount_xpub.parent_fingerprint = Default::default();
+
     Ok(subaccount_xpub)
 }
 
-fn get_challenge_address(master_key: &Xpriv, network: Network) -> Address {
-    let pk = master_key.to_keypair(secp1).public_key();
-    Address::p2pkh(&pk.into(), None, network.d().elements_params)
+fn get_challenge_address(signer: &dyn Signer) -> Result<Address, Error> {
+    let root_xpub = signer.get_xpub(&[])?;
+    let pk = root_xpub.public_key;
+    Ok(Address::p2pkh(
+        &pk.into(),
+        None,
+        signer.network().d().elements_params,
+    ))
 }
 
 async fn send(connection: &mut Connection, msg: Msg) -> Result<(), Error> {
@@ -1316,10 +1285,68 @@ async fn process_command(data: &mut Data, command: Command) -> Result<(), Error>
             recv_addr_request(
                 data,
                 Box::new(move |data, res| {
-                    let res = res.and_then(|args| -> Result<Address, Error> {
-                        let address = parse_args1::<models::ReceiveAddress>(args)?;
-                        let address = data.derive_address(address.pointer);
-                        Ok(address)
+                    let res = res.and_then(|args| -> Result<AddressInfo, Error> {
+                        let resp = parse_args1::<models::ReceiveAddress>(args)?;
+
+                        let derived_address = data.derive_address(resp.pointer);
+
+                        let user_path = address_user_path(data.subaccount, resp.pointer)
+                            .into_iter()
+                            .map(u32::from)
+                            .collect();
+                        assert_eq!(derived_address.prevout_script, resp.script);
+
+                        Ok(AddressInfo {
+                            address: derived_address.address,
+                            pointer: resp.pointer,
+                            user_path,
+                            prevout_script: derived_address.prevout_script,
+                            service_xpub: data.service_xpub.to_string(),
+                        })
+                    });
+                    res_channel.send(res);
+                    Ok(())
+                }),
+            )
+            .await
+        }
+
+        Command::PreviousAddresses(res_channel) => {
+            make_request(
+                data,
+                "com.greenaddress.addressbook.get_my_addresses",
+                vec![data.subaccount.into()],
+                Box::new(move |data, res| {
+                    let res = res.and_then(|args| -> Result<Vec<AddressInfo>, Error> {
+                        let latest_list = parse_args1::<Vec<models::PreviousAddress>>(args)?;
+
+                        let max_pointer = latest_list
+                            .iter()
+                            .map(|addr| addr.pointer)
+                            .max()
+                            .unwrap_or_default();
+
+                        let list = (0..=max_pointer)
+                            .rev()
+                            .map(|pointer| {
+                                let derived_address = data.derive_address(pointer);
+
+                                let user_path = address_user_path(data.subaccount, pointer)
+                                    .into_iter()
+                                    .map(u32::from)
+                                    .collect();
+
+                                AddressInfo {
+                                    address: derived_address.address,
+                                    pointer,
+                                    user_path,
+                                    prevout_script: derived_address.prevout_script,
+                                    service_xpub: data.service_xpub.to_string(),
+                                }
+                            })
+                            .collect::<Vec<_>>();
+
+                        Ok(list)
                     });
                     res_channel.send(res);
                     Ok(())
@@ -1382,7 +1409,7 @@ async fn process_command(data: &mut Data, command: Command) -> Result<(), Error>
             make_request(
                 data,
                 "com.greenaddress.txs.get_list_v3",
-                vec![data.subaccount.into(), timestamp.as_micros().into()],
+                vec![data.subaccount.into(), timestamp.micros().into()],
                 Box::new(move |_data, res| {
                     let res = res.and_then(|args| -> Result<models::Transactions, Error> {
                         let transactions = parse_args1::<models::Transactions>(args)?;
@@ -1422,6 +1449,27 @@ async fn process_command(data: &mut Data, command: Command) -> Result<(), Error>
             )
             .await
         }
+
+        Command::SetWatchOnly {
+            credentials,
+            res_sender,
+        } => {
+            make_request(
+                data,
+                "com.greenaddress.addressbook.sync_custom",
+                vec![credentials.username.into(), credentials.password.into()],
+                Box::new(move |_data, res| {
+                    let res = res.and_then(|args| -> Result<(), Error> {
+                        let resp = parse_args1::<bool>(args)?;
+                        verify!(resp, Error::ProtocolError("unexpected error"));
+                        Ok(())
+                    });
+                    res_sender.send(res);
+                    Ok(())
+                }),
+            )
+            .await
+        }
     }
 }
 
@@ -1429,7 +1477,7 @@ async fn connect_ws(network: Network) -> Result<Connection, Error> {
     let url = match network {
         Network::Liquid => "wss://green-liquid-mainnet.blockstream.com/v2/ws",
         Network::LiquidTestnet => "wss://green-liquid-testnet.blockstream.com/v2/ws",
-        Network::Regtest => todo!(),
+        Network::Regtest => std::future::pending().await, // Do nothing on regtest
     };
     let url: url::Url = url.parse().expect("must be valid");
     let host = url.host().expect("must be set").to_string();
@@ -1497,12 +1545,8 @@ async fn login(connection: &mut Connection) -> Result<(), Error> {
     Ok(())
 }
 
-async fn get_challenge(
-    connection: &mut Connection,
-    master_key: &Xpriv,
-    network: Network,
-) -> Result<String, Error> {
-    let challenge_address = get_challenge_address(master_key, network).to_string();
+async fn get_challenge(connection: &mut Connection, signer: &dyn Signer) -> Result<String, Error> {
+    let challenge_address = get_challenge_address(signer)?.to_string();
     let args = vec![challenge_address.into(), true.into()];
 
     let request_id = WampId::generate();
@@ -1559,21 +1603,13 @@ const USER_AGENT_CAPS: &str = "[v2,sw,csv,csv_opt] sideswap_amp";
 
 async fn authenticate(
     connection: &mut Connection,
-    master_key: &Xpriv,
+    signer: &dyn Signer,
     challenge: &str,
 ) -> Result<Option<AuthenticateResp>, Error> {
-    let login_path = vec![ChildNumber::from(0x4741b11e)];
-
-    let login_xpriv = master_key
-        .derive_priv(secp1, &login_path)
-        .expect("should not fail");
-    let login_keypair = login_xpriv.to_keypair(secp1);
+    let login_path = [ChildNumber::Normal { index: 0x4741b11e }];
     let message = format!("greenaddress.it      login {}", challenge);
-    let message_hash = bitcoin::sign_message::signed_msg_hash(&message);
-    let message = bitcoin::secp256k1::Message::from_digest(message_hash.to_byte_array());
-    let signature = secp1
-        .sign_ecdsa(&message, &login_keypair.secret_key())
-        .to_string();
+
+    let signature = signer.sign_message(&login_path, message)?.to_string();
 
     let args = vec![
         signature.into(),
@@ -1652,13 +1688,125 @@ async fn authenticate(
     }
 }
 
+async fn wo_login(
+    connection: &mut Connection,
+    Credentials { username, password }: &Credentials,
+) -> Result<Option<AuthenticateResp>, Error> {
+    #[derive(Serialize)]
+    pub struct Credentials {
+        username: String,
+        password: String,
+        minimal: String,
+    }
+
+    let credentials = Credentials {
+        username: username.to_owned(),
+        password: password.to_owned(),
+        minimal: "true".to_owned(), // Must be string!
+    };
+
+    // let with_blob = false;
+
+    let args = vec![
+        "custom".into(),
+        serde_json::to_value(&credentials)
+            .expect("must not fail")
+            .into(),
+        USER_AGENT_CAPS.into(),
+        // with_blob.into(),
+    ];
+
+    let request_id = WampId::generate();
+
+    send(
+        connection,
+        Msg::Call {
+            request: request_id,
+            options: WampDict::new(),
+            procedure: "com.greenaddress.login.watch_only_v2".to_owned(),
+            arguments: Some(args),
+            arguments_kw: None,
+        },
+    )
+    .await?;
+
+    let resp = get_wamp_msg(connection).await?;
+
+    match resp {
+        Msg::Result {
+            request, arguments, ..
+        } => {
+            verify!(
+                request == request_id,
+                Error::ProtocolError("unexpected request_id")
+            );
+            let args = arguments.ok_or(Error::ProtocolError("empty response"))?;
+
+            if args.first().and_then(|resp| resp.as_bool()) == Some(false) {
+                log::debug!("login failed, no account found");
+                return Ok(None);
+            }
+
+            let auth_res = parse_args1::<models::AuthenticateResult>(args)?;
+
+            let next_subaccount = auth_res
+                .subaccounts
+                .iter()
+                .map(|subaccount| subaccount.pointer)
+                .max()
+                .unwrap_or(0)
+                + 1;
+
+            let amp_subaccount = auth_res
+                .subaccounts
+                .into_iter()
+                .find(|subaccount| subaccount.type_ == AMP_SUBACCOUNT_TYPE);
+
+            log::info!("watch-only login succeed");
+            Ok(Some(AuthenticateResp {
+                gait_path: auth_res.gait_path,
+                wallet_id: auth_res.receiving_id,
+                amp_subaccount,
+                block_height: auth_res.block_height,
+                next_subaccount,
+            }))
+        }
+        Msg::Error {
+            request,
+            error,
+            arguments,
+            ..
+        } => {
+            verify!(
+                request == request_id,
+                Error::ProtocolError("unexpected request_id")
+            );
+            let args = arguments.ok_or(Error::ProtocolError("empty error response"))?;
+            if args.first().and_then(|resp| resp.as_str())
+                == Some("http://greenaddressit.com/error#usernotfound")
+            {
+                abort!(Error::WrongWatchOnlyPassword)
+            }
+            abort!(Error::WampError {
+                context: "login.watch_only_v2 call failed",
+                error
+            })
+        }
+        _ => abort!(Error::ProtocolError("unexpected response")),
+    }
+}
+
 async fn create_subaccount(
     connection: &mut Connection,
-    master_key: &Xpriv,
+    signer: &dyn Signer,
     pointer: u32,
 ) -> Result<String, Error> {
-    let subaccount_xpriv = derive_subaccount_xpriv(master_key, pointer);
-    let subaccount_xpub = Xpub::from_priv(secp1, &subaccount_xpriv).to_string();
+    let user_path = [
+        ChildNumber::Hardened { index: 3 },
+        ChildNumber::Hardened { index: pointer },
+    ];
+
+    let subaccount_xpub = signer.get_xpub(&user_path)?.to_string();
 
     let xpubs: WampArgs = vec![subaccount_xpub.into()];
     let sigs: WampArgs = vec!["".into()];
@@ -1714,10 +1862,12 @@ async fn create_subaccount(
     }
 }
 
-async fn register(connection: &mut Connection, master_key: &Xpriv) -> Result<(), Error> {
-    let pubkey = hex::encode(master_key.private_key.public_key(secp2).serialize());
-    let chaincode = hex::encode(master_key.chain_code.as_bytes());
-    let ga_path = hex::encode(derive_ga_path(master_key));
+async fn register(connection: &mut Connection, signer: &dyn Signer) -> Result<(), Error> {
+    let root_xpub = signer.get_xpub(&[])?;
+
+    let pubkey = hex::encode(root_xpub.public_key.serialize());
+    let chaincode = hex::encode(root_xpub.chain_code.as_bytes());
+    let ga_path = hex::encode(derive_ga_path(signer)?);
 
     let args = vec![
         pubkey.into(),
@@ -1801,7 +1951,7 @@ fn block_callback(data: &mut Data, args: WampArgs) -> Result<(), Error> {
     let block = parse_args1::<models::BlockEvent>(args)?;
     log::debug!("block callback: {block:?}");
     data.block_height = block.count;
-    let _ = data.event_sender.send(Event::NewBlock {
+    (data.event_callback)(Event::NewBlock {
         block_height: block.count,
     });
     Ok(())
@@ -1811,15 +1961,12 @@ fn tx_callback(data: &mut Data, args: WampArgs) -> Result<(), Error> {
     let tx = parse_args1::<models::TransactionEvent>(args)?;
     log::debug!("tx callback: {tx:?}");
     data.reload_utxos = true;
-    let _ = data.event_sender.send(Event::NewTx { txid: tx.txhash });
+    (data.event_callback)(Event::NewTx { txid: tx.txhash });
     Ok(())
 }
 
-fn send_event(data: &mut Data, event: Event) {
-    let res = data.event_sender.send(event);
-    if res.is_err() {
-        log::warn!("event sending failed");
-    }
+fn send_event(data: &Data, event: Event) {
+    (data.event_callback)(event);
 }
 
 async fn reload_wallet_utxos(data: &mut Data) -> Result<(), Error> {
@@ -1873,6 +2020,11 @@ async fn connection_check(data: &mut Data) -> Result<(), Error> {
 }
 
 async fn upload_ca_addresses(data: &mut Data, num: u32) -> Result<(), Error> {
+    verify!(
+        !data.watch_only,
+        Error::ProtocolError("can't upload CA addresses from watch-only session")
+    );
+
     log::debug!("upload {num} ca addresses");
     for _ in 0..num {
         recv_addr_request(
@@ -1880,7 +2032,7 @@ async fn upload_ca_addresses(data: &mut Data, num: u32) -> Result<(), Error> {
             Box::new(move |data, res| {
                 let address = parse_args1::<models::ReceiveAddress>(res?)?;
                 let address = data.derive_address(address.pointer);
-                data.ca_addresses.push(address);
+                data.ca_addresses.push(address.address);
                 Ok(())
             }),
         )
@@ -1965,21 +2117,27 @@ async fn processing_loop(
     }
 }
 
-async fn connect(
-    master_blinding_key: &MasterBlindingKey,
-    master_key: &Xpriv,
-    network: Network,
-    command_receiver: &mut UnboundedReceiver<Command>,
-    event_sender: UnboundedSender<Event>,
-) -> Result<(), Error> {
-    let mut connection = connect_ws(network).await?;
+async fn connect(login_details: &LoginType, event_callback: EventCallback) -> Result<Data, Error> {
+    let mut connection = connect_ws(login_details.network()).await?;
+
+    let master_blinding_key = login_details.get_master_blinding_key()?;
 
     login(&mut connection).await?;
 
-    let challenge = get_challenge(&mut connection, master_key, network).await?;
-    log::debug!("got challenge: {challenge}");
+    let auth_res = match login_details {
+        LoginType::Full(signer) => {
+            let challenge = get_challenge(&mut connection, signer.as_ref()).await?;
+            log::debug!("got challenge: {challenge}");
+            authenticate(&mut connection, signer.as_ref(), &challenge).await?
+        }
+        LoginType::WatchOnly { credentials, .. } => wo_login(&mut connection, credentials).await?,
+    };
 
-    let auth_res = authenticate(&mut connection, master_key, &challenge).await?;
+    let watch_only = match login_details {
+        LoginType::Full(_) => false,
+        LoginType::WatchOnly { .. } => true,
+    };
+
     let AuthenticateResp {
         gait_path,
         wallet_id,
@@ -1993,11 +2151,18 @@ async fn connect(
         }
         None => {
             log::debug!("authentication failed, try register...");
-            register(&mut connection, master_key).await?;
+            let signer = match login_details {
+                LoginType::Full(signer) => signer,
+                LoginType::WatchOnly { .. } => {
+                    return Err(Error::ProtocolError("no wo account found"))
+                }
+            };
 
-            let challenge = get_challenge(&mut connection, master_key, network).await?;
+            register(&mut connection, signer.as_ref()).await?;
+
+            let challenge = get_challenge(&mut connection, signer.as_ref()).await?;
             log::debug!("got challenge: {challenge}");
-            let auth_res = authenticate(&mut connection, master_key, &challenge).await?;
+            let auth_res = authenticate(&mut connection, signer.as_ref(), &challenge).await?;
 
             auth_res.ok_or(Error::ProtocolError(
                 "login after registration failed unexpectedly",
@@ -2009,36 +2174,53 @@ async fn connect(
         Some(subaccount) => (
             subaccount.pointer,
             subaccount.receiving_id,
-            subaccount.required_ca,
+            subaccount.required_ca.unwrap_or_default(),
         ),
         None => {
-            let new_gaid = create_subaccount(&mut connection, master_key, next_subaccount).await?;
+            let signer = match login_details {
+                LoginType::Full(signer) => signer,
+                LoginType::WatchOnly { .. } => {
+                    return Err(Error::ProtocolError("no wo subaccount found"))
+                }
+            };
+
+            let new_gaid =
+                create_subaccount(&mut connection, signer.as_ref(), next_subaccount).await?;
             (next_subaccount, new_gaid, 20)
         }
     };
 
-    let user_xpriv = derive_user_xpriv(master_key, subaccount);
+    let user_xpub = match login_details {
+        LoginType::Full(signer) => derive_user_xpub(signer.as_ref(), subaccount)?,
 
-    let service_xpub = derive_service_xpub(network, &gait_path, subaccount)?;
+        LoginType::WatchOnly { amp_user_xpub, .. } => *amp_user_xpub,
+    };
+
+    let service_xpub = derive_service_xpub(login_details.network(), &gait_path, subaccount)?;
+
+    let network = login_details.network();
+
+    let policy_asset = network.d().policy_asset.asset_id();
 
     let mut data = Data {
+        policy_asset,
         connection,
         pending_requests: BTreeMap::new(),
         network,
-        master_blinding_key: *master_blinding_key,
+        master_blinding_key,
         subaccount,
-        user_xpriv,
+        user_xpub,
         service_xpub,
-        event_sender,
+        event_callback,
         pending_subscribe: HashMap::new(),
         active_subscribe: HashMap::new(),
         utxos: Vec::new(),
         reload_utxos: true,
         ca_addresses: Vec::new(),
         block_height,
+        watch_only,
+        gaid,
     };
-
-    send_event(&mut data, Event::Connected { gaid, block_height });
 
     subscribe(
         &mut data,
@@ -2054,9 +2236,27 @@ async fn connect(
     )
     .await?;
 
-    upload_ca_addresses(&mut data, required_ca).await?;
+    if !data.watch_only {
+        upload_ca_addresses(&mut data, required_ca).await?;
+    }
 
-    let res = processing_loop(&mut data, command_receiver).await;
+    send_event(
+        &data,
+        Event::Connected {
+            gaid: data.gaid.clone(),
+            subaccount: data.subaccount,
+            block_height: data.block_height,
+        },
+    );
+
+    Ok(data)
+}
+
+async fn run_once(
+    mut data: Data,
+    mut command_receiver: UnboundedReceiver<Command>,
+) -> Result<(), Error> {
+    let res = processing_loop(&mut data, &mut command_receiver).await;
 
     while let Some(req) = data.pending_requests.pop_first() {
         let _ = (req.1.callback)(&mut data, Err(Error::ProtocolError("connection closed")));
@@ -2065,57 +2265,48 @@ async fn connect(
     res
 }
 
-async fn run(
-    master_blinding_key: MasterBlindingKey,
-    master_key: Xpriv,
-    network: Network,
+async fn run_loop(
+    login: LoginType,
     mut command_receiver: UnboundedReceiver<Command>,
-    event_sender: UnboundedSender<Event>,
-) {
+    event_callback: EventCallback,
+) -> Result<(), Error> {
     let mut retry_delay = RetryDelay::default();
+
     loop {
-        let started = Instant::now();
-
-        let res = connect(
-            &master_blinding_key,
-            &master_key,
-            network,
-            &mut command_receiver,
-            event_sender.clone(),
+        let res = tokio::time::timeout(
+            Duration::from_secs(60),
+            connect(&login, event_callback.clone()),
         )
-        .await;
+        .await
+        .unwrap_or_else(|_err| Err(Error::ProtocolError("connection timeout")));
 
-        if Instant::now().duration_since(started) >= Duration::from_secs(60) {
-            // Connection worked correctly for some time, no need to wait a lot before trying to restart
-            retry_delay = RetryDelay::default();
-        }
+        match res {
+            Ok(mut data) => {
+                retry_delay = RetryDelay::default();
 
-        if let Err(err) = res {
-            log::error!("connection failed: {err}");
-            let _ = event_sender.send(Event::Disconnected);
-            tokio::time::sleep(retry_delay.next_delay()).await;
-        }
+                let res = processing_loop(&mut data, &mut command_receiver).await;
 
-        if command_receiver.is_closed() {
-            return;
+                while let Some(req) = data.pending_requests.pop_first() {
+                    let _ =
+                        (req.1.callback)(&mut data, Err(Error::ProtocolError("connection closed")));
+                }
+
+                match res {
+                    Ok(()) => {
+                        log::debug!("connection closed normally");
+                    }
+                    Err(err) => {
+                        log::error!("connection closed unexpectedly: {err}");
+                    }
+                }
+            }
+
+            Err(err) => {
+                log::error!("connection failed: {err}");
+                tokio::time::sleep(retry_delay.next_delay()).await;
+            }
         }
     }
-}
-
-fn take_utxos<'a>(mut utxos: Vec<Utxo>, required: impl Iterator<Item = &'a InOut>) -> Vec<Utxo> {
-    let mut selected = Vec::new();
-    for required in required {
-        let index = utxos
-            .iter()
-            .position(|utxo| {
-                utxo.tx_out_sec.asset == required.asset_id
-                    && utxo.tx_out_sec.value == required.value
-            })
-            .expect("must exist");
-        let utxo = utxos.remove(index);
-        selected.push(utxo);
-    }
-    selected
 }
 
 #[cfg(test)]

@@ -18,6 +18,7 @@ pub mod network;
 pub mod network_fee;
 pub mod network_fee_discount;
 pub mod panic_handler;
+pub mod path_helpers;
 pub mod pin;
 pub mod price_stream;
 pub mod pset;

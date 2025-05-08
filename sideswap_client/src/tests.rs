@@ -3,11 +3,11 @@ use std::{
     sync::{mpsc, Arc},
 };
 
-use sideswap_common::env::Env;
+use sideswap_common::{env::Env, panic_handler::install_panic_handler};
 
 use crate::{
-    ffi::proto,
-    worker::{self, AccountId, ACCOUNT_ID_AMP, ACCOUNT_ID_REG},
+    ffi::proto::{self, Account},
+    worker,
 };
 
 #[derive(Default)]
@@ -22,7 +22,7 @@ struct Data {
     msg_sender: mpsc::Sender<worker::Message>,
     from_receiver: mpsc::Receiver<proto::from::Msg>,
     server_connected: bool,
-    balances: BTreeMap<AccountId, Vec<proto::Balance>>,
+    balances: BTreeMap<Account, Vec<proto::Balance>>,
     own_orders: BTreeMap<u64, proto::OwnOrder>,
     own_orders_received: bool,
     subscribed_values: SubscribedValues,
@@ -42,7 +42,7 @@ impl Data {
 
         match &msg {
             proto::from::Msg::BalanceUpdate(msg) => {
-                self.balances.insert(msg.account.id, msg.balances.clone());
+                self.balances.insert(msg.account(), msg.balances.clone());
             }
 
             proto::from::Msg::OwnOrders(msg) => {
@@ -109,6 +109,7 @@ impl Data {
             | proto::from::Msg::BlindedValues(_)
             | proto::from::Msg::LoadUtxos(_)
             | proto::from::Msg::LoadAddresses(_)
+            | proto::from::Msg::LoadTransactions(_)
             | proto::from::Msg::ShowMessage(_)
             | proto::from::Msg::InsufficientFunds(_)
             | proto::from::Msg::AssetDetails(_)
@@ -135,14 +136,22 @@ impl Data {
             | proto::from::Msg::ChartsSubscribe(_)
             | proto::from::Msg::ChartsUpdate(_)
             | proto::from::Msg::LoadHistory(_)
-            | proto::from::Msg::HistoryUpdated(_) => {}
+            | proto::from::Msg::HistoryUpdated(_)
+            | proto::from::Msg::NewBlock(_)
+            | proto::from::Msg::NewTx(_) => {}
         }
 
         msg
     }
 }
 
-fn start_wallet(wallet: proto::to::login::Wallet, work_dir: &str) -> Data {
+fn start_wallet(
+    wallet: proto::to::login::Wallet,
+    work_dir: &str,
+    wait_positive_balance: bool,
+) -> Data {
+    install_panic_handler();
+
     let (msg_sender, msg_receiver) = mpsc::channel::<worker::Message>();
     let (from_sender, from_receiver) = mpsc::channel::<proto::from::Msg>();
 
@@ -195,13 +204,8 @@ fn start_wallet(wallet: proto::to::login::Wallet, work_dir: &str) -> Data {
         let msg = data.recv();
         if let proto::from::Msg::BalanceUpdate(msg) = msg {
             let positive_balance = msg.balances.iter().any(|balance| balance.amount > 0);
-            if positive_balance {
-                match msg.account.id {
-                    ACCOUNT_ID_REG | ACCOUNT_ID_AMP => {
-                        wallets.insert(msg.account.id);
-                    }
-                    _ => panic!("unexpected account id: {}", msg.account.id),
-                }
+            if positive_balance || !wait_positive_balance {
+                wallets.insert(msg.account());
             }
         }
     }
@@ -223,6 +227,7 @@ fn start_wallet_1() -> Data {
     start_wallet(
         proto::to::login::Wallet::Mnemonic(std::env::var("GDK_TESTNET_MNEMONIC").unwrap()),
         "/tmp/sideswap/test_work_dir_1",
+        true,
     )
 }
 
@@ -230,6 +235,7 @@ fn start_wallet_2() -> Data {
     start_wallet(
         proto::to::login::Wallet::Mnemonic(std::env::var("GDK_TESTNET_MNEMONIC_2").unwrap()),
         "/tmp/sideswap/test_work_dir_2",
+        true,
     )
 }
 
@@ -237,6 +243,7 @@ fn start_jade() -> Data {
     start_wallet(
         proto::to::login::Wallet::JadeId(std::env::var("GDK_TESTNET_JADE_ID").unwrap()),
         "/tmp/sideswap/test_work_dir_jade",
+        true,
     )
 }
 
@@ -398,7 +405,6 @@ fn make_swap(
 
 fn send_tx(
     data: &mut Data,
-    account_id: AccountId,
     asset_id: &str,
     amount: u64,
     address: &str,
@@ -411,7 +417,6 @@ fn send_tx(
             amount: amount as i64,
             asset_id: asset_id.to_string(),
         }],
-        account: proto::Account { id: account_id },
         utxos: Vec::new(),
         fee_asset_id: fee_asset_id.map(ToOwned::to_owned),
         deduct_fee_output,
@@ -430,10 +435,7 @@ fn send_tx(
         }
     };
 
-    data.send(proto::to::Msg::SendTx(proto::to::SendTx {
-        account: proto::Account { id: account_id },
-        id: created.id,
-    }));
+    data.send(proto::to::Msg::SendTx(proto::to::SendTx { id: created.id }));
 
     loop {
         let msg = data.recv();
@@ -484,11 +486,11 @@ fn buy_sswp_for_lbtc_wallet1() {
 
 #[ignore]
 #[test]
-fn swap_sswp_for_usdt_wallet1_wallet2() {
-    let mut data1 = start_wallet_1();
+fn swap_sswp_for_usdt_wallet1_wallet2_public() {
+    let mut data_1 = start_wallet_1();
 
     submit_order(
-        &mut data1,
+        &mut data_1,
         SSWP,
         USDT,
         100,
@@ -498,10 +500,10 @@ fn swap_sswp_for_usdt_wallet1_wallet2() {
         false,
     );
 
-    let mut data2 = start_wallet_2();
+    let mut data_2 = start_wallet_2();
 
     make_swap(
-        &mut data2,
+        &mut data_2,
         SSWP,
         USDT,
         proto::AssetType::Base,
@@ -643,7 +645,7 @@ fn sell_sswp_for_usdt_offline_wallet1() {
         &mut data,
         SSWP,
         USDT,
-        12,
+        30,
         0.95,
         proto::TradeDir::Sell,
         true,
@@ -671,10 +673,10 @@ fn sell_sswp_for_usdt_offline_jade() {
 #[ignore]
 #[test]
 fn buy_lbtc_for_usdt_offline_jade() {
-    let mut data1 = start_jade();
+    let mut data_1 = start_jade();
 
     submit_order(
-        &mut data1,
+        &mut data_1,
         LBTC,
         USDT,
         50000,
@@ -688,11 +690,10 @@ fn buy_lbtc_for_usdt_offline_jade() {
 #[ignore]
 #[test]
 fn send_payjoin_wallet1_normal() {
-    let mut data1 = start_wallet_1();
+    let mut data_1 = start_wallet_1();
 
     send_tx(
-        &mut data1,
-        ACCOUNT_ID_REG,
+        &mut data_1,
         USDT,
         100000000,
         "vjU5WU5sQZVpuvY1GDHmjufQcBdRTS2yZKrCAQuBhBjxqVcKhHKN82YtBUiznTX9WQ5MSUUZaRBdG9Du",
@@ -704,11 +705,10 @@ fn send_payjoin_wallet1_normal() {
 #[ignore]
 #[test]
 fn send_payjoin_wallet1_deduct_fee() {
-    let mut data1 = start_wallet_1();
+    let mut data_1 = start_wallet_1();
 
     send_tx(
-        &mut data1,
-        ACCOUNT_ID_REG,
+        &mut data_1,
         USDT,
         100000000,
         "vjU5WU5sQZVpuvY1GDHmjufQcBdRTS2yZKrCAQuBhBjxqVcKhHKN82YtBUiznTX9WQ5MSUUZaRBdG9Du",
@@ -720,11 +720,10 @@ fn send_payjoin_wallet1_deduct_fee() {
 #[ignore]
 #[test]
 fn send_normal_wallet1_p2wsh() {
-    let mut data1 = start_wallet_1();
+    let mut data_1 = start_wallet_1();
 
     send_tx(
-        &mut data1,
-        ACCOUNT_ID_REG,
+        &mut data_1,
         USDT,
         1,
         "tlq1qqgqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqrcasc3pf3lquzjd0haxgn9hmjfp84eq7geymjdx2f9verdu99wz4fpuwuw86sas9",
@@ -736,11 +735,10 @@ fn send_normal_wallet1_p2wsh() {
 #[ignore]
 #[test]
 fn send_payjoin_wallet1_p2wsh() {
-    let mut data1 = start_wallet_1();
+    let mut data_1 = start_wallet_1();
 
     send_tx(
-        &mut data1,
-        ACCOUNT_ID_REG,
+        &mut data_1,
         USDT,
         1,
         "tlq1qqgqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqrcasc3pf3lquzjd0haxgn9hmjfp84eq7geymjdx2f9verdu99wz4fpuwuw86sas9",
@@ -751,12 +749,26 @@ fn send_payjoin_wallet1_p2wsh() {
 
 #[ignore]
 #[test]
-fn send_payjoin_jade() {
-    let mut data1 = start_jade();
+fn send_normal_jade() {
+    let mut data_1 = start_jade();
 
     send_tx(
-        &mut data1,
-        ACCOUNT_ID_REG,
+        &mut data_1,
+        USDT,
+        100000000,
+        "vjU5WU5sQZVpuvY1GDHmjufQcBdRTS2yZKrCAQuBhBjxqVcKhHKN82YtBUiznTX9WQ5MSUUZaRBdG9Du",
+        None,
+        None,
+    );
+}
+
+#[ignore]
+#[test]
+fn send_payjoin_jade() {
+    let mut data_1 = start_jade();
+
+    send_tx(
+        &mut data_1,
         USDT,
         100000000,
         "vjU5WU5sQZVpuvY1GDHmjufQcBdRTS2yZKrCAQuBhBjxqVcKhHKN82YtBUiznTX9WQ5MSUUZaRBdG9Du",
@@ -767,11 +779,26 @@ fn send_payjoin_jade() {
 
 #[ignore]
 #[test]
+fn send_sswp_jade() {
+    let mut data_1 = start_jade();
+
+    send_tx(
+        &mut data_1,
+        SSWP,
+        1,
+        "vjTvf1RJwj4sAAFnhEKHA1GH99uyAnALzYZ9CZ2DewoV4jFCUbNQjp6gmwNB8E6fsTtLu3WD18RzEmaz",
+        None,
+        None,
+    );
+}
+
+#[ignore]
+#[test]
 fn swap_sswp_for_usdt_wallet1_wallet2_private() {
-    let mut data1 = start_wallet_1();
+    let mut data_1 = start_wallet_1();
 
     submit_order(
-        &mut data1,
+        &mut data_1,
         SSWP,
         USDT,
         100,
@@ -781,34 +808,34 @@ fn swap_sswp_for_usdt_wallet1_wallet2_private() {
         true,
     );
 
-    assert_eq!(data1.own_orders.len(), 1);
-    let order = data1.own_orders.values().next().unwrap();
+    assert_eq!(data_1.own_orders.len(), 1);
+    let order = data_1.own_orders.values().next().unwrap();
 
-    let mut data2 = start_wallet_2();
+    let mut data_2 = start_wallet_2();
 
-    make_order_swap(&mut data2, order.order_id.id, order.private_id.clone());
+    make_order_swap(&mut data_2, order.order_id.id, order.private_id.clone());
 }
 
 #[ignore]
 #[test]
 fn send_pegin_wallet_balance() {
-    let mut data1 = start_wallet_1();
+    let mut data_1 = start_wallet_1();
 
-    data1.send(proto::to::Msg::ActivePage(proto::ActivePage::PegIn.into()));
-    while data1.subscribed_values.peg_in_min_amount.is_none()
-        || data1.subscribed_values.peg_in_wallet_balance.is_none()
+    data_1.send(proto::to::Msg::ActivePage(proto::ActivePage::PegIn.into()));
+    while data_1.subscribed_values.peg_in_min_amount.is_none()
+        || data_1.subscribed_values.peg_in_wallet_balance.is_none()
     {
-        data1.recv();
+        data_1.recv();
     }
 
-    data1.send(proto::to::Msg::ActivePage(proto::ActivePage::Other.into()));
-    data1.subscribed_values = SubscribedValues::default();
+    data_1.send(proto::to::Msg::ActivePage(proto::ActivePage::Other.into()));
+    data_1.subscribed_values = SubscribedValues::default();
 
-    data1.send(proto::to::Msg::ActivePage(proto::ActivePage::PegIn.into()));
-    while data1.subscribed_values.peg_in_min_amount.is_none()
-        || data1.subscribed_values.peg_in_wallet_balance.is_none()
+    data_1.send(proto::to::Msg::ActivePage(proto::ActivePage::PegIn.into()));
+    while data_1.subscribed_values.peg_in_min_amount.is_none()
+        || data_1.subscribed_values.peg_in_wallet_balance.is_none()
     {
-        data1.recv();
+        data_1.recv();
     }
 }
 
@@ -851,5 +878,109 @@ fn instant_swaps_ind_price() {
             }
         }
     };
-    panic!("ind_price: {ind_price:#?}");
+    println!("ind_price: {ind_price:#?}");
+}
+
+#[ignore]
+#[test]
+fn blinded_values() {
+    let mut data = start_wallet_1();
+
+    data.send(proto::to::Msg::BlindedValues(proto::to::BlindedValues {
+        txid: "eae6e3b83bd9b1ed8e5b94f9daac6649fbd2e4c12013e1698eb80829980a2d64".to_owned(),
+    }));
+
+    let res = loop {
+        let msg = data.recv();
+        if let proto::from::Msg::BlindedValues(msg) = msg {
+            break msg.result.unwrap();
+        }
+    };
+
+    match res {
+        proto::from::blinded_values::Result::ErrorMsg(err) => {
+            panic!("failed: {err}")
+        }
+        proto::from::blinded_values::Result::BlindedValues(values) => {
+            assert!(!values.is_empty());
+            log::debug!("blinded values: {values}");
+        }
+    }
+}
+
+#[ignore]
+#[test]
+fn load_addresses_and_utxos() {
+    let mut data = start_wallet_1();
+
+    for account in [Account::Reg, Account::Amp] {
+        data.send(proto::to::Msg::LoadAddresses(account.into()));
+
+        loop {
+            let msg = data.recv();
+            if let proto::from::Msg::LoadAddresses(msg) = msg {
+                assert!(msg.error_msg.is_none());
+                log::debug!("account: {account:?}, addresses: {msg:#?}");
+                break;
+            }
+        }
+
+        data.send(proto::to::Msg::LoadUtxos(account.into()));
+
+        loop {
+            let msg = data.recv();
+            if let proto::from::Msg::LoadUtxos(msg) = msg {
+                assert!(msg.error_msg.is_none());
+                log::debug!("account: {account:?}, utxos: {msg:#?}");
+                break;
+            }
+        }
+    }
+}
+
+#[ignore]
+#[test]
+fn load_transactions_wallet_1() {
+    let mut data = start_wallet_1();
+
+    data.send(proto::to::Msg::LoadTransactions(proto::Empty {}));
+
+    loop {
+        let msg = data.recv();
+        if let proto::from::Msg::LoadTransactions(msg) = msg {
+            assert!(msg.error_msg.is_none());
+            log::debug!("transactions: {msg:#?}");
+            break;
+        }
+    }
+}
+
+#[ignore]
+#[test]
+fn create_new_wallet() {
+    let dir_name = "/tmp/sideswap/test_work_dir_new_wallet";
+    let _ = std::fs::remove_dir_all(dir_name);
+    let mnemonic = bip39::Mnemonic::generate(12).unwrap();
+    start_wallet(
+        proto::to::login::Wallet::Mnemonic(mnemonic.to_string()),
+        dir_name,
+        false,
+    );
+}
+
+#[ignore]
+#[test]
+fn load_transactions_jade() {
+    let mut data = start_jade();
+
+    data.send(proto::to::Msg::LoadTransactions(proto::Empty {}));
+
+    loop {
+        let msg = data.recv();
+        if let proto::from::Msg::LoadTransactions(msg) = msg {
+            assert!(msg.error_msg.is_none());
+            log::debug!("transactions: {msg:#?}");
+            break;
+        }
+    }
 }

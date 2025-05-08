@@ -24,7 +24,7 @@ pub enum JadeStatus {
     SignTx(TxType),
 }
 
-pub type JadeStatusCallback = std::sync::Arc<Box<dyn Fn(Option<JadeStatus>)>>;
+pub type JadeStatusCallback = std::sync::Arc<Box<dyn Fn(Option<JadeStatus>) + Send + Sync>>;
 
 // Number of started Jade popups (only the first status is shown).
 type ActiveStatuses = Arc<Mutex<usize>>;
@@ -33,6 +33,8 @@ pub struct JadeStatusFlag {
     active_statuses: ActiveStatuses,
     status_callback: JadeStatusCallback,
 }
+
+pub const AE_STUB_DATA: ByteArray32 = ByteArray([1u8; 32]);
 
 impl JadeStatusFlag {
     fn new(
@@ -66,7 +68,7 @@ impl Drop for JadeStatusFlag {
 }
 
 use crate::{
-    byte_array::ByteArray32,
+    byte_array::{ByteArray, ByteArray32},
     http_request::handle_http_request,
     models,
     transports::{self, Connection, Transport},
@@ -355,7 +357,7 @@ impl ManagedJade {
         Ok(resp.into_vec())
     }
 
-    pub fn sign_tx(&self, sign_tx: models::ReqSignTx) -> Result<bool, anyhow::Error> {
+    pub fn sign_liquid_tx(&self, sign_tx: models::ReqSignTx) -> Result<bool, anyhow::Error> {
         let resp = self.make_request::<models::ReqSignTx, models::RespSignTx>(
             "sign_liquid_tx",
             std::time::Duration::from_secs(300),

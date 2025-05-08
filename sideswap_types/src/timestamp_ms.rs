@@ -26,7 +26,7 @@ impl TimestampMs {
         Self::from_time(std::time::SystemTime::now()).expect("invalid SystemTime")
     }
 
-    pub fn as_millis(self) -> u64 {
+    pub fn millis(self) -> u64 {
         self.0
     }
 }

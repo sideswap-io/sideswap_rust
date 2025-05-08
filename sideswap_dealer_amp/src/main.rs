@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use elements::pset::PartiallySignedTransaction;
+use sideswap_amp::sw_signer::SwSigner;
 use sideswap_api::mkt::AssetPair;
 use sideswap_api::{AssetBlindingFactor, ValueBlindingFactor};
 use sideswap_common::channel_helpers::UncheckedUnboundedSender;
@@ -10,6 +11,7 @@ use sideswap_common::dealer_ticker::{TickerLoader, WhitelistedAssets};
 use sideswap_common::recipient::Recipient;
 use sideswap_dealer::market::{SendAssetReq, SendAssetResp};
 use sideswap_dealer::{market, price_stream};
+use tokio::sync::mpsc::unbounded_channel;
 
 #[derive(Debug, serde::Deserialize)]
 struct Settings {
@@ -25,6 +27,7 @@ struct Settings {
 }
 
 struct Data {
+    sw_signer: Arc<SwSigner>,
     wallet: Arc<sideswap_amp::Wallet>,
     market_command_sender: UncheckedUnboundedSender<market::Command>,
     sync_utxos: bool,
@@ -34,15 +37,19 @@ struct Data {
 
 async fn sign_swap(
     wallet: &sideswap_amp::Wallet,
+    sw_signer: &SwSigner,
     pset: PartiallySignedTransaction,
 ) -> Result<PartiallySignedTransaction, anyhow::Error> {
     let all_utxos = wallet.unspent_outputs().await?;
-    let pset = wallet.user_sign_swap_pset(pset, all_utxos)?;
+
+    let pset = sw_signer.user_signatures(pset, all_utxos)?;
+
     Ok(pset)
 }
 
 async fn send_asset(
     wallet: &sideswap_amp::Wallet,
+    sw_signer: &SwSigner,
     req: SendAssetReq,
 ) -> Result<SendAssetResp, anyhow::Error> {
     let created_tx = wallet
@@ -55,19 +62,26 @@ async fn send_asset(
             None,
         )
         .await?;
-    let tx = wallet
-        .sign_and_broadcast_pset(
-            created_tx.pset,
+
+    let pset = sw_signer.user_signatures(created_tx.pset, created_tx.used_utxos)?;
+
+    let txid = pset.extract_tx()?.txid();
+
+    let _pset = wallet
+        .green_backend_sign(
+            pset,
             created_tx.blinding_nonces,
-            created_tx.used_utxos,
+            sideswap_amp::SignAction::SignAndBroadcast,
         )
         .await?;
-    Ok(SendAssetResp { txid: tx.txid() })
+
+    Ok(SendAssetResp { txid })
 }
 
 fn process_wallet_event(data: &mut Data, event: sideswap_amp::Event) {
     match event {
         sideswap_amp::Event::Connected {
+            subaccount: _,
             gaid,
             block_height: _,
         } => {
@@ -94,10 +108,11 @@ async fn process_market_event(data: &mut Data, event: market::Event) {
             log::info!("sign swap, quote_id: {}", quote_id.value());
 
             let wallet = Arc::clone(&data.wallet);
+            let sw_signer = Arc::clone(&data.sw_signer);
             let market_command_sender = data.market_command_sender.clone();
 
             tokio::spawn(async move {
-                let res = sign_swap(&wallet, pset).await;
+                let res = sign_swap(&wallet, &sw_signer, pset).await;
 
                 match res {
                     Ok(pset) => {
@@ -119,6 +134,7 @@ async fn process_market_event(data: &mut Data, event: market::Event) {
                 let res = wallet
                     .receive_address()
                     .await
+                    .map(|address_info| address_info.address)
                     .map_err(|err| anyhow::anyhow!("loading address failed: {err}"));
                 res_sender.send(res);
             });
@@ -148,8 +164,9 @@ async fn process_market_event(data: &mut Data, event: market::Event) {
 
         market::Event::SendAsset { req, res_sender } => {
             let wallet = Arc::clone(&data.wallet);
+            let sw_signer = Arc::clone(&data.sw_signer);
             tokio::spawn(async move {
-                let res = send_asset(&wallet, req).await;
+                let res = send_asset(&wallet, &sw_signer, req).await;
                 res_sender.send(res);
             });
         }
@@ -235,7 +252,16 @@ async fn main() {
 
     let network = settings.env.d().network;
 
-    let (wallet, mut wallet_events) = sideswap_amp::Wallet::new(settings.mnemonic.clone(), network);
+    let sw_signer = Arc::new(SwSigner::new(network, &settings.mnemonic));
+
+    let (wallet_event_sender, mut wallet_event_receiver) = unbounded_channel();
+    let wallet_callback = Arc::new(move |event| {
+        let res = wallet_event_sender.send(event);
+        if res.is_err() {
+            log::debug!("wallet event channel is closed");
+        }
+    });
+    let wallet = sideswap_amp::Wallet::software(&settings.mnemonic, network, wallet_callback);
 
     let market_params = market::Params {
         env: settings.env,
@@ -256,6 +282,7 @@ async fn main() {
     );
 
     let mut data = Data {
+        sw_signer,
         wallet: Arc::new(wallet),
         market_command_sender: market_command_sender.into(),
         sync_utxos: false,
@@ -269,7 +296,7 @@ async fn main() {
 
     loop {
         tokio::select! {
-            event = wallet_events.recv() => {
+            event = wallet_event_receiver.recv() => {
                 let event = event.expect("must be open");
                 process_wallet_event(&mut data, event);
             },
