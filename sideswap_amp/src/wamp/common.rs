@@ -39,14 +39,11 @@ pub type WampDict = HashMap<String, Arg>;
 /// list: a list (array) where items can be of any type
 pub type WampList = Vec<Arg>;
 /// Arbitrary values supported by the serialization format in the payload
-///
-/// Implementation note: we currently use `serde_json::Value`, which is
-/// suboptimal when you want to use MsgPack and pass binary data.
-pub type WampPayloadValue = serde_json::Value;
+pub type WampPayloadValue = rmpv::Value;
 /// Unnamed WAMP argument list
 pub type WampArgs = Vec<WampPayloadValue>;
 /// Named WAMP argument map
-pub type WampKwArgs = serde_json::Map<String, WampPayloadValue>;
+pub type WampKwArgs = serde_json::Map<String, serde_json::Value>;
 
 /// Generic enum that can hold any concrete WAMP value
 #[derive(Serialize, Deserialize, Debug)]

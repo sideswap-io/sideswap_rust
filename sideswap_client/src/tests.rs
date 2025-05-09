@@ -674,7 +674,7 @@ fn sell_sswp_for_usdt_offline_jade() {
         &mut data,
         SSWP,
         USDT,
-        6,
+        33,
         0.95,
         proto::TradeDir::Sell,
         true,

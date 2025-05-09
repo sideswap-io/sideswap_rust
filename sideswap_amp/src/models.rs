@@ -1,5 +1,5 @@
 use serde::Deserialize;
-use sideswap_types::timestamp_us::TimestampUs;
+use sideswap_types::{hex_encoded::HexEncoded, timestamp_us::TimestampUs};
 
 mod helpers;
 
@@ -41,6 +41,7 @@ pub struct ReceiveAddress {
 #[derive(Deserialize, Debug)]
 pub struct Utxo {
     pub block_height: Option<u32>,
+    #[serde(deserialize_with = "helpers::deserialize_txid")]
     pub txhash: elements::Txid,
     pub pt_idx: u32,
     pub subaccount: u32,
@@ -76,6 +77,7 @@ pub struct TransactionEp {
     pub subaccount: u32,
 
     // Set for inputs
+    #[serde(default, deserialize_with = "helpers::deserialize_txid_opt")]
     pub prevtxhash: Option<elements::Txid>,
     pub previdx: Option<u32>,
     pub prevsubaccount: Option<u32>,
@@ -106,6 +108,7 @@ pub struct Transaction {
     pub eps: Vec<TransactionEp>,
     pub block_height: u32,
     pub created_at_ts: TimestampUs,
+    #[serde(deserialize_with = "helpers::deserialize_txid")]
     pub txhash: elements::Txid,
     pub transaction_vsize: usize,
     pub fee: u64,
@@ -129,8 +132,14 @@ pub struct BlockEvent {
 #[derive(Deserialize, Debug)]
 pub struct TransactionEvent {
     pub subaccounts: Vec<u32>,
+    #[serde(deserialize_with = "helpers::deserialize_txid")]
     pub txhash: elements::Txid,
 }
+
+#[derive(Deserialize)]
+pub struct BroadcastResult(
+    #[serde(deserialize_with = "helpers::deserialize_txid")] pub elements::Txid,
+);
 
 #[cfg(test)]
 mod tests;

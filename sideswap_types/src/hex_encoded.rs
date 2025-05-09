@@ -1,7 +1,7 @@
 use elements::hex::FromHex;
 
 #[derive(Debug, Copy, Clone)]
-pub struct HexEncoded<T>(T);
+pub struct HexEncoded<T>(pub T);
 
 impl<T> HexEncoded<T> {
     pub fn new(value: T) -> Self {

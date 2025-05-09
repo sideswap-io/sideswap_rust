@@ -100,7 +100,7 @@ pub enum Error {
     #[error("channel was closed receiving")]
     RecvError,
     #[error("parsing failed for {0}: {1}")]
-    BackendJsonError(&'static str, serde_json::Error),
+    BackendMsgPackError(&'static str, rmp_serde::decode::Error),
     #[error("unexpected arguments count: {0}, expected at least {1} elements")]
     BackendUnexpectedCount(usize, usize),
     #[error("send amount can't be 0")]
@@ -150,7 +150,7 @@ impl Error {
         match self {
             Error::Signer(_)
             | Error::WrongWatchOnlyPassword
-            | Error::BackendJsonError(_, _)
+            | Error::BackendMsgPackError(_, _)
             | Error::BackendUnexpectedCount(_, _) => true,
 
             Error::SendError(_)
@@ -205,11 +205,21 @@ enum Command {
     },
 }
 
-fn parse_args1<T1: serde::de::DeserializeOwned>(mut args: WampArgs) -> Result<T1, Error> {
-    match &mut *args {
+fn to_value<T: serde::Serialize>(value: &T) -> rmpv::Value {
+    let value = rmp_serde::encode::to_vec_named(value).expect("must not fail");
+    rmp_serde::decode::from_slice(&value).expect("must not fail")
+}
+
+fn from_value<T: serde::de::DeserializeOwned>(value: &rmpv::Value) -> Result<T, Error> {
+    let value = rmp_serde::encode::to_vec_named(value).expect("must not fail");
+    rmp_serde::decode::from_slice::<T>(&value)
+        .map_err(|err| Error::BackendMsgPackError(std::any::type_name::<T>(), err))
+}
+
+fn parse_args1<T1: serde::de::DeserializeOwned>(args: WampArgs) -> Result<T1, Error> {
+    match &*args {
         [value, ..] => {
-            let value = serde_json::from_value::<T1>(std::mem::take(value))
-                .map_err(|err| Error::BackendJsonError(std::any::type_name::<T1>(), err))?;
+            let value = from_value::<T1>(value)?;
             Ok(value)
         }
         _ => abort!(Error::BackendUnexpectedCount(args.len(), 1)),
@@ -217,14 +227,12 @@ fn parse_args1<T1: serde::de::DeserializeOwned>(mut args: WampArgs) -> Result<T1
 }
 
 fn parse_args2<T1: serde::de::DeserializeOwned, T2: serde::de::DeserializeOwned>(
-    mut args: WampArgs,
+    args: WampArgs,
 ) -> Result<(T1, T2), Error> {
-    match &mut *args {
+    match &*args {
         [value1, value2, ..] => {
-            let value1 = serde_json::from_value::<T1>(std::mem::take(value1))
-                .map_err(|err| Error::BackendJsonError(std::any::type_name::<T1>(), err))?;
-            let value2 = serde_json::from_value::<T2>(std::mem::take(value2))
-                .map_err(|err| Error::BackendJsonError(std::any::type_name::<T2>(), err))?;
+            let value1 = from_value::<T1>(value1)?;
+            let value2 = from_value::<T2>(value2)?;
             Ok((value1, value2))
         }
         _ => abort!(Error::BackendUnexpectedCount(args.len(), 2)),
@@ -1064,10 +1072,47 @@ fn get_challenge_address(signer: &dyn Signer) -> Result<Address, Error> {
     ))
 }
 
+fn encode_msg(msg: Msg) -> tungstenite::Message {
+    let msg = rmp_serde::encode::to_vec(&msg).expect("should not fail");
+
+    if log::log_enabled!(log::Level::Trace) {
+        let value = rmpv::decode::read_value(&mut msg.as_slice()).expect("must not fail");
+        log::trace!("send: {value:#?}");
+    }
+
+    tungstenite::Message::binary(msg)
+}
+
+fn decode_msg(msg: tungstenite::Message) -> Result<Option<Msg>, Error> {
+    match msg {
+        tungstenite::Message::Text(_) => {
+            abort!(Error::ProtocolError("unexpected text message received"))
+        }
+        tungstenite::Message::Binary(msg) => {
+            if log::log_enabled!(log::Level::Trace) {
+                let value = rmpv::decode::read_value(&mut msg.as_ref()).expect("must not fail");
+                log::trace!("recv: {value:#?}");
+            }
+
+            let msg = rmp_serde::decode::from_slice::<Msg>(&msg)
+                .map_err(|err| Error::BackendMsgPackError(std::any::type_name::<Msg>(), err))?;
+
+            Ok(Some(msg))
+        }
+        tungstenite::Message::Ping(_) => Ok(None),
+        tungstenite::Message::Pong(_) => Ok(None),
+        tungstenite::Message::Close(close) => {
+            log::debug!("close event received: {close:?}");
+            abort!(Error::ProtocolError("close frame message received"))
+        }
+        tungstenite::Message::Frame(_) => {
+            abort!(Error::ProtocolError("unexpected frame message received"))
+        }
+    }
+}
+
 async fn send(connection: &mut Connection, msg: Msg) -> Result<(), Error> {
-    let msg = serde_json::to_string(&msg).expect("should not fail");
-    log::debug!("send: {}", msg);
-    connection.send(tungstenite::Message::text(msg)).await?;
+    connection.send(encode_msg(msg)).await?;
     Ok(())
 }
 
@@ -1183,25 +1228,11 @@ async fn process_msg(data: &mut Data, msg: Msg) -> Result<(), Error> {
 }
 
 async fn process_ws_msg(data: &mut Data, msg: tungstenite::Message) -> Result<(), Error> {
-    match msg {
-        tungstenite::Message::Text(msg) => {
-            log::debug!("recv: {}", msg);
-            let msg = serde_json::from_str::<Msg>(&msg)
-                .map_err(|err| Error::BackendJsonError(std::any::type_name::<Msg>(), err))?;
-            process_msg(data, msg).await
-        }
-        tungstenite::Message::Binary(_) => {
-            abort!(Error::ProtocolError("unexpected binary message received"))
-        }
-        tungstenite::Message::Ping(_) => Ok(()),
-        tungstenite::Message::Pong(_) => Ok(()),
-        tungstenite::Message::Close(close) => {
-            log::debug!("close event received: {close:?}");
-            Ok(())
-        }
-        tungstenite::Message::Frame(_) => {
-            abort!(Error::ProtocolError("unexpected frame message received"))
-        }
+    let msg = decode_msg(msg)?;
+    if let Some(msg) = msg {
+        process_msg(data, msg).await
+    } else {
+        Ok(())
     }
 }
 
@@ -1213,24 +1244,9 @@ async fn get_wamp_msg(connection: &mut Connection) -> Result<Msg, Error> {
             None => abort!(Error::ProtocolError("connection closed unexpectedly")),
         };
 
-        match ws_msg {
-            tungstenite::Message::Text(data) => {
-                log::debug!("recv: {}", data);
-                let res = serde_json::from_str::<Msg>(&data)
-                    .map_err(|err| Error::BackendJsonError("msg", err));
-                return res;
-            }
-            tungstenite::Message::Binary(_) => {
-                abort!(Error::ProtocolError("unexpected binary message received"));
-            }
-            tungstenite::Message::Ping(_) => {}
-            tungstenite::Message::Pong(_) => {}
-            tungstenite::Message::Close(close) => {
-                log::debug!("close event received: {close:?}");
-            }
-            tungstenite::Message::Frame(_) => {
-                abort!(Error::ProtocolError("unexpected frame message received"));
-            }
+        let msg = decode_msg(ws_msg)?;
+        if let Some(msg) = msg {
+            break Ok(msg);
         }
     }
 }
@@ -1371,14 +1387,14 @@ async fn process_command(data: &mut Data, command: Command) -> Result<(), Error>
             #[derive(serde::Serialize)]
             struct TwofacData {}
             let twofac_data = TwofacData {};
-            let twofac_data = serde_json::to_value(twofac_data).expect("should not fail");
+            let twofac_data = to_value(&twofac_data);
 
             #[derive(serde::Serialize)]
             struct PrivData {
                 blinding_nonces: Vec<String>,
             }
             let priv_data = PrivData { blinding_nonces };
-            let priv_data = serde_json::to_value(priv_data).expect("should not fail");
+            let priv_data = to_value(&priv_data);
 
             #[derive(serde::Deserialize)]
             struct Output {
@@ -1445,7 +1461,7 @@ async fn process_command(data: &mut Data, command: Command) -> Result<(), Error>
                 vec![tx.into()],
                 Box::new(move |_data, res| {
                     let res = res.and_then(|args| -> Result<Txid, Error> {
-                        let txid = parse_args1::<Txid>(args)?;
+                        let txid = parse_args1::<models::BroadcastResult>(args)?.0;
                         Ok(txid)
                     });
                     res_channel.send(res);
@@ -1497,7 +1513,7 @@ async fn connect_ws(network: Network, proxy: &Option<ProxyAddress>) -> Result<Co
         .header("Upgrade", "websocket")
         .header("User-Agent", DEFAULT_AGENT_STR)
         .header("Sec-WebSocket-Version", "13")
-        .header("Sec-WebSocket-Protocol", "wamp.2.json")
+        .header("Sec-WebSocket-Protocol", "wamp.2.msgpack")
         .header(
             "Sec-WebSocket-Key",
             tungstenite::handshake::client::generate_key(),
@@ -1730,9 +1746,7 @@ async fn wo_login(
 
     let args = vec![
         "custom".into(),
-        serde_json::to_value(&credentials)
-            .expect("must not fail")
-            .into(),
+        to_value(&credentials),
         USER_AGENT_CAPS.into(),
         // with_blob.into(),
     ];
@@ -2066,7 +2080,7 @@ async fn send_ca_addresses(data: &mut Data) -> Result<(), Error> {
     let addresses = std::mem::take(&mut data.ca_addresses);
     let addresses = addresses
         .into_iter()
-        .map(|a| serde_json::Value::String(a.to_string()))
+        .map(|a| rmpv::Value::String(a.to_string().into()))
         .collect::<Vec<_>>();
     if !addresses.is_empty() {
         let count = addresses.len();
