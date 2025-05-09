@@ -15,6 +15,7 @@ use sideswap_common::{
     env::Env, network::Network, path_helpers::path_from_u32, utxo_select::WalletType,
 };
 use sideswap_types::timestamp_ms::TimestampMs;
+use ureq::json;
 
 use crate::{
     gdk_ses::{
@@ -103,10 +104,10 @@ impl GdkSesRust {
     }
 
     fn connect(&mut self) {
+        let net_params = json!({"proxy": self.login_info.proxy.clone()});
+
         // FIXME: Should we return error instead?
-        self.session
-            .connect(&serde_json::Value::Null)
-            .expect("should not fail");
+        self.session.connect(&net_params).expect("should not fail");
     }
 
     fn get_transactions_impl(
@@ -458,6 +459,7 @@ fn get_network_parameters(
     env: Env,
     electrum_server: &ElectrumServer,
     state_dir: &Path,
+    proxy: &Option<String>,
 ) -> gdk_common::NetworkParameters {
     let network = env.d().network;
 
@@ -487,15 +489,17 @@ fn get_network_parameters(
         (_, Network::Regtest) => unimplemented!(),
     };
 
-    let mut default_network = get_default_network(env);
+    let mut network = get_default_network(env);
 
-    default_network.state_dir = state_dir.to_str().expect("must be valid").to_owned();
+    network.state_dir = state_dir.to_str().expect("must be valid").to_owned();
 
-    default_network.electrum_url = Some(format!("{host}:{port}"));
-    default_network.electrum_tls = Some(use_tls);
-    default_network.electrum_onion_url = None;
+    network.electrum_url = Some(format!("{host}:{port}"));
+    network.electrum_tls = Some(use_tls);
+    network.electrum_onion_url = None;
 
-    default_network
+    network.proxy = proxy.clone();
+
+    network
 }
 
 pub fn start_processing(
@@ -506,6 +510,7 @@ pub fn start_processing(
         login_info.env,
         &login_info.electrum_server,
         &login_info.cache_dir,
+        &login_info.proxy,
     );
 
     let mut session = gdk_electrum::ElectrumSession::new(params).expect("must not fail");

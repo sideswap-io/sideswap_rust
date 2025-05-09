@@ -385,6 +385,7 @@ async fn connect(
                     mnemonic,
                 ))),
                 event_callback,
+                login_info.proxy.as_ref().map(String::as_str),
             )
             .await
         }
@@ -394,6 +395,7 @@ async fn connect(
                 sideswap_amp::Wallet::connect_once(
                     &sideswap_amp::LoginType::Full(Arc::new(jade.clone())),
                     event_callback,
+                    login_info.proxy.as_ref().map(String::as_str),
                 )
                 .await
             } else {
@@ -406,6 +408,7 @@ async fn connect(
                         amp_user_xpub: watch_only.amp_user_xpub,
                     },
                     event_callback,
+                    login_info.proxy.as_ref().map(String::as_str),
                 )
                 .await
             }

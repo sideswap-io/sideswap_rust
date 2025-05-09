@@ -1737,6 +1737,7 @@ impl Data {
                         mnemonic,
                     ))),
                     event_callback,
+                    self.proxy().as_ref().map(String::as_str),
                 ))?
             }
 
@@ -1751,6 +1752,7 @@ impl Data {
                 runtime.block_on(sideswap_amp::Wallet::connect_once(
                     &sideswap_amp::LoginType::Full(Arc::new(jade_data)),
                     event_callback,
+                    self.proxy().as_ref().map(String::as_str),
                 ))?
             }
         };
@@ -1818,7 +1820,7 @@ impl Data {
             }
 
             proto::to::login::Wallet::JadeId(jade_id) => {
-                let jade = self.jade_mng.open(&jade_id)?;
+                let jade = self.jade_mng.open(&jade_id, &self.proxy())?;
                 LoginData::Jade {
                     jade: Arc::new(jade),
                 }

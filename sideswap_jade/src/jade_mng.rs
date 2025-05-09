@@ -478,7 +478,11 @@ impl JadeMng {
             .collect())
     }
 
-    pub fn open(&mut self, jade_id: &JadeId) -> Result<ManagedJade, anyhow::Error> {
+    pub fn open(
+        &mut self,
+        jade_id: &JadeId,
+        proxy: &Option<String>,
+    ) -> Result<ManagedJade, anyhow::Error> {
         log::debug!("trying to connect to jade, jade_id: {jade_id}");
 
         let seconds = std::time::SystemTime::now()
@@ -499,10 +503,19 @@ impl JadeMng {
 
         log::debug!("connecting to jade succeed, jade_id: {jade_id}");
 
+        let agent = match proxy {
+            Some(proxy) => {
+                let proxy_address = format!("socks5://{proxy}");
+                let proxy = ureq::Proxy::new(proxy_address)?;
+                ureq::builder().proxy(proxy).build()
+            }
+            None => ureq::Agent::new(),
+        };
+
         Ok(ManagedJade {
             jade_id: jade_id.clone(),
             data: Arc::new(Mutex::new(jade_data)),
-            agent: ureq::Agent::new(), // FIXME: Use proxy
+            agent,
             transport: Arc::clone(transport),
             active_statuses: Arc::clone(&self.active_statuses),
             status_callback: Arc::clone(&self.status_callback),

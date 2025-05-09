@@ -95,33 +95,33 @@ pub enum SignAction {
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    #[error("Channel was closed sending {0}")]
+    #[error("channel was closed sending {0}")]
     SendError(&'static str),
-    #[error("Channel was closed receiving")]
+    #[error("channel was closed receiving")]
     RecvError,
-    #[error("Parsing failed for {0}: {1}")]
+    #[error("parsing failed for {0}: {1}")]
     BackendJsonError(&'static str, serde_json::Error),
-    #[error("Unexpected arguments count: {0}, expected at least {1} elements")]
+    #[error("unexpected arguments count: {0}, expected at least {1} elements")]
     BackendUnexpectedCount(usize, usize),
-    #[error("Send amount can't be 0")]
+    #[error("send amount can't be 0")]
     ZeroSendAmount,
-    #[error("Amount overflow")]
+    #[error("amount overflow")]
     AmountOverflow,
     #[error(
-        "Not enough amount for asset {asset_id}, required: {required}, available: {available}"
+        "not enough amount for asset {asset_id}, required: {required}, available: {available}"
     )]
     NotEnoughAmount {
         asset_id: AssetId,
         required: u64,
         available: u64,
     },
-    #[error("Blind error: {0}")]
+    #[error("blind error: {0}")]
     BlindError(#[from] sideswap_common::pset_blind::Error),
     #[error("WS error: {0}")]
     WsError(#[from] tokio_tungstenite::tungstenite::Error),
-    #[error("Protocol error: {0}")]
+    #[error("protocol error: {0}")]
     ProtocolError(&'static str),
-    #[error("Wamp error: {context}: {error}")]
+    #[error("wamp error: {context}: {error}")]
     WampError {
         context: &'static str,
         error: String,
@@ -130,16 +130,18 @@ pub enum Error {
     // NoRedeem(Txid, u32),
     #[error("PSET error: {0}")]
     PsetError(#[from] elements::pset::Error),
-    #[error("Request timeout")]
+    #[error("request timeout")]
     RequestTimeout,
     #[error("HTTP connection error: {0}")]
     HttpConnectionError(#[from] tungstenite::http::Error),
-    #[error("Signer error: {0}")]
+    #[error("signer error: {0}")]
     Signer(String),
-    #[error("Insufficient funds")]
+    #[error("insufficient funds")]
     InsufficientFunds,
-    #[error("User not found or invalid password")]
+    #[error("user not found or invalid password")]
     WrongWatchOnlyPassword,
+    #[error("proxy error: {0}")]
+    ProxyError(#[from] tokio_socks::Error),
 }
 
 impl Error {
@@ -164,7 +166,7 @@ impl Error {
             | Error::PsetError(_)
             | Error::RequestTimeout
             | Error::HttpConnectionError(_)
-            | Error::InsufficientFunds => false,
+            | Error::InsufficientFunds | Error::ProxyError(_) => false,
         }
     }
 }
@@ -295,12 +297,16 @@ impl Wallet {
     pub async fn connect_once(
         login: &LoginType,
         event_callback: EventCallback,
+        proxy: Option<&str>,
     ) -> Result<Wallet, Error> {
         let (command_sender, command_receiver) = tokio::sync::mpsc::unbounded_channel();
 
-        let data = tokio::time::timeout(Duration::from_secs(60), connect(login, event_callback))
-            .await
-            .map_err(|_err| Error::ProtocolError("connection timeout"))??;
+        let data = tokio::time::timeout(
+            Duration::from_secs(60),
+            connect(login, event_callback, proxy),
+        )
+        .await
+        .map_err(|_err| Error::ProtocolError("connection timeout"))??;
 
         let wallet = Wallet {
             command_sender,
@@ -332,7 +338,7 @@ impl Wallet {
             watch_only: false,
         };
 
-        tokio::task::spawn(run_loop(login, command_receiver, event_callback));
+        tokio::task::spawn(run_loop(login, command_receiver, event_callback, None));
 
         wallet
     }
@@ -1473,7 +1479,7 @@ async fn process_command(data: &mut Data, command: Command) -> Result<(), Error>
     }
 }
 
-async fn connect_ws(network: Network) -> Result<Connection, Error> {
+async fn connect_ws(network: Network, proxy: Option<&str>) -> Result<Connection, Error> {
     let url = match network {
         Network::Liquid => "wss://green-liquid-mainnet.blockstream.com/v2/ws",
         Network::LiquidTestnet => "wss://green-liquid-testnet.blockstream.com/v2/ws",
@@ -1481,6 +1487,9 @@ async fn connect_ws(network: Network) -> Result<Connection, Error> {
     };
     let url: url::Url = url.parse().expect("must be valid");
     let host = url.host().expect("must be set").to_string();
+    let port = url.port_or_known_default().expect("must be set");
+
+    let server_address = format!("{}:{}", host, port);
 
     let request = tungstenite::http::Request::builder()
         .uri(url.as_ref())
@@ -1497,7 +1506,20 @@ async fn connect_ws(network: Network) -> Result<Connection, Error> {
 
     let request = request.body(())?;
 
-    let (connection, _resp) = tokio_tungstenite::connect_async(request).await?;
+    let stream = if let Some(proxy) = proxy {
+        let stream = tokio::net::TcpStream::connect(proxy)
+            .await
+            .map_err(|err| Error::WsError(err.into()))?;
+        let stream =
+            tokio_socks::tcp::Socks5Stream::connect_with_socket(stream, server_address).await?;
+        stream.into_inner()
+    } else {
+        tokio::net::TcpStream::connect(server_address)
+            .await
+            .map_err(|err| Error::WsError(err.into()))?
+    };
+
+    let (connection, _resp) = tokio_tungstenite::client_async_tls(request, stream).await?;
 
     Ok(connection)
 }
@@ -2117,8 +2139,12 @@ async fn processing_loop(
     }
 }
 
-async fn connect(login_details: &LoginType, event_callback: EventCallback) -> Result<Data, Error> {
-    let mut connection = connect_ws(login_details.network()).await?;
+async fn connect(
+    login_details: &LoginType,
+    event_callback: EventCallback,
+    proxy: Option<&str>,
+) -> Result<Data, Error> {
+    let mut connection = connect_ws(login_details.network(), proxy).await?;
 
     let master_blinding_key = login_details.get_master_blinding_key()?;
 
@@ -2269,13 +2295,14 @@ async fn run_loop(
     login: LoginType,
     mut command_receiver: UnboundedReceiver<Command>,
     event_callback: EventCallback,
+    proxy: Option<&str>,
 ) -> Result<(), Error> {
     let mut retry_delay = RetryDelay::default();
 
     loop {
         let res = tokio::time::timeout(
             Duration::from_secs(60),
-            connect(&login, event_callback.clone()),
+            connect(&login, event_callback.clone(), proxy),
         )
         .await
         .unwrap_or_else(|_err| Err(Error::ProtocolError("connection timeout")));

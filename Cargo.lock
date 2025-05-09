@@ -4189,6 +4189,7 @@ dependencies = [
  "sideswap_types",
  "thiserror 1.0.69",
  "tokio",
+ "tokio-socks",
  "tokio-tungstenite",
  "url",
 ]
