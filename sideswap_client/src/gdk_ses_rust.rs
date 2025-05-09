@@ -14,7 +14,7 @@ use sideswap_amp::{sw_signer::SwSigner, Signer};
 use sideswap_common::{
     env::Env, network::Network, path_helpers::path_from_u32, utxo_select::WalletType,
 };
-use sideswap_types::timestamp_ms::TimestampMs;
+use sideswap_types::{proxy_address::ProxyAddress, timestamp_ms::TimestampMs};
 use ureq::json;
 
 use crate::{
@@ -93,20 +93,16 @@ impl GdkSesRust {
             }
         };
 
-        // TODO: Review and test that the methods won't fail
-
-        // FIXME: This can crash if wrong electrum server or proxy is used.
-        // Make sure only valid values are stored.
         let _login_data = self
             .session
             .login_wo(WatchOnlyCredentials::Parsed(accounts))
-            .expect("must not fail");
+            .expect("should not fail");
     }
 
     fn connect(&mut self) {
-        let net_params = json!({"proxy": self.login_info.proxy.clone()});
-
-        // FIXME: Should we return error instead?
+        let net_params = json!({
+            "proxy": self.login_info.proxy.as_ref().map(ToString::to_string)
+        });
         self.session.connect(&net_params).expect("should not fail");
     }
 
@@ -459,7 +455,7 @@ fn get_network_parameters(
     env: Env,
     electrum_server: &ElectrumServer,
     state_dir: &Path,
-    proxy: &Option<String>,
+    proxy: &Option<ProxyAddress>,
 ) -> gdk_common::NetworkParameters {
     let network = env.d().network;
 
@@ -497,7 +493,7 @@ fn get_network_parameters(
     network.electrum_tls = Some(use_tls);
     network.electrum_onion_url = None;
 
-    network.proxy = proxy.clone();
+    network.proxy = proxy.as_ref().map(ToString::to_string);
 
     network
 }

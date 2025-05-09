@@ -7,6 +7,7 @@ pub mod enum_utils;
 pub mod fee_rate;
 pub mod hex_encoded;
 pub mod normal_float;
+pub mod proxy_address;
 pub mod str_encoded;
 pub mod timestamp_ms;
 pub mod timestamp_us;

@@ -1,6 +1,7 @@
 use std::str::FromStr;
 
 use anyhow::anyhow;
+use sideswap_types::proxy_address::ProxyAddress;
 
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct PinData {
@@ -43,10 +44,10 @@ impl From<gdk_pin_client::Error> for Error {
     }
 }
 
-fn get_pin_client(proxy: Option<&String>) -> Result<gdk_pin_client::PinClient, Error> {
+fn get_pin_client(proxy: &Option<ProxyAddress>) -> Result<gdk_pin_client::PinClient, Error> {
     let agent = ureq::AgentBuilder::new();
     let agent = if let Some(proxy) = proxy {
-        let proxy = ureq::Proxy::new(format!("socks5://{}", proxy))
+        let proxy = ureq::Proxy::new(proxy.to_string())
             .map_err(|err| Error::InvalidData(anyhow!("Invalid proxy: {err}")))?;
         agent.proxy(proxy)
     } else {
@@ -61,7 +62,7 @@ fn get_pin_client(proxy: Option<&String>) -> Result<gdk_pin_client::PinClient, E
     ))
 }
 
-pub fn decrypt_pin(data: &str, pin: &str, proxy: Option<&String>) -> Result<String, Error> {
+pub fn decrypt_pin(data: &str, pin: &str, proxy: &Option<ProxyAddress>) -> Result<String, Error> {
     let pin = gdk_pin_client::Pin::from(pin);
     let data = serde_json::from_str::<gdk_pin_client::PinData>(data)
         .map_err(|err| Error::InvalidData(anyhow!("Can't decrypt PinData: {err}")))?;
@@ -72,7 +73,11 @@ pub fn decrypt_pin(data: &str, pin: &str, proxy: Option<&String>) -> Result<Stri
     Ok(mnemonic)
 }
 
-pub fn encrypt_pin(mnemonic: &str, pin: &str, proxy: Option<&String>) -> Result<String, Error> {
+pub fn encrypt_pin(
+    mnemonic: &str,
+    pin: &str,
+    proxy: &Option<ProxyAddress>,
+) -> Result<String, Error> {
     let pin = gdk_pin_client::Pin::from(pin);
     let manager = get_pin_client(proxy)?;
     let data = manager.encrypt(mnemonic.as_bytes(), &pin)?;

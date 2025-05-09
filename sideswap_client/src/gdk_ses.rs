@@ -7,6 +7,7 @@ use bitcoin::bip32;
 use elements_miniscript::slip77::MasterBlindingKey;
 use sideswap_common::env::Env;
 use sideswap_jade::{jade_mng, models::JadeNetwork};
+use sideswap_types::proxy_address::ProxyAddress;
 
 #[derive(Clone)]
 pub struct JadeData {
@@ -57,7 +58,7 @@ pub struct LoginInfo {
     pub cache_dir: PathBuf,
     pub wallet_info: WalletInfo,
     pub electrum_server: ElectrumServer,
-    pub proxy: Option<String>,
+    pub proxy: Option<ProxyAddress>,
 }
 
 pub enum WalletNotif {

@@ -106,9 +106,6 @@ impl Msg {
     }
 }
 
-//TODO: Code below is very boilerplatey, it could probably be generated more reliably with a macro that transforms
-//      an enum struct variant into a tuple before serialization and vice-versa.
-
 /// Serialization from the struct to the WAMP tuple
 impl Serialize for Msg {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>

@@ -6,6 +6,7 @@ use anyhow::anyhow;
 use futures::prelude::*;
 use log::{debug, error, info, warn};
 use sideswap_api::*;
+use sideswap_types::proxy_address::ProxyAddress;
 use std::time::Instant;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tungstenite::Message;
@@ -16,7 +17,7 @@ pub enum WrappedRequest {
         host: String,
         port: u16,
         use_tls: bool,
-        proxy: Option<String>,
+        proxy: Option<ProxyAddress>,
     },
     Disconnect,
     Request(RequestMessage),
@@ -38,12 +39,12 @@ pub type ResponseCallback = Box<dyn Fn(WrappedResponse) + Send>;
 
 async fn connect_async(
     url: &str,
-    proxy: Option<&String>,
+    proxy: &Option<ProxyAddress>,
     host: &str,
     port: u16,
 ) -> Result<WsStream, anyhow::Error> {
-    let stream = if let Some(proxy) = proxy {
-        let stream = tokio::net::TcpStream::connect(proxy).await?;
+    let stream = if let Some(ProxyAddress::Socks5 { address }) = proxy {
+        let stream = tokio::net::TcpStream::connect(address).await?;
         let stream = tokio_socks::tcp::Socks5Stream::connect_with_socket(
             stream,
             format!("{}:{}", host, port),
@@ -61,7 +62,7 @@ async fn connect_async(
 
 async fn connect_with_error_delay(
     url: &str,
-    proxy: Option<&String>,
+    proxy: &Option<ProxyAddress>,
     host: &str,
     port: u16,
     error_delay: Duration,
@@ -120,7 +121,7 @@ async fn run(
         let mut ws_stream = loop {
             debug!("try ws connection to {url}...");
             tokio::select! {
-                connect_result = connect_with_error_delay(&url, proxy.as_ref(), &host, port, retry_delay.next_delay()) => {
+                connect_result = connect_with_error_delay(&url, &proxy, &host, port, retry_delay.next_delay()) => {
                     match connect_result {
                         Ok((ws_stream, _response)) => break ws_stream,
                         Err(e) => {

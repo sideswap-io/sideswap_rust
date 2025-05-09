@@ -385,7 +385,7 @@ async fn connect(
                     mnemonic,
                 ))),
                 event_callback,
-                login_info.proxy.as_ref().map(String::as_str),
+                &login_info.proxy,
             )
             .await
         }
@@ -395,7 +395,7 @@ async fn connect(
                 sideswap_amp::Wallet::connect_once(
                     &sideswap_amp::LoginType::Full(Arc::new(jade.clone())),
                     event_callback,
-                    login_info.proxy.as_ref().map(String::as_str),
+                    &login_info.proxy,
                 )
                 .await
             } else {
@@ -408,7 +408,7 @@ async fn connect(
                         amp_user_xpub: watch_only.amp_user_xpub,
                     },
                     event_callback,
-                    login_info.proxy.as_ref().map(String::as_str),
+                    &login_info.proxy,
                 )
                 .await
             }
@@ -469,7 +469,6 @@ fn process_reconnect_result(data: &mut Data, res: ConnectRes) {
 async fn process_command(data: &mut Data, command: Command) {
     match command {
         Command::GetTransactions(opts, res_sender) => {
-            // TODO: Process this in background (without blocking)
             let res = get_transactions(data, opts).await;
             res_sender.send(res);
         }

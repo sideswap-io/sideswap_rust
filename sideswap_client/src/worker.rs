@@ -1,3 +1,4 @@
+use std::net::SocketAddr;
 use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 use std::{
@@ -46,6 +47,7 @@ use sideswap_common::ws::next_request_id;
 use sideswap_common::{abort, b64, pin, verify};
 use sideswap_jade::jade_mng::{self, JadeStatus, JadeStatusCallback, ManagedJade};
 use sideswap_types::fee_rate::FeeRateSats;
+use sideswap_types::proxy_address::ProxyAddress;
 use tokio::sync::mpsc::UnboundedSender;
 
 use sideswap_api::{self as api, fcm_models, MarketType, OrderId};
@@ -266,7 +268,7 @@ pub struct Data {
     jade_mng: jade_mng::JadeMng,
 
     network_settings: proto::to::NetworkSettings,
-    proxy_settings: proto::to::ProxySettings,
+    proxy_address: Option<ProxyAddress>,
     wallet_event_callback: wallet::EventCallback,
 }
 
@@ -323,7 +325,7 @@ impl Data {
         asset_ids: impl Iterator<Item = &'a AssetId>,
     ) -> Result<Vec<api::Asset>, anyhow::Error> {
         let asset_ids = asset_ids.copied().collect::<Vec<_>>();
-        assets_registry::get_assets(self.env, self.master_xpub(), asset_ids)
+        assets_registry::get_assets(self.env, self.master_xpub(), asset_ids, self.proxy())
     }
 
     fn merge_txs(txs: BTreeMap<Account, TransactionList>) -> TransactionList {
@@ -396,7 +398,6 @@ impl Data {
                     result: Some(result),
                 }));
             self.wallet_data.as_mut().expect("must be set").sent_txhash = None;
-            self.update_sync_interval();
         }
 
         let items = merged_txs
@@ -1619,7 +1620,6 @@ impl Data {
         match res {
             Ok(txid) => {
                 self.wallet_data.as_mut().expect("must be set").sent_txhash = Some(txid);
-                self.update_sync_interval();
             }
             Err(err) => self
                 .ui
@@ -1712,11 +1712,8 @@ impl Data {
         }
     }
 
-    fn proxy(&self) -> Option<String> {
-        match self.proxy_settings.proxy.as_ref() {
-            Some(proto::to::proxy_settings::Proxy { host, port }) => Some(format!("{host}:{port}")),
-            None => std::env::var("SOCKS_SERVER").ok(),
-        }
+    fn proxy(&self) -> &Option<ProxyAddress> {
+        &self.proxy_address
     }
 
     fn try_register(&mut self, login: &LoginData) -> Result<settings::RegInfo, anyhow::Error> {
@@ -1737,7 +1734,7 @@ impl Data {
                         mnemonic,
                     ))),
                     event_callback,
-                    self.proxy().as_ref().map(String::as_str),
+                    self.proxy(),
                 ))?
             }
 
@@ -1752,7 +1749,7 @@ impl Data {
                 runtime.block_on(sideswap_amp::Wallet::connect_once(
                     &sideswap_amp::LoginType::Full(Arc::new(jade_data)),
                     event_callback,
-                    self.proxy().as_ref().map(String::as_str),
+                    self.proxy(),
                 ))?
             }
         };
@@ -1820,7 +1817,8 @@ impl Data {
             }
 
             proto::to::login::Wallet::JadeId(jade_id) => {
-                let jade = self.jade_mng.open(&jade_id, &self.proxy())?;
+                let proxy = self.proxy().clone();
+                let jade = self.jade_mng.open(&jade_id, &proxy)?;
                 LoginData::Jade {
                     jade: Arc::new(jade),
                 }
@@ -1864,7 +1862,7 @@ impl Data {
                 cache_dir: cache_dir.clone(),
                 wallet_info: wallet_info.clone(),
                 electrum_server: self.electrum_server(),
-                proxy: self.proxy(),
+                proxy: self.proxy().clone(),
             };
 
             gdk_ses_rust::start_processing(info_reg, self.get_notif_callback())
@@ -1877,7 +1875,7 @@ impl Data {
                 cache_dir: cache_dir.clone(),
                 wallet_info: wallet_info.clone(),
                 electrum_server: self.electrum_server(),
-                proxy: self.proxy(),
+                proxy: self.proxy().clone(),
             };
 
             gdk_ses_amp::start_processing(info_amp, self.get_notif_callback())
@@ -2072,10 +2070,10 @@ impl Data {
         let mut login_info_amp = wallet_amp.login_info().clone();
 
         login_info_reg.electrum_server = self.electrum_server();
-        login_info_reg.proxy = self.proxy();
+        login_info_reg.proxy = self.proxy().clone();
 
         login_info_amp.electrum_server = self.electrum_server();
-        login_info_amp.proxy = self.proxy();
+        login_info_amp.proxy = self.proxy().clone();
 
         drop(wallet_reg);
         drop(wallet_amp);
@@ -2110,21 +2108,71 @@ impl Data {
             debug!("new electrum server: {electrum_server_new:?}");
             self.recreate_wallets();
         }
+
+        let master_xpub = self.master_xpub();
+        assets_registry::refresh(self.env, master_xpub, self.proxy().clone());
     }
 
     fn process_proxy_settings(&mut self, req: proto::to::ProxySettings) {
-        let proxy_old = self.proxy();
-        self.proxy_settings = req;
-        let proxy_new = self.proxy();
-        if proxy_new != proxy_old {
-            debug!("new proxy: {proxy_new:?}");
-            self.recreate_wallets();
-            self.restart_websocket();
+        let res = match req.proxy {
+            Some(proxy_user) => {
+                ProxyAddress::from_str(&format!("{}:{}", proxy_user.host, proxy_user.port))
+                    .or_else(|err| {
+                        // Try IPv6 as a fallback
+                        ProxyAddress::from_str(&format!(
+                            "[{}]:{}",
+                            proxy_user.host, proxy_user.port
+                        ))
+                        .map_err(|_err| {
+                            format!(
+                                "invalid proxy address: {}:{}: {}",
+                                proxy_user.host, proxy_user.port, err
+                            )
+                        })
+                    })
+                    .map(Some)
+            }
+
+            None => match std::env::var("SOCKS_SERVER").ok() {
+                Some(proxy_env) => match ProxyAddress::from_str(&proxy_env) {
+                    Ok(proxy_env) => Ok(Some(proxy_env)),
+                    Err(err) => Err(format!(
+                        "invalid SOCKS_SERVER env value: {}: {}",
+                        proxy_env, err
+                    )),
+                },
+                None => Ok(None),
+            },
+        };
+
+        match res {
+            Ok(Some(ProxyAddress::Socks5 {
+                address: SocketAddr::V6(socket),
+            })) => {
+                // ureq 2.x can't handle IPv6 proxy addresses
+                // TODO: Check that this works correctly in ureq 3: ureq::Proxy::new(&proxy.to_string())
+                self.show_message(&format!(
+                    "invalid proxy address: {socket}: IPv6 proxy addresses are not supported"
+                ));
+            }
+
+            Ok(proxy_new) => {
+                if proxy_new != *self.proxy() {
+                    debug!("new proxy: {proxy_new:?}");
+                    self.proxy_address = proxy_new.clone();
+                    self.recreate_wallets();
+                    self.restart_websocket();
+                    assets_registry::refresh(self.env, self.master_xpub(), proxy_new);
+                }
+            }
+            Err(err) => {
+                self.show_message(&err);
+            }
         }
     }
 
     fn process_encrypt_pin(&self, req: proto::to::EncryptPin) {
-        let result = match pin::encrypt_pin(&req.mnemonic, &req.pin, self.proxy().as_ref()) {
+        let result = match pin::encrypt_pin(&req.mnemonic, &req.pin, self.proxy()) {
             Ok(v) => {
                 let data = serde_json::from_str::<pin::PinData>(&v).expect("must not fail");
                 proto::from::encrypt_pin::Result::Data(proto::from::encrypt_pin::Data {
@@ -2154,7 +2202,7 @@ impl Data {
             hmac,
         };
         let data = serde_json::to_string(&details).expect("must not fail");
-        let result = match pin::decrypt_pin(&data, &req.pin, self.proxy().as_ref()) {
+        let result = match pin::decrypt_pin(&data, &req.pin, self.proxy()) {
             Ok(v) => proto::from::decrypt_pin::Result::Mnemonic(v),
             Err(e) => {
                 let error_code = match &e {
@@ -2686,7 +2734,7 @@ impl Data {
                 host,
                 port,
                 use_tls,
-                proxy: self.proxy(),
+                proxy: self.proxy().clone(),
             })
             .unwrap();
     }
@@ -3256,15 +3304,6 @@ impl Data {
         }
     }
 
-    fn update_sync_interval(&mut self) {
-        // TODO: Revert when possible
-        // let pending_tx = self.sent_txhash.is_some() || self.succeed_swap.is_some();
-        // let interval = if pending_tx { 1 } else { 7 };
-        // for wallet in self.wallets.values() {
-        // wallet.ses.update_sync_interval(interval);
-        // }
-    }
-
     fn process_background_message(&mut self, data: String, pending_sign: mpsc::Sender<()>) {
         self.process_push_message(data, Some(pending_sign));
     }
@@ -3508,7 +3547,7 @@ pub fn start_processing(
         jade_mng: jade_mng::JadeMng::new(jade_status_callback),
         async_requests: BTreeMap::new(),
         network_settings: Default::default(),
-        proxy_settings: Default::default(),
+        proxy_address: None,
         wallet_event_callback,
         wallet_data: None,
     };
@@ -3516,8 +3555,7 @@ pub fn start_processing(
     debug!("proxy: {:?}", data.proxy());
 
     let registry_path = data.registry_path();
-    let master_xpub = data.master_xpub();
-    assets_registry::init(env, &registry_path, master_xpub);
+    assets_registry::init(&registry_path);
 
     data.load_default_assets();
 

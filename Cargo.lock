@@ -4418,6 +4418,7 @@ dependencies = [
  "serde_bytes",
  "serde_json",
  "serialport",
+ "sideswap_types",
  "thiserror 1.0.69",
  "tokio",
  "uniffi",
@@ -4526,6 +4527,7 @@ dependencies = [
  "elements",
  "serde 1.0.219",
  "serde_json",
+ "thiserror 1.0.69",
 ]
 
 [[package]]

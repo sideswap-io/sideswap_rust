@@ -30,7 +30,7 @@ pub fn callback<Resp, WalletCallback, ResCallback>(
     };
 
     let event_callback = Arc::clone(&worker.wallet_event_callback);
-    // TODO: Use thread pool
+    // TODO: Use a thread pool
     std::thread::spawn(move || {
         let res = wallet_cb(wallet.as_ref());
         event_callback(
@@ -55,7 +55,7 @@ where
 
     let wallet = Arc::clone(&wallet);
 
-    // TODO: Use thread pool
+    // TODO: Use a thread pool
     std::thread::spawn(move || {
         let res = wallet_cb(wallet.as_ref());
         resp_sender.send(res).expect("channel must be open");

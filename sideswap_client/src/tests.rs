@@ -184,6 +184,18 @@ fn start_wallet(
         subscribed_values: SubscribedValues::default(),
     };
 
+    data.send(proto::to::Msg::ProxySettings(proto::to::ProxySettings {
+        proxy: None,
+    }));
+
+    data.send(proto::to::Msg::NetworkSettings(
+        proto::to::NetworkSettings {
+            selected: Some(proto::to::network_settings::Selected::Sideswap(
+                proto::Empty {},
+            )),
+        },
+    ));
+
     data.send(proto::to::Msg::Login(proto::to::Login {
         phone_key: None,
         wallet: Some(wallet),

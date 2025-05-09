@@ -33,7 +33,7 @@ use sideswap_common::{
     utxo_select::{self, ChangeWallets, WalletType},
     verify,
 };
-use sideswap_types::{timestamp_us::TimestampUs, utxo_ext::UtxoExt};
+use sideswap_types::{proxy_address::ProxyAddress, timestamp_us::TimestampUs, utxo_ext::UtxoExt};
 use sw_signer::SwSigner;
 use tokio::sync::{
     mpsc::{UnboundedReceiver, UnboundedSender},
@@ -297,7 +297,7 @@ impl Wallet {
     pub async fn connect_once(
         login: &LoginType,
         event_callback: EventCallback,
-        proxy: Option<&str>,
+        proxy: &Option<ProxyAddress>,
     ) -> Result<Wallet, Error> {
         let (command_sender, command_receiver) = tokio::sync::mpsc::unbounded_channel();
 
@@ -362,7 +362,6 @@ impl Wallet {
         res_receiver.await?
     }
 
-    // TODO: Remove when is not used
     pub fn receive_address_blocking(&self) -> Result<Address, Error> {
         let (res_sender, res_receiver) = oneshot::channel();
         self.command_sender
@@ -1479,7 +1478,7 @@ async fn process_command(data: &mut Data, command: Command) -> Result<(), Error>
     }
 }
 
-async fn connect_ws(network: Network, proxy: Option<&str>) -> Result<Connection, Error> {
+async fn connect_ws(network: Network, proxy: &Option<ProxyAddress>) -> Result<Connection, Error> {
     let url = match network {
         Network::Liquid => "wss://green-liquid-mainnet.blockstream.com/v2/ws",
         Network::LiquidTestnet => "wss://green-liquid-testnet.blockstream.com/v2/ws",
@@ -1506,8 +1505,8 @@ async fn connect_ws(network: Network, proxy: Option<&str>) -> Result<Connection,
 
     let request = request.body(())?;
 
-    let stream = if let Some(proxy) = proxy {
-        let stream = tokio::net::TcpStream::connect(proxy)
+    let stream = if let Some(ProxyAddress::Socks5 { address }) = proxy {
+        let stream = tokio::net::TcpStream::connect(address)
             .await
             .map_err(|err| Error::WsError(err.into()))?;
         let stream =
@@ -2142,7 +2141,7 @@ async fn processing_loop(
 async fn connect(
     login_details: &LoginType,
     event_callback: EventCallback,
-    proxy: Option<&str>,
+    proxy: &Option<ProxyAddress>,
 ) -> Result<Data, Error> {
     let mut connection = connect_ws(login_details.network(), proxy).await?;
 
@@ -2295,14 +2294,14 @@ async fn run_loop(
     login: LoginType,
     mut command_receiver: UnboundedReceiver<Command>,
     event_callback: EventCallback,
-    proxy: Option<&str>,
+    proxy: Option<ProxyAddress>,
 ) -> Result<(), Error> {
     let mut retry_delay = RetryDelay::default();
 
     loop {
         let res = tokio::time::timeout(
             Duration::from_secs(60),
-            connect(&login, event_callback.clone(), proxy),
+            connect(&login, event_callback.clone(), &proxy),
         )
         .await
         .unwrap_or_else(|_err| Err(Error::ProtocolError("connection timeout")));

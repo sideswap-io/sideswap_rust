@@ -5,6 +5,7 @@ use std::{
 
 use base64::Engine;
 use serde::{Deserialize, Serialize};
+use sideswap_types::proxy_address::ProxyAddress;
 
 #[derive(Copy, Clone)]
 pub enum TxType {
@@ -481,7 +482,7 @@ impl JadeMng {
     pub fn open(
         &mut self,
         jade_id: &JadeId,
-        proxy: &Option<String>,
+        proxy: &Option<ProxyAddress>,
     ) -> Result<ManagedJade, anyhow::Error> {
         log::debug!("trying to connect to jade, jade_id: {jade_id}");
 
@@ -505,8 +506,7 @@ impl JadeMng {
 
         let agent = match proxy {
             Some(proxy) => {
-                let proxy_address = format!("socks5://{proxy}");
-                let proxy = ureq::Proxy::new(proxy_address)?;
+                let proxy = ureq::Proxy::new(&proxy.to_string())?;
                 ureq::builder().proxy(proxy).build()
             }
             None => ureq::Agent::new(),
