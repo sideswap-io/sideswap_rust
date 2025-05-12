@@ -136,7 +136,7 @@ pub fn create_payjoin(
     ensure!(server_change_address.is_blinded());
     ensure!(!server_utxos.is_empty());
 
-    let policy_asset = network.d().policy_asset.asset_id();
+    let policy_asset = network.d().policy_asset;
     let args = utxo_select::payjoin::Args {
         policy_asset,
         fee_asset,

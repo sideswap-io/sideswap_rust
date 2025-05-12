@@ -3436,9 +3436,9 @@ pub fn start_processing(
         ui_stopped: Default::default(),
     };
     let env_settings = proto::from::EnvSettings {
-        policy_asset_id: env.nd().policy_asset.asset_id().to_string(),
-        usdt_asset_id: env.nd().known_assets.USDt.asset_id().to_string(),
-        eurx_asset_id: env.nd().known_assets.EURx.asset_id().to_string(),
+        policy_asset_id: env.nd().policy_asset.to_string(),
+        usdt_asset_id: env.nd().known_assets.USDt.to_string(),
+        eurx_asset_id: env.nd().known_assets.EURx.to_string(),
     };
     ui.send(proto::from::Msg::EnvSettings(env_settings));
 
@@ -3499,7 +3499,7 @@ pub fn start_processing(
     let mut settings = settings::load_settings(&settings_path).unwrap_or_default();
     settings::prune(&mut settings);
 
-    let policy_asset = env.nd().policy_asset.asset_id();
+    let policy_asset = env.nd().policy_asset;
 
     let msg_sender_copy = msg_sender.clone();
     let wallet_event_callback = Arc::new(move |account_id, event| {

@@ -115,7 +115,7 @@ impl TickerLoader {
         };
 
         ticker_loader
-            .add_asset(gdk_registry, &network.d().policy_asset.asset_id())
+            .add_asset(gdk_registry, &network.d().policy_asset)
             .expect("must be fail");
 
         for asset_id in known_assets.all_assets() {

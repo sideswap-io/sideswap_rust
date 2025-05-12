@@ -73,7 +73,7 @@ impl GdkRegistryCache {
         let cache_dir = cache_dir.as_ref().join(network.d().name);
         std::fs::create_dir_all(&cache_dir).expect("can't create cache directory");
 
-        let policy_asset_id = network.d().policy_asset.asset_id();
+        let policy_asset_id = network.d().policy_asset;
         let assets = Updater::new(network, cache_dir.clone()).await;
         let icons = Updater::new(network, cache_dir).await;
 
@@ -166,8 +166,8 @@ impl GdkRegistryCache {
 
 fn check_network<T>(data: &BTreeMap<AssetId, T>, network: Network) -> Result<(), anyhow::Error> {
     ensure!(
-        data.contains_key(&network.d().known_assets.USDt.asset_id())
-            || data.contains_key(&network.d().known_assets.EURx.asset_id()),
+        data.contains_key(&network.d().known_assets.USDt)
+            || data.contains_key(&network.d().known_assets.EURx),
         "wrong network, can't find usdt or eurx asset"
     );
     Ok(())

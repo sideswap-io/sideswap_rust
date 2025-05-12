@@ -341,7 +341,7 @@ impl Wallet {
 
         let wallet = Wallet {
             command_sender,
-            policy_asset: network.d().policy_asset.asset_id(),
+            policy_asset: network.d().policy_asset,
             master_blinding_key,
             watch_only: false,
         };
@@ -2239,7 +2239,7 @@ async fn connect(
 
     let network = login_details.network();
 
-    let policy_asset = network.d().policy_asset.asset_id();
+    let policy_asset = network.d().policy_asset;
 
     let mut data = Data {
         policy_asset,

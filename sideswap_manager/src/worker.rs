@@ -1157,7 +1157,7 @@ pub async fn run(
     ));
     let ws = WsReqSender::new(req_sender, resp_receiver);
 
-    let policy_asset = settings.env.nd().policy_asset.asset_id();
+    let policy_asset = settings.env.nd().policy_asset;
 
     let network = settings.env.d().network;
 

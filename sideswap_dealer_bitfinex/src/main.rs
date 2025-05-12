@@ -574,21 +574,21 @@ fn submit_market_prices(data: &mut Data) {
             ExchangePair::BtcUsdt => (
                 AssetPair {
                     base: data.policy_asset,
-                    quote: assets.USDt.asset_id(),
+                    quote: assets.USDt,
                 },
                 INTEREST_BTC_USDT,
             ),
             ExchangePair::BtcEur => (
                 AssetPair {
                     base: data.policy_asset,
-                    quote: assets.EURx.asset_id(),
+                    quote: assets.EURx,
                 },
                 INTEREST_BTC_EURX,
             ),
             ExchangePair::EurUsdt => (
                 AssetPair {
-                    base: assets.EURx.asset_id(),
-                    quote: assets.USDt.asset_id(),
+                    base: assets.EURx,
+                    quote: assets.USDt,
                 },
                 INTEREST_EURX_USDT,
             ),
@@ -1087,8 +1087,8 @@ fn process_market_event(data: &mut Data, event: market::Event) {
             price,
             txid,
         } => {
-            let usdt_asset = data.network.d().known_assets.USDt.asset_id();
-            let eurx_asset = data.network.d().known_assets.EURx.asset_id();
+            let usdt_asset = data.network.d().known_assets.USDt;
+            let eurx_asset = data.network.d().known_assets.EURx;
             let exchange_pair = if base == data.policy_asset && quote == usdt_asset {
                 ExchangePair::BtcUsdt
             } else if base == data.policy_asset && quote == eurx_asset {
@@ -1253,7 +1253,7 @@ async fn main() {
     let mut data = Data {
         settings,
         network,
-        policy_asset: network.d().policy_asset.asset_id(),
+        policy_asset: network.d().policy_asset,
         ticker_loader,
         server_connected: false,
         bfx_connected: false,

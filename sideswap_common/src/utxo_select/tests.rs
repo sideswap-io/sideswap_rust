@@ -8,8 +8,8 @@ use super::*;
 fn no_policy_asset_crash() {
     let network = Network::Regtest;
 
-    let policy_asset = network.d().policy_asset.asset_id();
-    let send_asset = network.d().known_assets.USDt.asset_id();
+    let policy_asset = network.d().policy_asset;
+    let send_asset = network.d().known_assets.USDt;
     let txid = elements::Txid::from_str(
         "0000000000000000000000000000000000000000000000000000000000000001",
     )

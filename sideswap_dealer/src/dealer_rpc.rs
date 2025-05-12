@@ -219,7 +219,7 @@ async fn get_pset(
     params: &Params,
     extra_asset_utxo: bool,
 ) -> Result<PsetMakerRequest, anyhow::Error> {
-    let bitcoin_asset = params.env.nd().policy_asset.asset_id();
+    let bitcoin_asset = params.env.nd().policy_asset;
     let (send_asset, send_amount) = if details.send_bitcoins {
         (bitcoin_asset, details.bitcoin_amount + details.server_fee)
     } else {
@@ -1061,7 +1061,7 @@ async fn worker(
     ));
     let ws = WsReqSender::new(req_sender, resp_receiver);
 
-    let policy_asset = params.env.nd().policy_asset.asset_id();
+    let policy_asset = params.env.nd().policy_asset;
 
     let (internal_sender, mut internal_receiver) = unbounded_channel::<Internal>();
 

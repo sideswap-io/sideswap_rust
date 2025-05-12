@@ -2532,8 +2532,8 @@ fn try_start_quotes(
 
         let selected_assets = [
             (worker.policy_asset, min_order_amounts.lbtc),
-            (known_assets.USDt.asset_id(), min_order_amounts.usdt),
-            (known_assets.EURx.asset_id(), min_order_amounts.eurx),
+            (known_assets.USDt, min_order_amounts.usdt),
+            (known_assets.EURx, min_order_amounts.eurx),
         ];
 
         let (selected_asset, min_amount) = selected_assets
