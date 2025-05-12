@@ -147,21 +147,43 @@ pub async fn run(
                 currency_to,
                 amount,
             } => {
-                let res = bf_api
-                    .make_request(bitfinex_api::transfer::TransferRequest {
-                        from,
-                        to,
-                        currency,
-                        currency_to,
-                        amount: amount.to_string(),
-                    })
-                    .await;
-                match res {
-                    Ok(resp) if resp.status == "SUCCESS" => {
-                        resp_callback(Response::Transfer { success: true })
+                let mut retry_count = 0;
+
+                let success = loop {
+                    let res = bf_api
+                        .make_request(bitfinex_api::transfer::TransferRequest {
+                            from: from.clone(),
+                            to: to.clone(),
+                            currency: currency.clone(),
+                            currency_to: currency_to.clone(),
+                            amount: amount.to_string(),
+                        })
+                        .await;
+                    match res {
+                        Ok(resp) if resp.status == "SUCCESS" => {
+                            break true;
+                        }
+
+                        Ok(resp) => {
+                            log::warn!("unexpected transfer response status: {}", resp.status);
+                            break false;
+                        }
+
+                        Err(err) => {
+                            debug!("transfer failed: {err}");
+                            retry_count += 1;
+                            if retry_count < 5 {
+                                log::debug!("wait and retry transfer...");
+                                tokio::time::sleep(Duration::from_secs(10)).await;
+                                continue;
+                            }
+
+                            break false;
+                        }
                     }
-                    Ok(_) | Err(_) => resp_callback(Response::Transfer { success: false }),
-                }
+                };
+
+                resp_callback(Response::Transfer { success });
             }
 
             Request::Withdraw {

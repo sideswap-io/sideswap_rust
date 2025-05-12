@@ -1,4 +1,3 @@
-use anyhow::bail;
 use log::debug;
 use serde::Serialize;
 
@@ -49,12 +48,24 @@ pub fn new_nonce() -> String {
         .to_string()
 }
 
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    #[error("transport error: {0:?}")]
+    Transport(#[from] reqwest::Error),
+    #[error("JSON error: {0}")]
+    Json(serde_json::Error),
+    #[error("parse error: {0}")]
+    Parse(anyhow::Error),
+    #[error("bfx error: {msg}, code: {code}")]
+    Bfx { code: String, msg: String },
+}
+
 impl Bitfinex {
     pub fn new(settings: BfSettings) -> Self {
         Self { settings }
     }
 
-    pub async fn make_request<T: ApiCall>(&self, request: T) -> Result<T::Response, anyhow::Error> {
+    pub async fn make_request<T: ApiCall>(&self, request: T) -> Result<T::Response, Error> {
         let body = serde_json::to_string(&request).expect("should not fail");
         let api_path = T::api_path();
         let nonce = new_nonce();
@@ -67,14 +78,14 @@ impl Bitfinex {
         let endpoint = format!("https://api.bitfinex.com/{api_path}");
         let signature = hex::encode(tag.as_ref());
 
-        debug!("bf request: {body}, nonce: {nonce}, path: {api_path}");
+        log::debug!("bf request: {body}, nonce: {nonce}, path: {api_path}");
 
         let http_client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(30))
             .build()
             .expect("http client construction failed");
 
-        let res = http_client
+        let resp = http_client
             .post(&endpoint)
             .header("Content-Type", "application/json")
             .header("Accept", "application/json")
@@ -83,24 +94,28 @@ impl Bitfinex {
             .header("bfx-signature", &signature)
             .body(body)
             .send()
-            .await?
-            .text()
-            .await;
+            .await?;
+        let status = resp.status();
+        let resp = resp.text().await?;
 
-        match res {
-            Ok(resp) => {
-                let resp: serde_json::Value = serde_json::from_str(&resp)?;
-                debug!(
-                    "bf response: {}, api_path: {api_path}",
-                    serde_json::to_string(&resp).unwrap()
-                );
-                let resp = T::parse(resp)?;
-                Ok(resp)
-            }
-            Err(err) => {
-                let status = err.status();
-                bail!("bf error: {err}, http_status: {status:?}")
+        debug!("bfx response: {resp}, api_path: {api_path}, status: {status}");
+
+        let resp = serde_json::from_str::<serde_json::Value>(&resp).map_err(Error::Json)?;
+
+        if let Some(
+            [serde_json::Value::String(err), serde_json::Value::Number(code), serde_json::Value::String(msg)],
+        ) = resp.as_array().map(|a| a.as_slice())
+        {
+            if err == "error" {
+                return Err(Error::Bfx {
+                    code: code.as_str().to_owned(),
+                    msg: msg.clone(),
+                });
             }
         }
+
+        let resp = T::parse(resp).map_err(Error::Parse)?;
+
+        Ok(resp)
     }
 }

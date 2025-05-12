@@ -24,6 +24,7 @@ reqwest.workspace = true
 ring.workspace = true
 serde_json.workspace = true
 serde.workspace = true
+thiserror.workspace = true
 tokio-tungstenite.workspace = true
 tokio.workspace = true
 tungstenite.workspace = true

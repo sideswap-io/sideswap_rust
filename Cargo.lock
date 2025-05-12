@@ -4368,6 +4368,7 @@ dependencies = [
  "sideswap_common",
  "sideswap_dealer",
  "sideswap_types",
+ "thiserror 1.0.69",
  "tokio",
  "tokio-tungstenite",
  "tungstenite",
