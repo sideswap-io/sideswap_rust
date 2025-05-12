@@ -8,18 +8,22 @@ use elements::{
     TxOutSecrets,
 };
 
+use crate::verify;
+
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    #[error("Output {0} value must be set")]
+    #[error("output {0} value must be set")]
     UnknownOutputValue(usize),
-    #[error("Output {0} asset must be set")]
+    #[error("output {0} asset must be set")]
     UnknownOutputAsset(usize),
-    #[error("No blinding output found")]
+    #[error("no blinding output found")]
     NoBlindingOutputFound,
-    #[error("Blinding error: {0}")]
+    #[error("blinding error: {0}")]
     BlindingError(#[from] elements::secp256k1_zkp::Error),
-    #[error("Invalid input: {0}")]
+    #[error("invalid input: {0}")]
     InvalidInput(&'static str),
+    #[error("too many tx inputs: {count}, must be no more than {limit}")]
+    TooManyInputs { count: usize, limit: usize },
 }
 
 const PSET_IN_EXPLICIT_VALUE: ProprietaryType = 0x11; // 8 bytes
@@ -152,6 +156,17 @@ pub fn blind_pset(
     inp_txout_sec: &[TxOutSecrets],
     blinding_factors: &[(AssetBlindingFactor, ValueBlindingFactor, SecretKey)],
 ) -> Result<OptBlindedOutputs, Error> {
+    let input_count = pset.inputs().len();
+    // Prevent failed asset - n_input_tags <= SECP256K1_SURJECTIONPROOF_MAX_N_INPUTS
+    let input_limit = 256;
+    verify!(
+        input_count <= input_limit,
+        Error::TooManyInputs {
+            count: input_count,
+            limit: input_limit,
+        }
+    );
+
     let secp = elements::secp256k1_zkp::global::SECP256K1;
 
     let rng = &mut rand::thread_rng();
