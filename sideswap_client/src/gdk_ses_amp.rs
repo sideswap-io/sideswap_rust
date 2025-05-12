@@ -185,7 +185,6 @@ fn get_wallet(wallet: &WalletOpt) -> Result<&sideswap_amp::Wallet, anyhow::Error
         .ok_or_else(|| anyhow::anyhow!("the AMP wallet is disconnected"))
 }
 
-// TODO: Can this work in background?
 async fn get_transactions(
     data: &mut Data,
     opts: GetTransactionsOpt,
@@ -328,7 +327,7 @@ async fn get_previous_addresses(wallet: &WalletOpt) -> Result<AddressList, anyho
             is_internal: None,
             public_key: None,
             prevout_script: Some(addr.prevout_script),
-            service_xpub: Some(addr.service_xpub.to_string()),
+            service_xpub: Some(addr.service_xpub),
         })
         .collect();
     Ok(AddressList { list })

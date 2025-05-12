@@ -35,7 +35,7 @@ pub struct WatchOnly {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct RegInfo {
     pub watch_only: Option<WatchOnly>,
-    pub amp_service_xpub: String,
+    pub amp_service_xpub: bip32::Xpub,
     pub amp_user_path: Vec<u32>,
 }
 

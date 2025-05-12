@@ -114,5 +114,5 @@ pub struct AddressInfo {
 
     // Normally AMP only, example: 52210305b9d4acd4c6cd5a5a9eb5e9a4dcd74a7b962eb0109cab264ea7412d6901bfa42102945512944638fe25e24962866d19ec858fdc70dd5a68ae801d54b5c36231f2e652ae
     pub prevout_script: Option<elements::Script>,
-    pub service_xpub: Option<String>,
+    pub service_xpub: Option<bitcoin::bip32::Xpub>,
 }

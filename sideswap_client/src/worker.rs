@@ -1871,8 +1871,7 @@ impl Data {
 
         let nested_account_path = self.env.nd().account_path_sh_wpkh;
         let native_account_path = self.env.nd().account_path_wpkh;
-        let amp_service_xpub =
-            bip32::Xpub::from_str(&reg_info.amp_service_xpub).expect("must be valid");
+        let amp_service_xpub = reg_info.amp_service_xpub;
         let amp_user_path = reg_info.amp_user_path.clone();
 
         let (nested_account, native_account, amp_user_xpub, master_blinding_key) =
@@ -2561,7 +2560,7 @@ impl Data {
             is_internal: None,
             public_key: None,
             prevout_script: Some(amp_address.prevout_script),
-            service_xpub: Some(wallet_data.xpubs.amp_service_xpub.to_string()),
+            service_xpub: Some(wallet_data.xpubs.amp_service_xpub),
         })
     }
 

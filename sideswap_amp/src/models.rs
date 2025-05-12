@@ -52,6 +52,7 @@ pub struct Utxo {
     pub subtype: u32,
     #[serde(deserialize_with = "helpers::deserialize_hex")]
     pub asset_tag: elements::confidential::Asset,
+    /// script_pub_key
     pub script: elements::Script,
     #[serde(deserialize_with = "helpers::deserialize_hex")]
     pub commitment: elements::confidential::Value,

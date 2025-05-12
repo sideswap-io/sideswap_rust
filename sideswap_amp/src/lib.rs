@@ -1,5 +1,3 @@
-// TODO: Switch from JSON to msgpack
-
 use std::{
     collections::{BTreeMap, HashMap},
     fmt::Debug,
@@ -249,7 +247,7 @@ pub struct AddressInfo {
     pub pointer: u32,
     pub user_path: Vec<u32>,
     pub prevout_script: elements::Script,
-    pub service_xpub: String,
+    pub service_xpub: Xpub,
 }
 
 pub type EventCallback = Arc<dyn Fn(Event) + Sync + Send>;
@@ -270,7 +268,7 @@ pub enum LoginType {
         master_blinding_key: MasterBlindingKey,
         credentials: Credentials,
         network: Network,
-        amp_user_xpub: Xpub, // TODO: Can this be removed?
+        amp_user_xpub: Xpub,
     },
 }
 
@@ -1322,7 +1320,7 @@ async fn process_command(data: &mut Data, command: Command) -> Result<(), Error>
                             pointer: resp.pointer,
                             user_path,
                             prevout_script: derived_address.prevout_script,
-                            service_xpub: data.service_xpub.to_string(),
+                            service_xpub: data.service_xpub,
                         })
                     });
                     res_channel.send(res);
@@ -1362,7 +1360,7 @@ async fn process_command(data: &mut Data, command: Command) -> Result<(), Error>
                                     pointer,
                                     user_path,
                                     prevout_script: derived_address.prevout_script,
-                                    service_xpub: data.service_xpub.to_string(),
+                                    service_xpub: data.service_xpub,
                                 }
                             })
                             .collect::<Vec<_>>();
