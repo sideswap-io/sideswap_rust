@@ -1705,6 +1705,15 @@ impl Data {
     }
 
     fn try_register(&mut self, login: &LoginData) -> Result<settings::RegInfo, anyhow::Error> {
+        log::debug!("try register...");
+        if self.env == Env::LocalRegtest {
+            return Ok(settings::RegInfo {
+                watch_only: None,
+                amp_service_xpub: "tpubECMbgHMZm4QymM7WtpQonF5cU5x54M54QvLFsGjEY3HWx8YPxqZ7nq3PiaQSEjeDwCwpYr4heLC8N7kP74HYGKjoycutoZ4VACJmco16btA".parse().expect("must not fail"),
+                amp_user_path: vec![2147483651, 2147483649, 1],
+            });
+        }
+
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()

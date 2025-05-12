@@ -341,8 +341,8 @@ fn get_default_network(env: Env) -> gdk_common::NetworkParameters {
             mainnet: true,
             tx_explorer_url: "https://blockstream.info/liquid/tx/".to_string(),
             address_explorer_url: "https://blockstream.info/liquid/address/".to_string(),
-            electrum_tls: Some(true),
-            electrum_url: Some("elements-mainnet.blockstream.info:50002".to_string()),
+            electrum_tls: None,
+            electrum_url: None,
             electrum_onion_url: Some(
                 "liqm3aeuthw4eacn2gssv4qg4zfhmy24rmtghp3vujintldu7jaxqyid.onion:50001".to_string(),
             ),
@@ -379,7 +379,7 @@ fn get_default_network(env: Env) -> gdk_common::NetworkParameters {
             tx_explorer_url: "https://blockstream.info/liquidtestnet/tx/".to_string(),
             address_explorer_url: "https://blockstream.info/liquidtestnet/address/".to_string(),
             electrum_tls: None,
-            electrum_url: Some("electrs.sideswap.io:12002".to_string()),
+            electrum_url: None,
             electrum_onion_url: Some(
                 "liqtzdv3soz7onazmbqzvzbrcgz73bdqlcuhbqlkucjj7i6irbdmoryd.onion:50001".to_string(),
             ),
@@ -416,8 +416,8 @@ fn get_default_network(env: Env) -> gdk_common::NetworkParameters {
             mainnet: false,
             tx_explorer_url: "http://127.0.0.1:8080/tx/".to_string(),
             address_explorer_url: "http://127.0.0.1:8080/address/".to_string(),
-            electrum_tls: Some(false),
-            electrum_url: Some("127.0.0.1:19002".to_string()),
+            electrum_tls: None,
+            electrum_url: None,
             electrum_onion_url: None,
             validate_domain: None,
             policy_asset: Some(
@@ -474,7 +474,7 @@ fn get_network_parameters(
             _,
         ) => (host.as_str(), *port, *use_tls),
 
-        (_, Network::Regtest) => unimplemented!(),
+        (_, Network::Regtest) => ("127.0.0.1", 19002, false),
     };
 
     let mut network = get_default_network(env);
