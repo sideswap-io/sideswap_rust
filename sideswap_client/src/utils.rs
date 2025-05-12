@@ -470,23 +470,19 @@ pub fn convert_tx(
     let mut balances_all = Vec::new();
 
     for input in tx.inputs.iter() {
-        if let Some(unblinded) = &input.unblinded {
-            *balances.entry(unblinded.asset).or_default() -= unblinded.value as i64;
-            balances_all.push(proto::Balance {
-                asset_id: unblinded.asset.to_string(),
-                amount: -(unblinded.value as i64),
-            });
-        }
+        *balances.entry(input.unblinded.asset).or_default() -= input.unblinded.value as i64;
+        balances_all.push(proto::Balance {
+            asset_id: input.unblinded.asset.to_string(),
+            amount: -(input.unblinded.value as i64),
+        });
     }
 
     for output in tx.outputs.iter() {
-        if let Some(unblinded) = &output.unblinded {
-            *balances.entry(unblinded.asset).or_default() += unblinded.value as i64;
-            balances_all.push(proto::Balance {
-                asset_id: unblinded.asset.to_string(),
-                amount: unblinded.value as i64,
-            });
-        }
+        *balances.entry(output.unblinded.asset).or_default() += output.unblinded.value as i64;
+        balances_all.push(proto::Balance {
+            asset_id: output.unblinded.asset.to_string(),
+            amount: output.unblinded.value as i64,
+        });
     }
 
     let balances = balances

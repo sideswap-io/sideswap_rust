@@ -136,51 +136,43 @@ impl GdkSesRust {
                         vsize: tx.transaction_vsize,
                         created_at: TimestampMs::from_millis(tx.created_at_ts / 1000),
                         block_height: tx.block_height,
-                        inputs: tx
-                            .inputs
-                            .iter()
-                            .map(|_input| models::InputOutput { unblinded: None })
-                            .collect(),
-                        outputs: tx
-                            .outputs
-                            .iter()
-                            .map(|_output| models::InputOutput { unblinded: None })
-                            .collect(),
+                        inputs: Vec::new(),
+                        outputs: Vec::new(),
                     });
 
-                assert_eq!(tx.inputs.len(), entry.inputs.len());
-                for (tx_input, entry_input) in tx.inputs.iter().zip(entry.inputs.iter_mut()) {
-                    if tx_input.is_relevant {
-                        if let (Some(asset), Some(asset_bf), Some(value_bf)) = (
-                            tx_input.asset_id,
-                            tx_input.asset_blinder,
-                            tx_input.amount_blinder,
-                        ) {
-                            entry_input.unblinded = Some(TxOutSecrets {
+                for tx_input in tx.inputs.iter() {
+                    if let (true, Some(asset), Some(asset_bf), Some(value_bf)) = (
+                        tx_input.is_relevant,
+                        tx_input.asset_id,
+                        tx_input.asset_blinder,
+                        tx_input.amount_blinder,
+                    ) {
+                        entry.inputs.push(models::InputOutput {
+                            unblinded: TxOutSecrets {
                                 asset,
                                 asset_bf,
                                 value: tx_input.satoshi,
                                 value_bf,
-                            });
-                        }
+                            },
+                        });
                     }
                 }
 
-                assert_eq!(tx.outputs.len(), entry.outputs.len());
-                for (tx_output, entry_output) in tx.outputs.iter().zip(entry.outputs.iter_mut()) {
-                    if tx_output.is_relevant {
-                        if let (Some(asset), Some(asset_bf), Some(value_bf)) = (
-                            tx_output.asset_id,
-                            tx_output.asset_blinder,
-                            tx_output.amount_blinder,
-                        ) {
-                            entry_output.unblinded = Some(TxOutSecrets {
+                for tx_output in tx.outputs.iter() {
+                    if let (true, Some(asset), Some(asset_bf), Some(value_bf)) = (
+                        tx_output.is_relevant,
+                        tx_output.asset_id,
+                        tx_output.asset_blinder,
+                        tx_output.amount_blinder,
+                    ) {
+                        entry.outputs.push(models::InputOutput {
+                            unblinded: TxOutSecrets {
                                 asset,
                                 asset_bf,
                                 value: tx_output.satoshi,
                                 value_bf,
-                            });
-                        }
+                            },
+                        });
                     }
                 }
             }

@@ -10,12 +10,14 @@ use super::*;
 pub struct TransactionInput {
     pub prevtxid: elements::Txid,
     pub previdx: u32,
+    /// Set for own inputs only (is_relevant = true)
     pub unblinded: Option<TxOutSecrets>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TransactionOutput {
     pub pt_idx: u32,
+    /// Set for own outputs only (is_relevant = true)
     pub unblinded: Option<TxOutSecrets>,
 }
 

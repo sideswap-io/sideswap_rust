@@ -40,7 +40,7 @@ pub struct Address {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct InputOutput {
-    pub unblinded: Option<TxOutSecrets>,
+    pub unblinded: TxOutSecrets,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,7 +50,9 @@ pub struct Transaction {
     pub vsize: usize,
     pub created_at: TimestampMs,
     pub block_height: u32,
+    /// Only own inputs here (is_relevant = true)
     pub inputs: Vec<InputOutput>,
+    /// Only own outputs here (is_relevant = true)
     pub outputs: Vec<InputOutput>,
 }
 

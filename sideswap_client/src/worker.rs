@@ -347,23 +347,12 @@ impl Data {
                         vsize: tx.vsize,
                         created_at: tx.created_at,
                         block_height: tx.block_height,
-                        inputs: tx.inputs.clone(),
-                        outputs: tx.outputs.clone(),
+                        inputs: Vec::new(),
+                        outputs: Vec::new(),
                     });
 
-                // Merge both transactions
-
-                for (merged, new) in merged_tx.inputs.iter_mut().zip(tx.inputs.iter()) {
-                    if let Some(unblinded) = new.unblinded {
-                        merged.unblinded = Some(unblinded);
-                    }
-                }
-
-                for (merged, new) in merged_tx.outputs.iter_mut().zip(tx.outputs.iter()) {
-                    if let Some(unblinded) = new.unblinded {
-                        merged.unblinded = Some(unblinded);
-                    }
-                }
+                merged_tx.inputs.extend_from_slice(&tx.inputs);
+                merged_tx.outputs.extend_from_slice(&tx.outputs);
             }
         }
 
@@ -1654,13 +1643,12 @@ impl Data {
             .filter_map(|res_receiver| res_receiver.recv().expect("channel must be open").ok())
             .filter_map(|tx_list| tx_list.list.into_iter().find(|tx| tx.txid == txid))
             .flat_map(|tx| tx.inputs.into_iter().chain(tx.outputs.into_iter()))
-            .filter_map(|input_output| input_output.unblinded)
-            .flat_map(|unblinded| {
+            .flat_map(|in_out| {
                 [
-                    unblinded.value.to_string(),
-                    unblinded.asset.to_string(),
-                    unblinded.value_bf.to_string(),
-                    unblinded.asset_bf.to_string(),
+                    in_out.unblinded.value.to_string(),
+                    in_out.unblinded.asset.to_string(),
+                    in_out.unblinded.value_bf.to_string(),
+                    in_out.unblinded.asset_bf.to_string(),
                 ]
             })
             .collect::<Vec<_>>();

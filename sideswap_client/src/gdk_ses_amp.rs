@@ -222,15 +222,17 @@ async fn get_transactions(
             inputs: tx
                 .inputs
                 .iter()
-                .map(|input| models::InputOutput {
-                    unblinded: input.unblinded,
+                .filter_map(|input| {
+                    let unblinded = input.unblinded?;
+                    Some(models::InputOutput { unblinded })
                 })
                 .collect(),
             outputs: tx
                 .outputs
                 .iter()
-                .map(|output| models::InputOutput {
-                    unblinded: output.unblinded,
+                .filter_map(|output| {
+                    let unblinded = output.unblinded?;
+                    Some(models::InputOutput { unblinded })
                 })
                 .collect(),
         })
