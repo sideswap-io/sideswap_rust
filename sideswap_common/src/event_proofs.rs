@@ -305,3 +305,6 @@ impl EventProofs {
         signature.to_string()
     }
 }
+
+#[cfg(test)]
+mod tests;
