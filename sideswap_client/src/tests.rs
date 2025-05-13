@@ -1,6 +1,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     sync::{mpsc, Arc},
+    time::Duration,
 };
 
 use sideswap_common::{env::Env, panic_handler::install_panic_handler};
@@ -264,19 +265,20 @@ fn submit_order(
     base: &str,
     quote: &str,
     base_amount: u64,
-    price: f64,
+    price: Option<f64>,
+    price_tracking: Option<f64>,
     trade_dir: proto::TradeDir,
     two_step: bool,
     private: bool,
-) {
+) -> proto::OrderId {
     data.send(proto::to::Msg::OrderSubmit(proto::to::OrderSubmit {
         asset_pair: proto::AssetPair {
             base: base.to_owned(),
             quote: quote.to_owned(),
         },
         base_amount,
-        price: Some(price),
-        price_tracking: None,
+        price,
+        price_tracking,
         trade_dir: trade_dir.into(),
         ttl_seconds: Some(60),
         two_step,
@@ -305,9 +307,71 @@ fn submit_order(
 
     loop {
         let msg = data.recv();
-        if let proto::from::Msg::OwnOrderCreated(_msg) = msg {
+        if let proto::from::Msg::OwnOrderCreated(msg) = msg {
+            break msg.order_id;
+        }
+    }
+}
+
+fn edit_order(
+    data: &mut Data,
+    order_id: proto::OrderId,
+    base_amount: Option<u64>,
+    price: Option<f64>,
+    price_tracking: Option<f64>,
+) {
+    'outer: loop {
+        data.send(proto::to::Msg::OrderEdit(proto::to::OrderEdit {
+            order_id: order_id.clone(),
+            base_amount,
+            price,
+            price_tracking,
+        }));
+
+        loop {
+            let msg = data.recv();
+
+            if let proto::from::Msg::OrderEdit(msg) = msg {
+                if msg.error_msg().contains("signature verification failed") {
+                    log::debug!("retry after failed signature verification...");
+                    std::thread::sleep(Duration::from_millis(100));
+                    continue 'outer;
+                }
+                assert!(msg.success, "order edit failed: {}", msg.error_msg());
+                break 'outer;
+            }
+        }
+    }
+
+    log::debug!("wait for updated order...");
+
+    loop {
+        let order = data.own_orders.get(&order_id.id).unwrap();
+        let mut wait_for_update = false;
+
+        if let Some(base_amount) = base_amount {
+            if base_amount != order.orig_amount {
+                wait_for_update = true;
+            }
+        }
+
+        if let Some(price) = price {
+            if price != order.price {
+                wait_for_update = true;
+            }
+        }
+
+        if let Some(price_tracking) = price_tracking {
+            if price_tracking != order.price_tracking.unwrap() {
+                wait_for_update = true;
+            }
+        }
+
+        if !wait_for_update {
             break;
         }
+
+        data.recv();
     }
 }
 
@@ -506,7 +570,8 @@ fn swap_sswp_for_usdt_wallet1_wallet2_public() {
         SSWP,
         USDT,
         100,
-        0.85,
+        Some(0.85),
+        None,
         proto::TradeDir::Sell,
         false,
         false,
@@ -609,7 +674,8 @@ fn buy_lbtc_for_usdt_offline_maker_wallet1() {
         LBTC,
         USDT,
         50000,
-        95000.0,
+        Some(95000.0),
+        None,
         proto::TradeDir::Buy,
         true,
         false,
@@ -626,7 +692,8 @@ fn buy_lbtc_for_usdt_offline_maker_jade() {
         LBTC,
         USDT,
         50000,
-        95000.0,
+        Some(95000.0),
+        None,
         proto::TradeDir::Buy,
         true,
         false,
@@ -658,7 +725,8 @@ fn sell_sswp_for_usdt_offline_wallet1() {
         SSWP,
         USDT,
         30,
-        0.95,
+        Some(0.95),
+        None,
         proto::TradeDir::Sell,
         true,
         false,
@@ -675,7 +743,8 @@ fn sell_sswp_for_usdt_offline_jade() {
         SSWP,
         USDT,
         33,
-        0.95,
+        Some(0.95),
+        None,
         proto::TradeDir::Sell,
         true,
         false,
@@ -692,7 +761,8 @@ fn buy_lbtc_for_usdt_offline_jade() {
         LBTC,
         USDT,
         50000,
-        95000.0,
+        Some(95000.0),
+        None,
         proto::TradeDir::Buy,
         true,
         false,
@@ -814,7 +884,8 @@ fn swap_sswp_for_usdt_wallet1_wallet2_private() {
         SSWP,
         USDT,
         100,
-        0.85,
+        Some(0.85),
+        None,
         proto::TradeDir::Sell,
         false,
         true,
@@ -995,4 +1066,30 @@ fn load_transactions_jade() {
             break;
         }
     }
+}
+
+#[ignore]
+#[test]
+fn price_tracking() {
+    let mut data = start_wallet_1();
+
+    let order_id = submit_order(
+        &mut data,
+        LBTC,
+        USDT,
+        50000,
+        None,
+        Some(1.015),
+        proto::TradeDir::Sell,
+        false,
+        false,
+    );
+
+    let order = data.own_orders.get(&order_id.id).unwrap();
+    log::debug!("order before edit: {order:#?}");
+
+    edit_order(&mut data, order_id.clone(), None, None, Some(1.012));
+
+    let order = data.own_orders.get(&order_id.id).unwrap();
+    log::debug!("order after edit: {order:#?}");
 }
