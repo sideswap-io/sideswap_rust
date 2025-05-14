@@ -34,7 +34,7 @@ const RATIO_USDT: Ratio = Ratio {
     norm: 0.5,
     max: 0.75,
 };
-const MIN_BALANCING_AMOUNT_USDT: f64 = 1000.0;
+const MIN_BALANCING_AMOUNT_USDT: f64 = 10000.0;
 
 fn update_balancing_state(
     storage: &mut Storage,
