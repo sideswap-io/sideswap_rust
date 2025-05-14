@@ -1111,6 +1111,7 @@ impl Data {
         self.add_peg_monitoring(resp.order_id, settings::PegDir::In);
 
         let msg = proto::from::PeginWaitTx {
+            order_id: resp.order_id.to_string(),
             peg_addr: resp.peg_addr,
             recv_addr: recv_addr.to_string(),
         };

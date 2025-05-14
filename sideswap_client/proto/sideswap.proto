@@ -502,6 +502,7 @@ message From {
   }
 
   message PeginWaitTx {
+    required string order_id = 1;
     required string peg_addr = 5;
     required string recv_addr = 6;
   }
