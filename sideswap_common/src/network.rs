@@ -125,19 +125,19 @@ pub const NETWORK_LIQUID_REGTEST: NetworkData = NetworkData {
     tx_explorer_url: "fixme",
     address_explorer_url: "fixme",
     policy_asset: const_asset_id(
-        "5ac9f65c0efcc4775e0baec4ec03abdde22473cd3cf33c0419ca290e0751b225",
+        "2184a905372defaf7b0f506c01a54f734f7c0d0d60bbd1c2d90896a9438c1b76",
     ),
 
     service_chain_code: "fixme",
     service_pubkey: "fixme",
 
     known_assets: KnownAssetIds {
-        USDt: const_asset_id("38c973963a28f52653a4ca3ad987baa7dc957bf0bdce291be3c390d6859c8de1"),
-        EURx: const_asset_id("ae6d34eab54e70ddee51f6f550f376a235b0f95c9e1fea30f4ec65dc0943893d"),
-        MEX: const_asset_id("e0c73b7b1cb903be92a5dfbe5af8556f05db0c0fcc7dc17695c0e41cb47b828f"),
-        DePix: const_asset_id("37d5d7543d425b72bd954f44cd1cc21bee3bb9e8594b2431ea738828d51aaf6a"),
+        USDt: const_asset_id("dd7fc500fbb8527cfa188cfb6e1a76194edc2884f779f63bfa3ccb2fea0b697e"),
+        EURx: const_asset_id("aa176592c33bb4fd51ca6afbdd1ee89c2e8ead2dd022d9850642c19efec60d75"),
+        MEX: const_asset_id("371e7b3735b85f29c54dafea13147fb59cd68994d09b1da286d983681e6e9e69"),
+        DePix: const_asset_id("715bacc1a613952abf67569f3adb19172fef466f8d501ca319ff100c63899de4"),
 
-        SSWP: const_asset_id("adeb7b98709c254b3fc559f51daf53a22a1781bcf07c0b38559ad5cac1eb2066"),
+        SSWP: const_asset_id("e3c747d55d55e0a06a392a0063d3626a5e93bf6a216eff1b655251bed1f09c9a"),
     },
 };
 

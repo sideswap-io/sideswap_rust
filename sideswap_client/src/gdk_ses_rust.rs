@@ -421,7 +421,7 @@ fn get_default_network(env: Env) -> gdk_common::NetworkParameters {
             electrum_onion_url: None,
             validate_domain: None,
             policy_asset: Some(
-                "5ac9f65c0efcc4775e0baec4ec03abdde22473cd3cf33c0419ca290e0751b225".to_string(),
+                "2184a905372defaf7b0f506c01a54f734f7c0d0d60bbd1c2d90896a9438c1b76".to_string(),
             ),
             sync_interval: None,
             spv_enabled: Some(false),

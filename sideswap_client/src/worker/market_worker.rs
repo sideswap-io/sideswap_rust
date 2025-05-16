@@ -1483,7 +1483,10 @@ fn process_ws_maker_sign(worker: &mut super::Data, notif: mkt::MakerSignNotif) {
             );
         }
         Err(err) => {
-            log::error!("maker pset sign failed: {err}");
+            log::error!(
+                "maker pset sign failed: {err}, quote_id: {}",
+                quote_id.value()
+            );
         }
     }
 }

@@ -405,6 +405,7 @@ fn updated_recipients(
     Ok(recipients)
 }
 
+// TODO: Make sure mo more than 256 inputs are selected
 fn try_select(args: Args) -> Result<Res, Error> {
     log::debug!("utxo select: {args:#?}");
 
