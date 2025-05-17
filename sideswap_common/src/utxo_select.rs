@@ -3,7 +3,10 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use elements::{Address, AssetId, Txid};
 use serde::Serialize;
 
-use crate::{coin_select::no_change_or_naive, verify};
+use crate::{
+    coin_select::{in_range, no_change_or_naive},
+    verify,
+};
 
 pub mod payjoin;
 
@@ -33,7 +36,7 @@ pub enum WalletType {
     AMP,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RecipientAddress {
     Known(Address),
     Unknown(WalletType),
@@ -48,7 +51,7 @@ impl RecipientAddress {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Recipient {
     pub address: RecipientAddress,
     pub asset_id: AssetId,
@@ -79,13 +82,13 @@ impl WalletType {
 
 pub type ChangeWallets = BTreeMap<AssetId, WalletType>;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Utxo {
     pub wallet: WalletType,
-    pub txid: Txid,
-    pub vout: u32,
     pub asset_id: AssetId,
     pub value: u64,
+    pub txid: Txid,
+    pub vout: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -95,7 +98,7 @@ pub struct Change {
     pub value: u64,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Args {
     pub policy_asset: AssetId,
     pub utxos: Vec<Utxo>,
@@ -244,6 +247,20 @@ fn select_bitcoin_inputs(
     deduct_fee: Option<usize>,
     use_all_utxos: bool,
 ) -> Result<(Vec<Utxo>, Option<Change>, u64), Error> {
+    let scale = 40;
+
+    let utxo_value = |utxo: &Utxo| -> u64 {
+        (utxo.value * scale).saturating_sub(utxo.wallet.input_weight() as u64)
+    };
+
+    // let bitcoin_utxos = {
+    //     // Sort from the biggest to the smallest
+    //     let mut bitcoin_utxos = bitcoin_utxos;
+    //     bitcoin_utxos.sort_by_key(|utxo| utxo_value(utxo));
+    //     bitcoin_utxos.reverse();
+    //     bitcoin_utxos
+    // };
+
     let coins = bitcoin_utxos
         .iter()
         .map(|utxo| utxo.value)
@@ -253,13 +270,16 @@ fn select_bitcoin_inputs(
         .get(policy_asset)
         .ok_or(Error::InsufficientFunds)?;
 
-    if deduct_fee.is_some() {
-        // Fee is deducted from a recipient output, no need for iterative fee calculation here
-        let available = coins.iter().sum::<u64>();
-        verify!(available >= target, Error::InsufficientFunds);
+    // Fee is deducted from a recipient output, no need for iterative fee calculation here
+    let available = coins.iter().sum::<u64>();
+    verify!(
+        available > target || available == target && deduct_fee.is_some(),
+        Error::InsufficientFunds
+    );
 
+    if deduct_fee.is_some() {
         let selected = if !use_all_utxos {
-            no_change_or_naive(target, &coins).ok_or(Error::InsufficientFunds)?
+            no_change_or_naive(target, &coins).expect("must not fail")
         } else {
             coins
         };
@@ -289,84 +309,124 @@ fn select_bitcoin_inputs(
         let network_fee = weight_to_fee(total_weight, DEFAULT_FEE_RATE);
 
         Ok((bitcoin_inputs, change, network_fee))
+    } else if use_all_utxos {
+        let bitcoin_inputs_weight = bitcoin_utxos
+            .iter()
+            .map(|utxo| utxo.wallet.input_weight())
+            .sum::<usize>();
+
+        let total_weight_without_change = base_weight + bitcoin_inputs_weight;
+
+        let min_fee_without_change = weight_to_fee(total_weight_without_change, DEFAULT_FEE_RATE);
+
+        let fee_without_change = available - target;
+
+        verify!(
+            fee_without_change >= min_fee_without_change,
+            Error::InsufficientFunds
+        );
+
+        let all_utxos = bitcoin_utxos.into_iter().cloned().collect::<Vec<_>>();
+
+        let change_output_weight = change_wallet.output_weight();
+
+        let total_weight_with_change = base_weight + bitcoin_inputs_weight + change_output_weight;
+
+        let fee_with_change = weight_to_fee(total_weight_with_change, DEFAULT_FEE_RATE);
+
+        let change_amount = (available - target).saturating_sub(fee_with_change);
+
+        if change_amount > 0 {
+            let change = Change {
+                wallet: change_wallet,
+                asset_id: *policy_asset,
+                value: change_amount,
+            };
+
+            Ok((all_utxos, Some(change), fee_with_change))
+        } else {
+            Ok((all_utxos, None, fee_without_change))
+        }
     } else {
-        // Fee is paid by inputs, potentially creating change.
-        // Need to iterate because fee depends on inputs and change, which depend on fee.
+        // Try to select without change first
 
         let coins = bitcoin_utxos
             .iter()
-            .map(|utxo| utxo.value)
+            .filter_map(|utxo| {
+                let value = utxo_value(utxo);
+                (value > 0).then_some(value)
+            })
             .collect::<Vec<_>>();
-        let available_bitcoin = coins.iter().sum::<u64>();
 
-        let mut current_fee = 0;
+        let without_change = in_range(
+            target * scale + base_weight as u64,
+            change_wallet.output_weight() as u64,
+            0,
+            &coins,
+        );
 
-        loop {
-            let required_amount = target + current_fee;
+        if let Some(without_change) = without_change {
+            let mut counters = BTreeMap::<u64, usize>::new();
+            for coin in without_change {
+                *counters.entry(coin).or_default() += 1;
+            }
 
-            verify!(
-                available_bitcoin >= required_amount,
-                Error::InsufficientFunds
-            );
+            let mut selected_utxos = Vec::new();
+            let mut selected_total = 0;
+            for utxo in bitcoin_utxos {
+                let value = utxo_value(utxo);
+                let count = counters.entry(value).or_default();
+                if *count > 0 {
+                    *count -= 1;
+                    selected_utxos.push(utxo.clone());
+                    selected_total += utxo.value;
+                }
+            }
 
-            let selected_coins = if !use_all_utxos {
-                no_change_or_naive(required_amount, &coins).ok_or(Error::InsufficientFunds)?
-            } else {
-                coins.clone()
-            };
-
-            let bitcoin_inputs = select_utxos(&selected_coins, bitcoin_utxos.iter().copied());
-            let total_input_value = selected_coins.iter().sum::<u64>();
-
-            verify!(
-                total_input_value >= required_amount,
-                Error::InsufficientFunds
-            );
-
-            // Calculate potential change based on current fee estimate
-            // Must subtract required_amount (target + current_fee)
-            let change_amount_potential = total_input_value - required_amount;
-            // A change output is needed if potential change > 0 (ignoring dust for now)
-            let change_needed = change_amount_potential > 0;
-
-            let bitcoin_inputs_weight = bitcoin_inputs
+            let bitcoin_inputs_weight = selected_utxos
                 .iter()
                 .map(|utxo| utxo.wallet.input_weight())
                 .sum::<usize>();
-            let change_output_weight = if change_needed {
-                change_wallet.output_weight()
-            } else {
-                0
-            };
 
-            let total_weight = base_weight + bitcoin_inputs_weight + change_output_weight;
-            let new_fee = weight_to_fee(total_weight, DEFAULT_FEE_RATE);
+            let total_weight_without_change = base_weight + bitcoin_inputs_weight;
 
-            if new_fee == current_fee {
-                let target_plus_final_fee = target + new_fee;
+            let min_fee_without_change =
+                weight_to_fee(total_weight_without_change, DEFAULT_FEE_RATE);
 
-                // This check should ideally always pass if the loop converged correctly,
-                // but verifies against edge cases or potential logic flaws.
-                verify!(
-                    total_input_value >= target_plus_final_fee,
-                    Error::InsufficientFunds
-                );
+            let fee_without_change = selected_total - target;
 
-                let final_change_amount = total_input_value - target_plus_final_fee;
+            assert!(fee_without_change >= min_fee_without_change);
 
-                let change = (final_change_amount > 0).then_some(Change {
+            Ok((selected_utxos, None, fee_without_change))
+        } else {
+            let mut selected_utxos = Vec::new();
+            let mut total_selected = 0;
+            let mut bitcoin_inputs_weight = 0;
+
+            for utxo in bitcoin_utxos {
+                selected_utxos.push(utxo.clone());
+                total_selected += utxo.value;
+                bitcoin_inputs_weight += utxo.wallet.input_weight();
+
+                let total_weight_with_change =
+                    base_weight + bitcoin_inputs_weight + change_wallet.output_weight();
+
+                let network_fee = weight_to_fee(total_weight_with_change, DEFAULT_FEE_RATE);
+
+                if total_selected < target + network_fee {
+                    continue;
+                }
+                let change_amount = total_selected - target - network_fee;
+                let change = Change {
                     wallet: change_wallet,
                     asset_id: *policy_asset,
-                    value: final_change_amount,
-                });
+                    value: change_amount,
+                };
 
-                return Ok((bitcoin_inputs, change, new_fee));
-            } else {
-                // Fee estimate changed, update and loop again
-                current_fee = new_fee;
-                // The next iteration will use the updated fee to calculate required_amount
-                // and potentially re-select coins.
+                return Ok((selected_utxos, Some(change), network_fee));
             }
+
+            Err(Error::InsufficientFunds)
         }
     }
 }
@@ -417,6 +477,12 @@ fn try_select(args: Args) -> Result<Res, Error> {
         force_change_wallets,
         use_all_utxos,
     } = args;
+
+    let utxos = {
+        let mut utxos = utxos;
+        utxos.sort();
+        utxos
+    };
 
     verify!(
         utxos.iter().all(|utxo| utxo.value > 0),

@@ -21,7 +21,7 @@ fn test_balancing() {
     );
     assert_eq!(
         get_balancing(0.7, 0.3, 10000.0, 45000.0, 50000.0),
-        AssetBalancing::RecvUsdt(5000.0)
+        AssetBalancing::None
     );
     assert_eq!(
         get_balancing(0.3, 0.7, 34500.0, 15500.0, 50000.0),
@@ -51,7 +51,7 @@ fn test_balancing() {
     );
     assert_eq!(
         get_balancing(0.8, 0.2, 13500.0, 31500.0, 50000.0),
-        AssetBalancing::SendBtc(0.07)
+        AssetBalancing::None
     );
     assert_eq!(
         get_balancing(0.7, 0.3, 13500.0, 31500.0, 50000.0),

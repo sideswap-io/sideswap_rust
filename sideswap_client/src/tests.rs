@@ -197,6 +197,8 @@ fn start_wallet(
         },
     ));
 
+    // data.send(proto::to::Msg::JadeRescan(proto::Empty {}));
+
     data.send(proto::to::Msg::Login(proto::to::Login {
         phone_key: None,
         wallet: Some(wallet),

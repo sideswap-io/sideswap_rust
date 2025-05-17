@@ -38,3 +38,4 @@ url.workspace = true
 
 [dev-dependencies]
 hex.workspace = true
+rayon.workspace = true
