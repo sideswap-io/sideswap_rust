@@ -17,11 +17,11 @@ use crate::models::AddressType;
 use crate::settings::WatchOnly;
 use crate::utils::{
     self, convert_tx, derive_amp_address, derive_native_address, derive_nested_address,
-    get_peg_item, get_tx_size, redact_from_msg, redact_to_msg, TxSize,
+    get_jade_network, get_peg_item, get_tx_size, redact_from_msg, redact_to_msg, TxSize,
 };
 use crate::{gdk_ses_amp, models, settings};
 
-use anyhow::{anyhow, ensure};
+use anyhow::{anyhow, bail, ensure};
 use bitcoin::bip32;
 use bitcoin::secp256k1::global::SECP256K1;
 use elements::bitcoin::bip32::ChildNumber;
@@ -203,6 +203,7 @@ pub struct WalletData {
     wallet_loaded_sent: bool,
     active_extern_peg: Option<ActivePeg>,
     peg_out_server_amounts: Option<LastPegOutAmount>,
+    last_recv_address: Option<models::AddressInfo>,
 }
 
 #[derive(Clone)]
@@ -1150,6 +1151,7 @@ impl Data {
             |ses| ses.get_receive_address(),
             move |data, res| match res {
                 Ok(addr_info) => {
+                    let wallet_data = data.wallet_data.as_mut().expect("must be set");
                     data.ui
                         .send(proto::from::Msg::RecvAddress(proto::from::RecvAddress {
                             addr: proto::Address {
@@ -1157,6 +1159,7 @@ impl Data {
                             },
                             account: account_id.into(),
                         }));
+                    wallet_data.last_recv_address = Some(addr_info);
                 }
                 Err(err) => data.show_message(&err.to_string()),
             },
@@ -2000,6 +2003,7 @@ impl Data {
             wallet_loaded_sent: false,
             active_extern_peg: None,
             peg_out_server_amounts: None,
+            last_recv_address: None,
         });
 
         if self.skip_wallet_sync() {
@@ -2067,6 +2071,7 @@ impl Data {
             wallet_loaded_sent,
             active_extern_peg,
             peg_out_server_amounts,
+            last_recv_address,
         } = wallet_data;
 
         let mut login_info_reg = wallet_reg.login_info().clone();
@@ -2100,6 +2105,7 @@ impl Data {
             wallet_loaded_sent,
             active_extern_peg,
             peg_out_server_amounts,
+            last_recv_address,
         });
     }
 
@@ -2577,6 +2583,7 @@ impl Data {
             public_key: None,
             prevout_script: Some(amp_address.prevout_script),
             service_xpub: Some(wallet_data.xpubs.amp_service_xpub),
+            branch: None,
         })
     }
 
@@ -2819,6 +2826,7 @@ impl Data {
             proto::to::Msg::ConversionRates(_) => self.process_conversion_rates(),
             proto::to::Msg::JadeRescan(_) => self.process_jade_rescan_request(),
             proto::to::Msg::JadeUnlock(_) => self.process_jade_unlock(),
+            proto::to::Msg::JadeVerifyAddress(msg) => self.process_jade_verify_address(msg),
             proto::to::Msg::GaidStatus(msg) => self.process_gaid_status_req(msg),
             proto::to::Msg::MarketSubscribe(msg) => market_worker::market_subscribe(self, msg),
             proto::to::Msg::MarketUnsubscribe(msg) => market_worker::market_unsubscribe(self, msg),
@@ -3362,6 +3370,83 @@ impl Data {
             error_msg: res.err().map(|err| err.to_string()),
         };
         self.ui.send(proto::from::Msg::JadeUnlock(result));
+    }
+
+    fn try_jade_verify_address(&mut self, msg: proto::Address) -> Result<(), anyhow::Error> {
+        let wallet_data = self
+            .wallet_data
+            .as_ref()
+            .ok_or_else(|| anyhow!("no wallet_data"))?;
+
+        let latest_address = wallet_data
+            .last_recv_address
+            .as_ref()
+            .ok_or_else(|| anyhow!("no last_recv_address"))?;
+
+        ensure!(latest_address.address.to_string() == msg.addr);
+
+        match &wallet_data.wallet_reg.login_info().wallet_info {
+            WalletInfo::Mnemonic(_mnemonic) => bail!("jade only request"),
+            WalletInfo::Jade(jade_data, _watch_only) => {
+                utils::unlock_hw(self.env, &jade_data.jade)?;
+
+                // TODO: Verify jade wallet fingerprint
+
+                let network = get_jade_network(self.env);
+
+                let req = match latest_address.address_type {
+                    models::AddressType::P2wpkh | models::AddressType::P2shP2wpkh => {
+                        let variant = match latest_address.address_type {
+                            AddressType::P2wpkh => sideswap_jade::models::OutputVariant::P2wpkh,
+                            AddressType::P2shP2wpkh => {
+                                sideswap_jade::models::OutputVariant::P2wpkhP2sh
+                            }
+                            AddressType::P2wsh => unreachable!(),
+                        };
+
+                        sideswap_jade::models::GetReceiveAddressReq {
+                            network,
+                            variant: Some(variant),
+                            path: Some(latest_address.user_path.clone()),
+                            subaccount: None,
+                            pointer: None,
+                            branch: None,
+                        }
+                    }
+
+                    models::AddressType::P2wsh => {
+                        let subaccount = wallet_data
+                            .amp_subaccount
+                            .ok_or_else(|| anyhow!("amp_subaccount is None"))?;
+                        let branch = latest_address
+                            .branch
+                            .ok_or_else(|| anyhow!("branch is None"))?;
+                        sideswap_jade::models::GetReceiveAddressReq {
+                            network,
+                            variant: None,
+                            path: None,
+                            subaccount: Some(subaccount),
+                            pointer: Some(latest_address.pointer),
+                            branch: Some(branch),
+                        }
+                    }
+                };
+
+                let resp = jade_data.jade.get_receive_address(req)?;
+                ensure!(msg.addr == resp, "unexpected jade address");
+
+                Ok(())
+            }
+        }
+    }
+
+    fn process_jade_verify_address(&mut self, msg: proto::Address) {
+        let res = self.try_jade_verify_address(msg);
+        let result = proto::GenericResponse {
+            success: res.is_ok(),
+            error_msg: res.err().map(|err| err.to_string()),
+        };
+        self.ui.send(proto::from::Msg::JadeVerifyAddress(result));
     }
 
     fn process_gaid_status_req(&mut self, msg: proto::to::GaidStatus) {

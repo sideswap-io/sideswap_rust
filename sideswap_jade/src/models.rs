@@ -82,6 +82,25 @@ pub struct SignMessageReq {
     pub ae_host_commitment: ByteArray32,
 }
 
+#[derive(Debug, Serialize)]
+pub struct GetReceiveAddressReq {
+    pub network: JadeNetwork,
+
+    // Single-sig accounts only
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub variant: Option<OutputVariant>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<Vec<u32>>,
+
+    // AMP accounts only
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subaccount: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pointer: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub branch: Option<u32>,
+}
+
 // Other fields:
 // Text("JADE_OTA_MAX_CHUNK"), Integer(Integer(4096))
 // Text("JADE_CONFIG"), Text("BLE")

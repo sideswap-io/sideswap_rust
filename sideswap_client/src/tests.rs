@@ -120,6 +120,7 @@ impl Data {
             | proto::from::Msg::JadePorts(_)
             | proto::from::Msg::JadeStatus(_)
             | proto::from::Msg::JadeUnlock(_)
+            | proto::from::Msg::JadeVerifyAddress(_)
             | proto::from::Msg::GaidStatus(_)
             | proto::from::Msg::MarketList(_)
             | proto::from::Msg::MarketAdded(_)
@@ -1094,4 +1095,37 @@ fn price_tracking() {
 
     let order = data.own_orders.get(&order_id.id).unwrap();
     log::debug!("order after edit: {order:#?}");
+}
+
+#[ignore]
+#[test]
+fn verify_address_jade() {
+    let mut data = start_jade();
+
+    for account in [Account::Amp, Account::Reg] {
+        data.send(proto::to::Msg::GetRecvAddress(account.into()));
+
+        let address = loop {
+            let msg = data.recv();
+            if let proto::from::Msg::RecvAddress(msg) = msg {
+                break msg.addr;
+            }
+            if let proto::from::Msg::ShowMessage(msg) = msg {
+                panic!("recv adddress failed: {}", msg.text);
+            }
+        };
+
+        data.send(proto::to::Msg::JadeVerifyAddress(address));
+
+        loop {
+            let msg = data.recv();
+            if let proto::from::Msg::JadeVerifyAddress(msg) = msg {
+                if let Some(error_msg) = msg.error_msg {
+                    panic!("JadeVerifyAddress failed: {error_msg}")
+                }
+                assert!(msg.success);
+                break;
+            }
+        }
+    }
 }

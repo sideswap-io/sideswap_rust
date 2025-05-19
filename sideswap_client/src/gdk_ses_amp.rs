@@ -256,6 +256,7 @@ async fn get_recv_address(wallet: &WalletOpt) -> Result<models::AddressInfo, any
         public_key: None,
         prevout_script: Some(address_info.prevout_script),
         service_xpub: Some(address_info.service_xpub),
+        branch: Some(address_info.branch),
     })
 }
 
@@ -328,6 +329,7 @@ async fn get_previous_addresses(wallet: &WalletOpt) -> Result<AddressList, anyho
             public_key: None,
             prevout_script: Some(addr.prevout_script),
             service_xpub: Some(addr.service_xpub),
+            branch: Some(addr.branch),
         })
         .collect();
     Ok(AddressList { list })

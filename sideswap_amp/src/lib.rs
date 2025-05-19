@@ -248,6 +248,7 @@ pub struct AddressInfo {
     pub user_path: Vec<u32>,
     pub prevout_script: elements::Script,
     pub service_xpub: Xpub,
+    pub branch: u32,
 }
 
 pub type EventCallback = Arc<dyn Fn(Event) + Sync + Send>;
@@ -1321,6 +1322,7 @@ async fn process_command(data: &mut Data, command: Command) -> Result<(), Error>
                             user_path,
                             prevout_script: derived_address.prevout_script,
                             service_xpub: data.service_xpub,
+                            branch: resp.branch,
                         })
                     });
                     res_channel.send(res);
@@ -1339,31 +1341,35 @@ async fn process_command(data: &mut Data, command: Command) -> Result<(), Error>
                     let res = res.and_then(|args| -> Result<Vec<AddressInfo>, Error> {
                         let latest_list = parse_args1::<Vec<models::PreviousAddress>>(args)?;
 
-                        let max_pointer = latest_list
-                            .iter()
-                            .map(|addr| addr.pointer)
-                            .max()
-                            .unwrap_or_default();
+                        let last_addr = latest_list.iter().max_by_key(|addr| addr.pointer);
 
-                        let list = (0..=max_pointer)
-                            .rev()
-                            .map(|pointer| {
-                                let derived_address = data.derive_address(pointer);
+                        let list = last_addr
+                            .map(|last_addr| {
+                                let max_pointer = last_addr.pointer;
+                                let branch = last_addr.branch;
 
-                                let user_path = address_user_path(data.subaccount, pointer)
-                                    .into_iter()
-                                    .map(u32::from)
-                                    .collect();
+                                (0..=max_pointer)
+                                    .rev()
+                                    .map(|pointer| {
+                                        let derived_address = data.derive_address(pointer);
 
-                                AddressInfo {
-                                    address: derived_address.address,
-                                    pointer,
-                                    user_path,
-                                    prevout_script: derived_address.prevout_script,
-                                    service_xpub: data.service_xpub,
-                                }
+                                        let user_path = address_user_path(data.subaccount, pointer)
+                                            .into_iter()
+                                            .map(u32::from)
+                                            .collect();
+
+                                        AddressInfo {
+                                            address: derived_address.address,
+                                            pointer,
+                                            user_path,
+                                            prevout_script: derived_address.prevout_script,
+                                            service_xpub: data.service_xpub,
+                                            branch,
+                                        }
+                                    })
+                                    .collect::<Vec<_>>()
                             })
-                            .collect::<Vec<_>>();
+                            .unwrap_or_default();
 
                         Ok(list)
                     });

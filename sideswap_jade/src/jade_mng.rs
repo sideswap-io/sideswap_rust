@@ -421,6 +421,19 @@ impl ManagedJade {
         )?;
         Ok(resp.into_vec())
     }
+
+    pub fn get_receive_address(
+        &self,
+        req: models::GetReceiveAddressReq,
+    ) -> Result<String, anyhow::Error> {
+        // The request requires user approval
+        let resp = self.make_request::<models::GetReceiveAddressReq, String>(
+            "get_receive_address",
+            std::time::Duration::from_secs(300),
+            req,
+        )?;
+        Ok(resp)
+    }
 }
 
 // fn serial(efusemac: &str) -> &str {

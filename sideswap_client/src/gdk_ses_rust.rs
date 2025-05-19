@@ -229,6 +229,7 @@ impl crate::gdk_ses::GdkSes for GdkSesRust {
             public_key: Some(address_info.public_key),
             prevout_script: None,
             service_xpub: None,
+            branch: None,
         })
     }
 
@@ -323,6 +324,7 @@ impl crate::gdk_ses::GdkSes for GdkSesRust {
                         public_key: Some(addr.public_key),
                         prevout_script: None,
                         service_xpub: None,
+                        branch: None,
                     });
                 }
             }

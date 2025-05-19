@@ -405,6 +405,7 @@ message To {
 
     Empty jade_rescan = 71;
     Empty jade_unlock = 72;
+    Address jade_verify_address = 73;
 
     GaidStatus gaid_status = 81;
 
@@ -848,6 +849,7 @@ message From {
     JadePorts jade_ports = 80;
     JadeStatus jade_status = 83;
     GenericResponse jade_unlock = 81;
+    GenericResponse jade_verify_address = 82;
 
     GaidStatus gaid_status = 91;
 
