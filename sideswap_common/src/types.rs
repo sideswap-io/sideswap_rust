@@ -202,6 +202,8 @@ pub fn asset_int_amount_(asset_amount: f64, asset_precision: AssetPrecision) -> 
     f64::round(asset_amount * asset_scale(asset_precision)) as u64
 }
 
+pub const PEGOUT_MAX_CLIENT_NETWORK_FEE: i64 = 500;
+
 pub struct PegOutAmountReq {
     pub amount: i64,
     pub is_send_entered: bool,
@@ -228,7 +230,7 @@ pub fn peg_out_amount(req: PegOutAmountReq) -> Result<PegOutAmountResp, anyhow::
         (send_amount, req.amount)
     };
     ensure!(
-        send_amount >= req.min_peg_out_amount,
+        send_amount >= req.min_peg_out_amount - PEGOUT_MAX_CLIENT_NETWORK_FEE,
         "Min {}",
         Amount::from_sat(req.min_peg_out_amount).to_bitcoin()
     );

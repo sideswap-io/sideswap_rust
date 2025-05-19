@@ -918,6 +918,12 @@ impl Data {
             .ok_or(anyhow!("server_status is not known"))?;
 
         let amount = if req.is_send_entered {
+            ensure!(
+                req.amount >= server_status.min_peg_out_amount,
+                "Min {}",
+                Amount::from_sat(server_status.min_peg_out_amount).to_bitcoin()
+            );
+
             let utxo_select_res = utxo_select::select(utxo_select::Args {
                 policy_asset: self.policy_asset,
                 utxos: utxos
@@ -931,7 +937,7 @@ impl Data {
                     })
                     .collect(),
                 recipients: vec![utxo_select::Recipient {
-                    address: utxo_select::RecipientAddress::Unknown(WalletType::Nested),
+                    address: utxo_select::RecipientAddress::Unknown(WalletType::Native),
                     asset_id: self.policy_asset,
                     amount: req.amount as u64,
                 }],
@@ -996,7 +1002,7 @@ impl Data {
             .ok_or(anyhow!("server_status is not known"))?;
         ensure!(
             req.send_amount >= server_status.min_peg_out_amount,
-            "min {}",
+            "Min {}",
             Amount::from_sat(server_status.min_peg_out_amount)
                 .to_bitcoin()
                 .to_string()

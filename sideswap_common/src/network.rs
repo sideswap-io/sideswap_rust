@@ -121,15 +121,15 @@ pub const NETWORK_LIQUID_REGTEST: NetworkData = NetworkData {
     account_path_wpkh: [0x80000054, 0x80000001, 0x80000000],
     electrum_url: "127.0.0.1:56705",
     electrum_tls: true,
-    asset_registry_url: "fixme",
-    tx_explorer_url: "fixme",
-    address_explorer_url: "fixme",
+    asset_registry_url: "",
+    tx_explorer_url: "",
+    address_explorer_url: "",
     policy_asset: const_asset_id(
         "2184a905372defaf7b0f506c01a54f734f7c0d0d60bbd1c2d90896a9438c1b76",
     ),
 
-    service_chain_code: "fixme",
-    service_pubkey: "fixme",
+    service_chain_code: "",
+    service_pubkey: "",
 
     known_assets: KnownAssetIds {
         USDt: const_asset_id("dd7fc500fbb8527cfa188cfb6e1a76194edc2884f779f63bfa3ccb2fea0b697e"),
