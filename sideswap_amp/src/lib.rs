@@ -2295,17 +2295,23 @@ async fn connect(
     Ok(data)
 }
 
-async fn run_once(
-    mut data: Data,
-    mut command_receiver: UnboundedReceiver<Command>,
-) -> Result<(), Error> {
+async fn run_once(mut data: Data, mut command_receiver: UnboundedReceiver<Command>) {
     let res = processing_loop(&mut data, &mut command_receiver).await;
 
     while let Some(req) = data.pending_requests.pop_first() {
         let _ = (req.1.callback)(&mut data, Err(Error::ProtocolError("connection closed")));
     }
 
-    res
+    match res {
+        Ok(()) => {
+            log::debug!("connection closed normally");
+        }
+        Err(err) => {
+            log::error!("connection closed unexpectedly: {err}");
+        }
+    }
+
+    send_event(&data, Event::Disconnected);
 }
 
 async fn run_loop(
@@ -2343,6 +2349,8 @@ async fn run_loop(
                         log::error!("connection closed unexpectedly: {err}");
                     }
                 }
+
+                send_event(&data, Event::Disconnected);
             }
 
             Err(err) => {
