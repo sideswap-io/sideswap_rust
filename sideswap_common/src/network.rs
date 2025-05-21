@@ -94,7 +94,7 @@ pub const NETWORK_LIQUID_TESTNET: NetworkData = NetworkData {
     electrum_url: "blockstream.info:465",
     electrum_tls: true,
     asset_registry_url: "https://assets-testnet.blockstream.info",
-    tx_explorer_url: "https://blockstream.info/liquidtestnet/liquidtestnet/tx/",
+    tx_explorer_url: "https://blockstream.info/liquidtestnet/tx/",
     address_explorer_url: "https://blockstream.info/liquidtestnet/address/",
     policy_asset: const_asset_id(
         "144c654344aa716d6f3abcc1ca90e5641e4e2a7f633bc09fe3baf64585819a49",

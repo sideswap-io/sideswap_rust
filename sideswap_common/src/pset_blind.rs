@@ -5,7 +5,7 @@ use elements::{
         raw::{ProprietaryKey, ProprietaryType},
         PartiallySignedTransaction,
     },
-    TxOutSecrets,
+    AssetId, TxOutSecrets,
 };
 
 use crate::verify;
@@ -129,6 +129,8 @@ fn add_input_explicit_proofs(
 }
 
 pub struct BlindedOutput {
+    pub asset_id: AssetId,
+    pub value: u64,
     pub abf: AssetBlindingFactor,
     pub vbf: ValueBlindingFactor,
     pub blinding_nonce: SecretKey,
@@ -259,6 +261,8 @@ pub fn blind_pset(
                 abf: out_abf,
                 vbf: out_vbf,
                 blinding_nonce: shared_secret,
+                asset_id,
+                value,
             }));
 
             let mut message = [0u8; 64];
