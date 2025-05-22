@@ -10,7 +10,7 @@ where
 {
     struct Helper<T>(PhantomData<T>);
 
-    impl<'de, T> serde::de::Visitor<'de> for Helper<T>
+    impl<T> serde::de::Visitor<'_> for Helper<T>
     where
         T: elements::encode::Decodable,
     {
@@ -42,7 +42,7 @@ where
 {
     struct Helper;
 
-    impl<'de> serde::de::Visitor<'de> for Helper {
+    impl serde::de::Visitor<'_> for Helper {
         type Value = elements::confidential::Nonce;
 
         fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
@@ -106,7 +106,7 @@ where
 {
     struct Helper;
 
-    impl<'de> serde::de::Visitor<'de> for Helper {
+    impl serde::de::Visitor<'_> for Helper {
         type Value = elements::Txid;
 
         fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
@@ -130,7 +130,7 @@ where
 {
     struct Helper;
 
-    impl<'de> serde::de::Visitor<'de> for Helper {
+    impl serde::de::Visitor<'_> for Helper {
         type Value = Option<elements::Txid>;
 
         fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {

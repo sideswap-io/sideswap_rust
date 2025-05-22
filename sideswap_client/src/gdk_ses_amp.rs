@@ -244,7 +244,7 @@ async fn get_transactions(
 }
 
 async fn get_recv_address(wallet: &WalletOpt) -> Result<models::AddressInfo, anyhow::Error> {
-    let wallet = get_wallet(&wallet)?;
+    let wallet = get_wallet(wallet)?;
     let address_info = wallet.receive_address().await?;
 
     Ok(models::AddressInfo {
@@ -316,7 +316,7 @@ async fn get_utxos(wallet: &WalletOpt) -> Result<models::UtxoList, anyhow::Error
 }
 
 async fn get_previous_addresses(wallet: &WalletOpt) -> Result<AddressList, anyhow::Error> {
-    let wallet = get_wallet(&wallet)?;
+    let wallet = get_wallet(wallet)?;
     let list = wallet.previous_addresses().await?;
     let list = list
         .into_iter()
@@ -336,7 +336,7 @@ async fn get_previous_addresses(wallet: &WalletOpt) -> Result<AddressList, anyho
 }
 
 async fn broadcast_tx(wallet: &WalletOpt, tx: String) -> Result<(), anyhow::Error> {
-    let wallet = get_wallet(&wallet)?;
+    let wallet = get_wallet(wallet)?;
     let _txid = wallet.broadcast_tx(tx.to_owned()).await?;
     Ok(())
 }
@@ -570,7 +570,7 @@ async fn run(
         master_blinding_key.as_bytes(),
         b"sideswap_client/amp_cache_dir_name",
     );
-    let dir_name = hex::encode(&dir_name);
+    let dir_name = hex::encode(dir_name);
 
     let cipher_key = derive_key(
         master_blinding_key.as_bytes(),

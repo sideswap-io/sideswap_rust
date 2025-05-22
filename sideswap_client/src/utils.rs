@@ -151,12 +151,12 @@ pub fn get_witness(
     let message =
         elements::secp256k1_zkp::Message::from_digest_slice(&sighash[..]).expect("must not fail");
 
-    let signature = SECP256K1.sign_ecdsa_grind_r(&message, &priv_key, bytes_to_grind);
+    let signature = SECP256K1.sign_ecdsa_grind_r(&message, priv_key, bytes_to_grind);
     let signature = elements_miniscript::elementssig_to_rawsig(&(signature, sighash_type));
 
     match utxo.wallet_type {
         WalletType::Nested | WalletType::Native => {
-            let pub_key = priv_key.public_key(&SECP256K1);
+            let pub_key = priv_key.public_key(SECP256K1);
             vec![signature, pub_key.serialize().to_vec()]
         }
         WalletType::AMP => {

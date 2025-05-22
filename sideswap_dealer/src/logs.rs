@@ -22,7 +22,7 @@ pub fn init(work_dir: impl AsRef<Path>) {
     // Always overwrite default config for reference
     std::fs::write(log_config_default_path, DEFAULT).expect("writing default config file failed");
 
-    log4rs::init_file(&log_config_custom_path, Default::default())
+    log4rs::init_file(log_config_custom_path, Default::default())
         .expect("can't open log settings");
 
     if !can_update_config {

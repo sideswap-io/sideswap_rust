@@ -2,13 +2,13 @@ use std::sync::{mpsc, Arc};
 
 use crate::{ffi::proto::Account, gdk_ses::GdkSes, worker};
 
-pub type ResCallback = Box<dyn FnOnce(&mut worker::Data) -> () + Send>;
+pub type ResCallback = Box<dyn FnOnce(&mut worker::Data) + Send>;
 
 pub enum Event {
     Run(ResCallback),
 }
 
-pub type EventCallback = Arc<dyn Fn(Account, Event) -> () + Send + Sync>;
+pub type EventCallback = Arc<dyn Fn(Account, Event) + Send + Sync>;
 
 pub fn callback<Resp, WalletCallback, ResCallback>(
     account_id: Account,
@@ -19,7 +19,7 @@ pub fn callback<Resp, WalletCallback, ResCallback>(
     Resp: Send + 'static,
     WalletCallback: FnOnce(&dyn GdkSes) -> Result<Resp, anyhow::Error> + Send + Sync + 'static,
     ResCallback:
-        FnOnce(&mut super::Data, Result<Resp, anyhow::Error>) -> () + Send + Sync + 'static,
+        FnOnce(&mut super::Data, Result<Resp, anyhow::Error>) + Send + Sync + 'static,
 {
     let wallet = match worker.get_wallet(account_id) {
         Ok(wallet) => wallet,
@@ -53,7 +53,7 @@ where
 {
     let (resp_sender, resp_receiver) = mpsc::channel::<Result<Resp, anyhow::Error>>();
 
-    let wallet = Arc::clone(&wallet);
+    let wallet = Arc::clone(wallet);
 
     // TODO: Use a thread pool
     std::thread::spawn(move || {

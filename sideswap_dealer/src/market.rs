@@ -1441,7 +1441,7 @@ async fn process_client_command(data: &mut Data, command: ClientCommand) {
         ClientCommand::NewAddress { res_sender } => {
             data.event_sender.send(Event::NewAddress {
                 change: false,
-                res_sender: res_sender.into(),
+                res_sender,
             });
         }
 

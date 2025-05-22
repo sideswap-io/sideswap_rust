@@ -238,8 +238,8 @@ impl Controller {
             order_id,
             res_sender: res_sender.into(),
         })?;
-        let resp = recv_res(res_receiver).await?;
-        Ok(resp)
+        recv_res(res_receiver).await?;
+        Ok(())
     }
 
     pub async fn balances(&self) -> Result<Balances, Error> {
@@ -277,7 +277,7 @@ impl Controller {
     ) {
         self.send_command(ClientCommand::ClientConnected {
             client_id,
-            event_sender: event_sender.into(),
+            event_sender,
         });
     }
 
@@ -369,7 +369,7 @@ impl Controller {
         ticker: DealerTicker,
         amount: f64,
     ) -> Result<elements::Txid, Error> {
-        let address = self.parse_address(&address)?;
+        let address = self.parse_address(address)?;
         let asset_id = *self.ticker_loader.asset_id(ticker);
         let asset_precision = self.ticker_loader.precision(ticker);
         let amount = try_convert_asset_amount(amount, asset_precision)?;

@@ -59,7 +59,7 @@ impl UtxoData {
                 elements::confidential::Value::Explicit(utxo.value)
             } else {
                 elements::confidential::Value::new_confidential_from_assetid(
-                    &SECP256K1,
+                    SECP256K1,
                     utxo.value,
                     utxo.asset,
                     utxo.value_bf,

@@ -519,7 +519,7 @@ impl JadeMng {
 
         let agent = match proxy {
             Some(proxy) => {
-                let proxy = ureq::Proxy::new(&proxy.to_string())?;
+                let proxy = ureq::Proxy::new(proxy.to_string())?;
                 ureq::builder().proxy(proxy).build()
             }
             None => ureq::Agent::new(),

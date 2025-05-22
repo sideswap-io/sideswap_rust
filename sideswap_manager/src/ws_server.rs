@@ -80,7 +80,7 @@ fn get_req_id(msg: &str) -> api::ReqId {
     pub enum ToIdOnly {
         Req { id: api::ReqId },
     }
-    serde_json::from_str::<ToIdOnly>(&msg)
+    serde_json::from_str::<ToIdOnly>(msg)
         .map(|ToIdOnly::Req { id }| id)
         .unwrap_or_default()
 }

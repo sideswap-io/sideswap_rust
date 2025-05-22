@@ -59,6 +59,12 @@ pub struct Connection {
     command_receiver: Mutex<Option<UnboundedReceiver<Command>>>,
 }
 
+impl Default for Connection {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Connection {
     pub fn new() -> Connection {
         let (command_sender, command_receiver) = unbounded_channel();
@@ -170,32 +176,19 @@ async fn ws_resp(data: &mut Data) -> WrappedResponse {
     }
 }
 
-fn process_market_resp(_data: &mut Data, resp: mkt::Response) {
-    match resp {
-        mkt::Response::ListMarkets(_resp) => {}
-        _ => {}
-    }
-}
+fn process_market_resp(_data: &mut Data, _resp: mkt::Response) {}
 
 fn process_ws_resp(data: &mut Data, resp: sideswap_api::Response) {
-    match resp {
-        sideswap_api::Response::Market(resp) => process_market_resp(data, resp),
-        _ => {}
+    if let sideswap_api::Response::Market(resp) = resp {
+        process_market_resp(data, resp)
     }
 }
 
-fn process_market_notif(_data: &mut Data, notif: mkt::Notification) {
-    match notif {
-        // mkt::Notification::MarketAdded(_notif) => {}
-        // mkt::Notification::MarketRemoved(_notif) => {}
-        _ => {}
-    }
-}
+fn process_market_notif(_data: &mut Data, _notif: mkt::Notification) {}
 
 fn process_ws_notif(data: &mut Data, notif: sideswap_api::Notification) {
-    match notif {
-        sideswap_api::Notification::Market(notif) => process_market_notif(data, notif),
-        _ => {}
+    if let sideswap_api::Notification::Market(notif) = notif {
+        process_market_notif(data, notif)
     }
 }
 

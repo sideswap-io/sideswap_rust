@@ -64,7 +64,7 @@ impl Api {
         /// Asset amount
         amount: Query<f64>,
     ) -> Result<Json<api::Transaction>, ErrorResponse> {
-        let ticker = parse_dealer_ticker(&self, &asset.0)?;
+        let ticker = parse_dealer_ticker(self, &asset.0)?;
         let txid = self
             .controller
             .send_asset(&address.0, ticker, amount.0)
@@ -90,8 +90,8 @@ impl Api {
         /// Quote asset ticker, must be from a known market
         quote: Query<String>,
     ) -> Result<Json<api::OrderBook>, ErrorResponse> {
-        let base = parse_dealer_ticker(&self, &base.0)?;
-        let quote = parse_dealer_ticker(&self, &quote.0)?;
+        let base = parse_dealer_ticker(self, &base.0)?;
+        let quote = parse_dealer_ticker(self, &quote.0)?;
         let exchange_pair = ExchangePair { base, quote };
         let resp = self.controller.order_book(exchange_pair).await?;
         Ok(Json(resp.into()))
@@ -126,8 +126,8 @@ impl Api {
         /// Client order id. If set, must be unique among all active and recent history orders.
         client_order_id: Query<Option<Box<String>>>,
     ) -> Result<Json<api::OwnOrder>, ErrorResponse> {
-        let base = parse_dealer_ticker(&self, &base.0)?;
-        let quote = parse_dealer_ticker(&self, &quote.0)?;
+        let base = parse_dealer_ticker(self, &base.0)?;
+        let quote = parse_dealer_ticker(self, &quote.0)?;
         let exchange_pair = ExchangePair { base, quote };
         let price = parse_normal_float(price.0)?;
         let resp = self

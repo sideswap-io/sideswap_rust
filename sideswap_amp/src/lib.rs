@@ -334,7 +334,7 @@ impl Wallet {
     ) -> Wallet {
         let (command_sender, command_receiver) = tokio::sync::mpsc::unbounded_channel();
 
-        let login = LoginType::Full(Arc::new(SwSigner::new(network, &mnemonic)));
+        let login = LoginType::Full(Arc::new(SwSigner::new(network, mnemonic)));
 
         let master_blinding_key = login.get_master_blinding_key().expect("must not fail");
 
@@ -527,14 +527,12 @@ impl Wallet {
 
             if is_output {
                 outputs.push(tx_cache::TransactionOutput { pt_idx, unblinded });
-            } else {
-                if let (Some(prevtxid), Some(previdx)) = (prevtxhash, previdx) {
-                    inputs.push(tx_cache::TransactionInput {
-                        prevtxid,
-                        previdx,
-                        unblinded,
-                    });
-                }
+            } else if let (Some(prevtxid), Some(previdx)) = (prevtxhash, previdx) {
+                inputs.push(tx_cache::TransactionInput {
+                    prevtxid,
+                    previdx,
+                    unblinded,
+                });
             }
         }
 
@@ -950,15 +948,15 @@ pub fn derive_prevout_script(
         .expect("should not fail")
         .to_pub();
 
-    let prevout_script = elements::script::Builder::new()
+    
+
+    elements::script::Builder::new()
         .push_opcode(elements::opcodes::all::OP_PUSHNUM_2)
         .push_slice(&pub_key_green.to_bytes())
         .push_slice(&pub_key_user.to_bytes())
         .push_opcode(elements::opcodes::all::OP_PUSHNUM_2)
         .push_opcode(elements::opcodes::all::OP_CHECKMULTISIG)
-        .into_script();
-
-    prevout_script
+        .into_script()
 }
 
 struct DerivedAddress {
@@ -988,8 +986,8 @@ fn get_address(
         Some(master_blinding_key) => {
             let blinder = master_blinding_key
                 .blinding_key(SECP256K1, &unconfidential_address.script_pubkey());
-            let confidential_address = unconfidential_address.to_confidential(blinder);
-            confidential_address
+            
+            unconfidential_address.to_confidential(blinder)
         }
         None => unconfidential_address,
     }

@@ -21,9 +21,9 @@ impl From<mkt::TradeDir> for api::TradeDir {
     }
 }
 
-impl Into<mkt::TradeDir> for api::TradeDir {
-    fn into(self) -> mkt::TradeDir {
-        match self {
+impl From<api::TradeDir> for mkt::TradeDir {
+    fn from(val: api::TradeDir) -> Self {
+        match val {
             api::TradeDir::Sell => mkt::TradeDir::Sell,
             api::TradeDir::Buy => mkt::TradeDir::Buy,
         }

@@ -465,7 +465,7 @@ async fn process_dealer_event(data: &mut Data, event: Event) {
             let convert_balances = |amounts: &BTreeMap<AssetId, f64>| {
                 let get_balance = |ticker: DealerTicker| -> (DealerTicker, f64) {
                     let asset_id = data.ticker_loader.asset_id(ticker);
-                    let amount = amounts.get(&asset_id).copied().unwrap_or_default();
+                    let amount = amounts.get(asset_id).copied().unwrap_or_default();
                     (ticker, amount)
                 };
 
@@ -509,7 +509,7 @@ async fn process_dealer_event(data: &mut Data, event: Event) {
 fn submit_dealer_prices(data: &mut Data) {
     for ticker in [DealerTicker::USDT, DealerTicker::EURX] {
         let exchange_pair = ExchangePair::find_ticker(ticker).expect("must exist");
-        let price = get_bfx_price(&data, exchange_pair).map(|bfx_price| {
+        let price = get_bfx_price(data, exchange_pair).map(|bfx_price| {
             let submit_interest = if ticker == DealerTicker::USDT {
                 INTEREST_BTC_USDT
             } else if ticker == DealerTicker::EURX {
@@ -594,7 +594,7 @@ fn submit_market_prices(data: &mut Data) {
             ),
         };
 
-        let bfx_price = match get_bfx_price(&data, exchange_pair) {
+        let bfx_price = match get_bfx_price(data, exchange_pair) {
             Some(price) => price,
             None => continue,
         };
@@ -1048,7 +1048,7 @@ fn process_msg(data: &mut Data, msg: Msg) {
         Msg::External(ticker, price_res) => match price_res {
             Ok(price) => {
                 data.external_prices.insert(ticker, price);
-                get_bfx_price(&data, ticker);
+                get_bfx_price(data, ticker);
             }
             Err(err) => {
                 log::warn!("external price loading failed: {err}");

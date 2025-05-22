@@ -6,6 +6,12 @@ pub struct TermSignal {
     notify: Arc<Notify>,
 }
 
+impl Default for TermSignal {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TermSignal {
     pub fn new() -> TermSignal {
         let notify = Arc::new(Notify::new());

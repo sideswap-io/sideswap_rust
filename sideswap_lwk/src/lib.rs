@@ -40,7 +40,7 @@ impl<'de> serde::Deserialize<'de> for ScriptVariant {
     {
         let value = String::deserialize(deserializer)?;
         let value =
-            lwk_common::Singlesig::from_str(&value).map_err(|err| serde::de::Error::custom(err))?;
+            lwk_common::Singlesig::from_str(&value).map_err(serde::de::Error::custom)?;
         Ok(ScriptVariant(value))
     }
 }
@@ -164,7 +164,7 @@ fn create_tx(
 }
 
 fn broadcast_tx(electrum_client: &lwk_wollet::ElectrumClient, tx: &str) -> Result<Txid, Error> {
-    let tx = hex::decode(&tx)?;
+    let tx = hex::decode(tx)?;
     let tx = elements::encode::deserialize::<elements::Transaction>(&tx)?;
     let txid = electrum_client.broadcast(&tx)?;
     Ok(txid)
@@ -300,7 +300,7 @@ fn run(
                         let redeem_script = match script_variant.0 {
                             lwk_common::Singlesig::Wpkh => None,
                             lwk_common::Singlesig::ShWpkh => {
-                                let pub_key = priv_key.public_key(&SECP256K1);
+                                let pub_key = priv_key.public_key(SECP256K1);
                                 Some(sideswap_common::pset::p2shwpkh_redeem_script(&pub_key))
                             }
                         };

@@ -104,11 +104,11 @@ impl Error {
     }
 }
 
-impl Into<api::Error> for Error {
-    fn into(self) -> api::Error {
+impl From<Error> for api::Error {
+    fn from(val: Error) -> Self {
         api::Error {
-            text: self.to_string(),
-            code: self.error_code(),
+            text: val.to_string(),
+            code: val.error_code(),
             details: None,
         }
     }

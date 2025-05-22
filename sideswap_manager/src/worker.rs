@@ -568,7 +568,7 @@ async fn get_quote(data: &mut Data, req: api::GetQuoteReq) -> Result<api::GetQuo
 
     // TODO: Reuse addresses
     let receive_address = req.receive_address;
-    let change_address = get_new_address(&data, true, None).await?.address;
+    let change_address = get_new_address(data, true, None).await?.address;
 
     let utxos = data
         .utxo_data

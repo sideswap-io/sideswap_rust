@@ -321,9 +321,9 @@ fn get_price_taker(
 
     let base_amount_taker = asset_float_amount_(base_amount_taker, base.precision);
     let quote_amount_taker = asset_float_amount_(quote_amount_taker, quote.precision);
-    let price_taker = quote_amount_taker / base_amount_taker;
+    
 
-    price_taker
+    quote_amount_taker / base_amount_taker
 }
 
 struct GetSendRecvAmount {
@@ -433,7 +433,7 @@ fn try_get_wallet_key_software(
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("xprivs are not set"))?;
 
-    let public_key = xprivs.register_priv.public_key(&SECP256K1);
+    let public_key = xprivs.register_priv.public_key(SECP256K1);
     let message_hash = bitcoin::sign_message::signed_msg_hash(&message);
     let message = bitcoin::secp256k1::Message::from_digest(message_hash.to_byte_array());
     let signature = SECP256K1
@@ -949,7 +949,7 @@ fn process_ws_quote(worker: &mut super::Data, notif: mkt::QuoteNotif) {
                 worker.market.received_quotes.insert(
                     quote_id,
                     ReceivedQuote {
-                        started_quote: Arc::clone(&started_quote),
+                        started_quote: Arc::clone(started_quote),
                         base_amount,
                         quote_amount,
                         server_fee,
@@ -1079,7 +1079,7 @@ pub fn try_sign_pset_software(
                 if let Some((input_index, pset_input)) = input {
                     let priv_key = derive_priv_key(xprivs, utxo);
 
-                    pset_input.final_script_sig = get_script_sig(&utxo);
+                    pset_input.final_script_sig = get_script_sig(utxo);
 
                     pset_input.final_script_witness = Some(get_witness(
                         &mut sighash_cache,
@@ -1220,7 +1220,7 @@ pub fn try_sign_pset_jade(
         };
 
         let trusted_commitment = if let Some(shared_secret) = shared_secret {
-            let tx_sec = unblind(&tx_output, shared_secret)
+            let tx_sec = unblind(tx_output, shared_secret)
                 .map_err(|err| anyhow!("unblinding output failed: {err}, index: {index}"))?;
 
             let output_blinding_pk = pset_output
@@ -1715,7 +1715,7 @@ fn try_create_funding_tx(
         None
     };
 
-    let wallet_type = if worker.amp_assets.contains(&asset_id) {
+    let wallet_type = if worker.amp_assets.contains(asset_id) {
         WalletType::AMP
     } else {
         WalletType::Native
@@ -2969,8 +2969,8 @@ pub fn charts_unsubscribe(worker: &mut super::Data, _msg: proto::Empty) {
 pub fn load_history(worker: &mut super::Data, msg: proto::to::LoadHistory) {
     worker.make_async_request(
         api::Request::Market(Request::LoadHistory(mkt::LoadHistoryRequest {
-            start_time: msg.start_time.map(|value| TimestampMs::from_millis(value)),
-            end_time: msg.end_time.map(|value| TimestampMs::from_millis(value)),
+            start_time: msg.start_time.map(TimestampMs::from_millis),
+            end_time: msg.end_time.map(TimestampMs::from_millis),
             skip: msg.skip.map(|value| value as usize),
             count: msg.count.map(|value| value as usize),
         })),

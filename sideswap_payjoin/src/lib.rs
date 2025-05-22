@@ -273,7 +273,7 @@ pub fn create_payjoin(
         pset,
         blinding_nonces: get_blinding_nonces(&blinded_outputs),
         asset_fee: server_fee,
-        network_fee: network_fee,
+        network_fee,
     })
 }
 

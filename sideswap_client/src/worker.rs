@@ -983,7 +983,7 @@ impl Data {
         let res = match self.try_process_pegout_amount(req) {
             Ok(amounts) => proto::from::peg_out_amount::Result::Amounts(amounts),
             Err(err) => {
-                error!("peg-out amount failed: {}", err.to_string());
+                error!("peg-out amount failed: {}", err);
                 proto::from::peg_out_amount::Result::ErrorMsg(err.to_string())
             }
         };
@@ -1080,7 +1080,7 @@ impl Data {
                 wallet_data.active_extern_peg = Some(ActivePeg { order_id });
             }
             Err(e) => {
-                error!("starting peg-out failed: {}", e.to_string());
+                error!("starting peg-out failed: {}", e);
                 self.ui.send(proto::from::Msg::SwapFailed(e.to_string()));
             }
         }
@@ -1137,7 +1137,7 @@ impl Data {
                 self.ui.send(proto::from::Msg::PeginWaitTx(v));
             }
             Err(e) => {
-                error!("starting peg-in failed: {}", e.to_string());
+                error!("starting peg-in failed: {}", e);
                 self.ui.send(proto::from::Msg::SwapFailed(e.to_string()));
             }
         }
@@ -1652,7 +1652,7 @@ impl Data {
             .iter()
             .filter_map(|res_receiver| res_receiver.recv().expect("channel must be open").ok())
             .filter_map(|tx_list| tx_list.list.into_iter().find(|tx| tx.txid == txid))
-            .flat_map(|tx| tx.inputs.into_iter().chain(tx.outputs.into_iter()))
+            .flat_map(|tx| tx.inputs.into_iter().chain(tx.outputs))
             .flat_map(|in_out| {
                 [
                     in_out.unblinded.value.to_string(),
@@ -1746,7 +1746,7 @@ impl Data {
             }
 
             LoginData::Jade { jade } => {
-                utils::unlock_hw(self.env, &jade)?;
+                utils::unlock_hw(self.env, jade)?;
 
                 let jade_data = JadeData {
                     env: self.env,
@@ -1789,7 +1789,7 @@ impl Data {
 
                 let amp_user_xpub = jade_data.resolve_xpub(network, &amp_user_path)?;
 
-                let master_blinding_key = amp_wallet.master_blinding_key().clone().into();
+                let master_blinding_key = (*amp_wallet.master_blinding_key()).into();
 
                 let master_xpub_fingerprint = root_xpub.fingerprint();
 
@@ -1955,7 +1955,7 @@ impl Data {
                             .expect("must not fail")
                     })
                     .unwrap_or_else(|| {
-                        EventProofs::new(self.env, register_priv.public_key(&SECP256K1))
+                        EventProofs::new(self.env, register_priv.public_key(SECP256K1))
                     });
 
                 market_worker::set_xprivs(
@@ -2973,8 +2973,7 @@ impl Data {
     ) {
         let assets = asset_pairs
             .into_iter()
-            .map(|asset_pair| [&asset_pair.base, &asset_pair.quote])
-            .flatten();
+            .flat_map(|asset_pair| [&asset_pair.base, &asset_pair.quote]);
         self.add_missing_gdk_assets(assets);
     }
 
@@ -3108,7 +3107,7 @@ impl Data {
                 }),
                 move |_data, res| {
                     if let Err(e) = res {
-                        error!("updating push token failed: {}", e.to_string());
+                        error!("updating push token failed: {}", e);
                     }
                 },
             );
