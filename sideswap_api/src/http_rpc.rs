@@ -41,8 +41,8 @@ pub struct SwapSignResponse {
 #[serde(tag = "method", content = "params")]
 #[serde(rename_all = "snake_case")]
 pub enum Request {
-    SwapStart(SwapStartRequest),
-    SwapSign(SwapSignRequest),
+    SwapStart(Box<SwapStartRequest>),
+    SwapSign(Box<SwapSignRequest>),
 }
 
 #[derive(Serialize, Deserialize)]

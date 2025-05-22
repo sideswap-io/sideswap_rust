@@ -32,9 +32,7 @@ pub struct KnownAssetIds {
 
 impl KnownAssetIds {
     pub fn all_assets(&self) -> impl Iterator<Item = elements::AssetId> {
-        [self.USDt, self.EURx, self.DePix, self.MEX, self.SSWP]
-            .into_iter()
-            .map(|asset| asset)
+        [self.USDt, self.EURx, self.DePix, self.MEX, self.SSWP].into_iter()
     }
 }
 

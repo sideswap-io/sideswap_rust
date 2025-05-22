@@ -224,7 +224,7 @@ struct AcceptQuoteResp {
 #[derive(Debug, thiserror::Error)]
 enum Error {
     #[error("WS request error: {0}")]
-    WsRequestError(#[from] ws_req_sender::Error),
+    WsRequest(#[from] ws_req_sender::Error),
     #[error("Unexpected response, expected: {0}")]
     UnexpectedResponse(&'static str),
     #[error("Server connection is down")]
@@ -240,7 +240,7 @@ enum Error {
     #[error("No gaid")]
     NoGaid,
     #[error("Wallet error: {0}")]
-    WalletError(anyhow::Error),
+    Wallet(anyhow::Error),
     #[error("Unknown order id")]
     UnknownOrderId,
     #[error("Unknown asset id: {0}")]
@@ -259,10 +259,10 @@ impl Error {
     fn code(&self) -> api::ErrorCode {
         match self {
             Error::ChannelClosed
-            | Error::WsRequestError(_)
+            | Error::WsRequest(_)
             | Error::UnexpectedResponse(_)
             | Error::NoGaid
-            | Error::WalletError(_)
+            | Error::Wallet(_)
             | Error::ServerDisconnected => api::ErrorCode::ServerError,
             Error::UnknownTicker(_)
             | Error::InvalidFloat(_)
@@ -277,10 +277,10 @@ impl Error {
     fn details(&self) -> Option<api::ErrorDetails> {
         match self {
             Error::ChannelClosed
-            | Error::WsRequestError(_)
+            | Error::WsRequest(_)
             | Error::UnexpectedResponse(_)
             | Error::NoGaid
-            | Error::WalletError(_)
+            | Error::Wallet(_)
             | Error::ServerDisconnected
             | Error::UnknownTicker(_)
             | Error::InvalidFloat(_)
@@ -613,7 +613,7 @@ fn ws_callback(data: &mut Data, req: mkt::Request, callback: WsCallback) {
     if !data.ws.connected() {
         callback(
             data,
-            Err(Error::WsRequestError(ws_req_sender::Error::Disconnected)),
+            Err(Error::WsRequest(ws_req_sender::Error::Disconnected)),
         );
         return;
     }
@@ -758,7 +758,7 @@ fn process_ws_disconnected(data: &mut Data) {
     for request in async_requests.into_values() {
         request(
             data,
-            Err(Error::WsRequestError(ws_req_sender::Error::Disconnected)),
+            Err(Error::WsRequest(ws_req_sender::Error::Disconnected)),
         );
     }
 }
@@ -1120,10 +1120,8 @@ async fn process_ws_event(data: &mut Data, event: WrappedResponse) {
             if let Some(callback) = ws_callback {
                 let res = match res {
                     Ok(sideswap_api::Response::Market(resp)) => Ok(resp),
-                    Ok(_) => Err(Error::WsRequestError(
-                        ws_req_sender::Error::UnexpectedResponse,
-                    )),
-                    Err(err) => Err(Error::WsRequestError(ws_req_sender::Error::BackendError(
+                    Ok(_) => Err(Error::WsRequest(ws_req_sender::Error::UnexpectedResponse)),
+                    Err(err) => Err(Error::WsRequest(ws_req_sender::Error::BackendError(
                         err.message,
                         err.code,
                     ))),
@@ -1358,7 +1356,7 @@ async fn new_address(
         change,
         res_sender: res_sender.into(),
     });
-    let address = res_receiver.await?.map_err(Error::WalletError)?;
+    let address = res_receiver.await?.map_err(Error::Wallet)?;
     Ok(address)
 }
 
@@ -1502,7 +1500,7 @@ async fn process_client_command(data: &mut Data, command: ClientCommand) {
                             })
                         }
                         Ok(_) => Err(Error::UnexpectedResponse("LoadHistory")),
-                        Err(err) => Err(Error::WsRequestError(err)),
+                        Err(err) => Err(Error::WsRequest(err)),
                     };
                     res_sender.send(res);
                 }),
@@ -1525,7 +1523,7 @@ async fn process_client_command(data: &mut Data, command: ClientCommand) {
                             Ok(resp.address.clone())
                         }
                         Ok(_) => Err(Error::UnexpectedResponse("ResolveGaid")),
-                        Err(err) => Err(Error::WsRequestError(err)),
+                        Err(err) => Err(Error::WsRequest(err)),
                     };
                     res_sender.send(res);
                 }),
@@ -1577,7 +1575,7 @@ async fn process_client_command(data: &mut Data, command: ClientCommand) {
                             Ok(order)
                         }
                         Ok(_) => Err(Error::UnexpectedResponse("AddOrder")),
-                        Err(err) => Err(Error::WsRequestError(err)),
+                        Err(err) => Err(Error::WsRequest(err)),
                     };
                     res_sender.send(res);
                 }),
@@ -1613,7 +1611,7 @@ async fn process_client_command(data: &mut Data, command: ClientCommand) {
                             Ok(order)
                         }
                         Ok(_) => Err(Error::UnexpectedResponse("EditOrder")),
-                        Err(err) => Err(Error::WsRequestError(err)),
+                        Err(err) => Err(Error::WsRequest(err)),
                     };
                     res_sender.send(res);
                 }),
@@ -1636,7 +1634,7 @@ async fn process_client_command(data: &mut Data, command: ClientCommand) {
                             Ok(())
                         }
                         Ok(_) => Err(Error::UnexpectedResponse("CancelOrder")),
-                        Err(err) => Err(Error::WsRequestError(err)),
+                        Err(err) => Err(Error::WsRequest(err)),
                     };
                     res_sender.send(res);
                 }),

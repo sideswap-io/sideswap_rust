@@ -21,7 +21,7 @@ pub fn vsize_to_fee(vsize: usize, fee_rate: f64) -> u64 {
 }
 
 pub fn weight_to_vsize(weight: usize) -> usize {
-    (weight + 3) / 4
+    weight.div_ceil(4)
 }
 
 pub fn weight_to_fee(weight: usize, fee_rate: f64) -> u64 {
@@ -544,14 +544,14 @@ fn try_select(args: Args) -> Result<Res, Error> {
 
     let inputs = asset_inputs
         .into_iter()
-        .chain(bitcoin_inputs.into_iter())
+        .chain(bitcoin_inputs)
         .collect::<Vec<_>>();
 
     let updated_recipients = updated_recipients(recipients, network_fee, deduct_fee)?;
 
     let change = asset_change
         .into_iter()
-        .chain(bitcoin_change.into_iter())
+        .chain(bitcoin_change)
         .collect::<Vec<_>>();
 
     Ok(Res {

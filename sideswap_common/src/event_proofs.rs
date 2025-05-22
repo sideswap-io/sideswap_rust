@@ -68,7 +68,7 @@ fn append_event(last_hash: &HashArray, event: EventHash) -> HashArray {
 
 impl EventProofs {
     pub fn new(env: Env, public_key: secp256k1::PublicKey) -> EventProofs {
-        let last_hash = hash_str(&env.d().name);
+        let last_hash = hash_str(env.d().name);
         EventProofs {
             last_hash,
             pending_orders: VecDeque::new(),
@@ -155,7 +155,7 @@ impl EventProofs {
             } => {
                 let order = self
                     .active_orders
-                    .get_mut(&order_id)
+                    .get_mut(order_id)
                     .ok_or_else(|| anyhow!("can't find order {order_id}"))?;
                 if let Some(base_amount) = base_amount {
                     order.base_amount = *base_amount;
@@ -199,7 +199,7 @@ impl EventProofs {
                     .pending_orders
                     .pop_front()
                     .ok_or_else(|| anyhow!("can't find pending order {order_id}"))?;
-                ensure!(!self.active_orders.contains_key(&order_id));
+                ensure!(!self.active_orders.contains_key(order_id));
                 order.created_at = *created_at;
                 self.active_orders.insert(*order_id, order);
             }
@@ -210,7 +210,7 @@ impl EventProofs {
             } => {
                 let order = self
                     .active_orders
-                    .get_mut(&order_id)
+                    .get_mut(order_id)
                     .ok_or_else(|| anyhow!("can't find order {order_id}"))?;
                 order.created_at = *updated_at;
             }
@@ -218,7 +218,7 @@ impl EventProofs {
             ServerEvent::OrderRemoved { order_id } => {
                 let _order = self
                     .active_orders
-                    .remove(&order_id)
+                    .remove(order_id)
                     .ok_or_else(|| anyhow!("can't find order {order_id}"))?;
             }
 
@@ -232,7 +232,7 @@ impl EventProofs {
                 txid: _,
             } => {
                 // The order can be already removed
-                if let Some(order) = self.active_orders.get_mut(&order_id) {
+                if let Some(order) = self.active_orders.get_mut(order_id) {
                     order.base_amount = order.base_amount.saturating_sub(*base_amount);
                 }
             }

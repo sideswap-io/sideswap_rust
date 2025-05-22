@@ -273,8 +273,7 @@ fn get_checksum(points: &[PricePoint]) -> u32 {
         .collect::<Vec<_>>();
     bids.sort_by(|a, b| b.price.total_cmp(&a.price));
     asks.sort_by(|a, b| a.price.total_cmp(&b.price));
-    let mut list = Vec::<u8>::new();
-    list.reserve(2000);
+    let mut list = Vec::<u8>::with_capacity(2000);
     for index in 0..COUNT {
         let mut try_append = |bids_asks: &[&PricePoint]| {
             if let Some(point) = bids_asks.get(index) {

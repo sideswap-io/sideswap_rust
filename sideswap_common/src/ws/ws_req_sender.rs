@@ -203,12 +203,14 @@ impl WsReqSender {
 
             WrappedResponse::Response(resp) => match resp {
                 sideswap_api::ResponseMessage::Response(Some(request_id), res) => {
-                    self.callbacks.remove(request_id).map(|callback| match res {
-                        Ok(resp) => callback(Ok(resp)),
-                        Err(err) => {
-                            callback(Err(Error::BackendError(err.message.clone(), err.code)))
+                    if let Some(callback) = self.callbacks.remove(request_id) {
+                        match res {
+                            Ok(resp) => callback(Ok(resp)),
+                            Err(err) => {
+                                callback(Err(Error::BackendError(err.message.clone(), err.code)))
+                            }
                         }
-                    });
+                    }
                 }
                 sideswap_api::ResponseMessage::Response(None, _) => {}
                 sideswap_api::ResponseMessage::Notification(_) => {}

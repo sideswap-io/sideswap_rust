@@ -28,13 +28,11 @@ pub async fn get_price(
         )
         .await?;
 
-    let resp = match resp {
+    let sideswap_api::market::MarketDetailsResponse { ind_price } = match resp {
         sideswap_api::market::Response::MarketDetails(resp) => resp,
     };
 
-    let ind_price = resp
-        .ind_price
-        .ok_or_else(|| anyhow!("index price is not available"))?;
+    let ind_price = ind_price.ok_or_else(|| anyhow!("index price is not available"))?;
 
     Ok(PricePair {
         bid: ind_price.value(),

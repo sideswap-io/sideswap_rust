@@ -13,10 +13,10 @@ pub enum MarketType {
     ExchangeMarket,
 }
 
-impl ToString for MarketType {
-    fn to_string(&self) -> String {
+impl MarketType {
+    pub fn name(&self) -> &'static str {
         match self {
-            MarketType::ExchangeMarket => "EXCHANGE MARKET".to_owned(),
+            MarketType::ExchangeMarket => "EXCHANGE MARKET",
         }
     }
 }
@@ -110,7 +110,7 @@ async fn order_submit_with_retry(
 
         let submit_res = bf_api
             .make_request(bitfinex_api::submit::SubmitRequest {
-                type_: req.market_type.to_string(),
+                type_: req.market_type.name().to_owned(),
                 cid: req.cid,
                 symbol: req.symbol.clone(),
                 amount: req.amount.to_string(),

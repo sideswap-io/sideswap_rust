@@ -28,7 +28,7 @@ pub async fn get_price(client: &HttpClient, market: &Market) -> Result<PricePair
         .ok_or_else(|| anyhow!("unexpected response"))?;
 
     let bid = resp
-        .get(0)
+        .first()
         .ok_or_else(|| anyhow!("no bid value"))?
         .as_f64()
         .ok_or_else(|| anyhow!("f64 expected in bid"))?;

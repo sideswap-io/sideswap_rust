@@ -453,15 +453,13 @@ impl ManagedJade {
 
 impl JadeMng {
     pub fn new(status_callback: JadeStatusCallback) -> Self {
-        let mut transports = Vec::<Arc<dyn Transport>>::new();
-
-        #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
-        transports.push(Arc::new(transports::serial::SerialTransport::new()));
-
-        #[cfg(any(target_os = "android", target_os = "ios"))]
-        transports.push(Arc::new(transports::ble::BleTransport::new()));
-
-        transports.push(Arc::new(transports::tcp::TcpTransport::new()));
+        let transports: Vec<Arc<dyn Transport>> = vec![
+            #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+            Arc::new(transports::serial::SerialTransport::new()),
+            #[cfg(any(target_os = "android", target_os = "ios"))]
+            Arc::new(transports::ble::BleTransport::new()),
+            Arc::new(transports::tcp::TcpTransport::new()),
+        ];
 
         JadeMng {
             transports,

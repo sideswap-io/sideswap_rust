@@ -42,7 +42,7 @@ pub fn parse_balances(balances: &BalanceMap, policy_asset: &AssetId) -> ParsedBa
             let asset_id = if name == "bitcoin" {
                 *policy_asset
             } else {
-                AssetId::from_str(&name).expect("must be valid")
+                AssetId::from_str(name).expect("must be valid")
             };
             let value: u64 = Amount::from_rpc(balance)
                 .0

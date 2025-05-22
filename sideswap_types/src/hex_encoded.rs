@@ -11,8 +11,10 @@ impl<T> HexEncoded<T> {
     pub fn into_inner(self) -> T {
         self.0
     }
+}
 
-    pub fn as_ref(&self) -> &T {
+impl<T> AsRef<T> for HexEncoded<T> {
+    fn as_ref(&self) -> &T {
         &self.0
     }
 }

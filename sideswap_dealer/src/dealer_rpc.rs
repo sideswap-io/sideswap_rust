@@ -523,7 +523,7 @@ async fn process_timer(data: &mut Data) {
     }
 
     for order in data.orders.values() {
-        if data.taken_orders.get(&order.order_id).is_some() {
+        if data.taken_orders.contains(&order.order_id) {
             continue;
         }
 

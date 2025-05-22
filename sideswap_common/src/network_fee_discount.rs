@@ -10,7 +10,7 @@ pub const WEIGHT_VOUT_NATIVE: usize = 266;
 pub const WEIGHT_VOUT_NESTED: usize = 270;
 
 pub fn weight_to_vsize(weight: usize) -> usize {
-    (weight + 3) / 4
+    weight.div_ceil(4)
 }
 
 pub fn vsize_to_fee(vsize: usize, fee_rate: f64) -> u64 {

@@ -7,7 +7,7 @@ pub const WEIGHT_VOUT: usize = 4810;
 pub const WEIGHT_FEE: usize = 178;
 
 pub fn weight_to_network_fee(weight: usize) -> u64 {
-    let vsize = (weight + 3) / 4;
+    let vsize = weight.div_ceil(4);
     (vsize as f64 * FEE_RATE).ceil() as u64
 }
 

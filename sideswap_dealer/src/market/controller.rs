@@ -162,7 +162,7 @@ impl Controller {
         self.make_request(ClientCommand::NewAddress {
             res_sender: res_sender.into(),
         })?;
-        let address = res_receiver.await?.map_err(Error::WalletError)?;
+        let address = res_receiver.await?.map_err(Error::Wallet)?;
         Ok(address)
     }
 
@@ -383,7 +383,7 @@ impl Controller {
             },
             res_sender: res_sender.into(),
         })?;
-        let super::SendAssetResp { txid } = res_receiver.await?.map_err(Error::WalletError)?;
+        let super::SendAssetResp { txid } = res_receiver.await?.map_err(Error::Wallet)?;
         Ok(txid)
     }
 }

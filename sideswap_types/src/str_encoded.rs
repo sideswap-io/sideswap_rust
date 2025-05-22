@@ -9,8 +9,10 @@ impl<T> StrEncoded<T> {
     pub fn into_inner(self) -> T {
         self.0
     }
+}
 
-    pub fn as_ref(&self) -> &T {
+impl<T> AsRef<T> for StrEncoded<T> {
+    fn as_ref(&self) -> &T {
         &self.0
     }
 }
