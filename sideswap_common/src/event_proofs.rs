@@ -21,12 +21,6 @@ enum EventHash<'a> {
     Server { event: &'a ServerEvent },
 }
 
-#[derive(Debug, Copy, Clone)]
-pub enum Host {
-    Server,
-    Client,
-}
-
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Order {
     pub asset_pair: AssetPair,
@@ -96,15 +90,7 @@ impl EventProofs {
         &self,
         event: &mkt::ClientEvent,
         signature: &str,
-        host: Host,
     ) -> Result<HashArray, anyhow::Error> {
-        log::debug!(
-            "verify_client_signature, last_hash: {:?}, count: {}, event: {:?}, host: {:?}",
-            self.last_hash,
-            self.count,
-            event,
-            host,
-        );
         let last_hash = append_event(&self.last_hash, EventHash::Client { event });
 
         let msg = secp256k1::Message::from_digest(last_hash);
@@ -121,9 +107,8 @@ impl EventProofs {
         &mut self,
         event: mkt::ClientEvent,
         signature: &str,
-        host: Host,
     ) -> Result<(), anyhow::Error> {
-        let last_hash = self.verify_client_signature(&event, signature, host)?;
+        let last_hash = self.verify_client_signature(&event, signature)?;
 
         match &event {
             ClientEvent::AddOrder {
@@ -201,22 +186,10 @@ impl EventProofs {
         self.last_hash = last_hash;
         self.count += 1;
 
-        log::debug!(
-            "add_client_event, last_hash: {:?}, count: {}, event: {:?}, host: {:?}",
-            self.last_hash,
-            self.count,
-            event,
-            host,
-        );
-
         Ok(())
     }
 
-    pub fn add_server_event(
-        &mut self,
-        event: mkt::ServerEvent,
-        host: Host,
-    ) -> Result<(), anyhow::Error> {
+    pub fn add_server_event(&mut self, event: mkt::ServerEvent) -> Result<(), anyhow::Error> {
         match &event {
             ServerEvent::OrderCreated {
                 order_id,
@@ -268,27 +241,15 @@ impl EventProofs {
         self.last_hash = append_event(&self.last_hash, EventHash::Server { event: &event });
         self.count += 1;
 
-        log::debug!(
-            "add_server_event, last_hash: {:?}, count: {}, event: {:?}, host: {:?}",
-            self.last_hash,
-            self.count,
-            event,
-            host,
-        );
-
         Ok(())
     }
 
-    pub fn add_event(
-        &mut self,
-        event: mkt::EventWithSignature,
-        host: Host,
-    ) -> Result<(), anyhow::Error> {
+    pub fn add_event(&mut self, event: mkt::EventWithSignature) -> Result<(), anyhow::Error> {
         match event {
             mkt::EventWithSignature::Client { event, signature } => {
-                self.add_client_event(event, &signature, host)
+                self.add_client_event(event, &signature)
             }
-            mkt::EventWithSignature::Server { event } => self.add_server_event(event, host),
+            mkt::EventWithSignature::Server { event } => self.add_server_event(event),
         }
     }
 

@@ -637,10 +637,7 @@ fn ws_login(worker: &mut super::Data) {
 
                         if let Some(xprivs) = worker.market.xprivs.as_mut() {
                             for event in resp.new_events {
-                                xprivs
-                                    .event_proofs
-                                    .add_event(event, sideswap_common::event_proofs::Host::Client)
-                                    .expect("must not fail");
+                                xprivs.event_proofs.add_event(event).expect("must not fail");
                             }
                         }
 
@@ -1558,7 +1555,7 @@ fn process_ws_new_event(worker: &mut super::Data, notif: mkt::NewEventNotif) {
 
         xprivs
             .event_proofs
-            .add_event(notif.event, sideswap_common::event_proofs::Host::Client)
+            .add_event(notif.event)
             .expect("must not fail");
 
         let json = serde_json::to_value(&xprivs.event_proofs).expect("must not fail");
