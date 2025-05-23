@@ -120,7 +120,8 @@ const BITFINEX_METHOD_LBTC: &str = "LBT";
 const BITFINEX_STATUS_COMPLETED: &str = "COMPLETED";
 
 const MIN_BALANCE_BITCOIN: f64 = 0.05;
-const MIN_BALANCE_TETHER: f64 = 2500.;
+const MIN_BALANCE_USDT: f64 = 2500.;
+const MIN_BALANCE_EURX: f64 = 20000.;
 
 const BF_RESERVE: f64 = 0.99;
 
@@ -692,8 +693,9 @@ async fn process_timer(data: &mut Data) {
         (data.bfx_prices.len() != ExchangePair::ALL.len()).then_some("PriceExpired"),
         (balance_wallet_bitcoin < MIN_BALANCE_BITCOIN).then_some("WalletBitcoinLow"),
         (balance_exchange_bitcoin < MIN_BALANCE_BITCOIN).then_some("ExchangeBitcoinLow"),
-        (balance_wallet_usdt < MIN_BALANCE_TETHER).then_some("WalletTetherLow"),
-        (balance_exchange_usdt < MIN_BALANCE_TETHER).then_some("ExchangeTetherLow"),
+        (balance_wallet_usdt < MIN_BALANCE_USDT).then_some("WalletTetherLow"),
+        (balance_exchange_usdt < MIN_BALANCE_USDT).then_some("ExchangeTetherLow"),
+        (balance_wallet_eurx < MIN_BALANCE_EURX).then_some("WalletEurxLow"),
         balancing_expired.then_some("BalancingStuck"),
         (data.failed_orders_count != 0).then_some("FailedOrderSubmit"),
         (data.external_prices.len() != 3).then_some("ExternalPrices"),
