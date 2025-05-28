@@ -285,7 +285,6 @@ fn submit_order(
         trade_dir: trade_dir.into(),
         ttl_seconds: Some(60),
         two_step,
-        tx_chaining_allowed: Some(true),
         private,
     }));
 

@@ -329,7 +329,6 @@ message To {
     required TradeDir trade_dir = 4;
     optional uint64 ttl_seconds = 5;
     required bool two_step = 6;
-    optional bool tx_chaining_allowed = 7;
     required bool private = 8;
   }
 
