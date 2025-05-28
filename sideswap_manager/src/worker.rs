@@ -750,16 +750,18 @@ async fn accept_quote(
 
     let pset = encode_pset(&quote.pset);
 
-    new_monitored_tx(
-        &data.db,
-        &mut data.monitored_txs,
-        MonitoredTx {
-            txid: Text(quote.txid),
-            description: Some(quote.note.clone()),
-            user_note: req.user_note,
-        },
-    )
-    .await;
+    if !data.monitored_txs.contains_key(&quote.txid) {
+        new_monitored_tx(
+            &data.db,
+            &mut data.monitored_txs,
+            MonitoredTx {
+                txid: Text(quote.txid),
+                description: Some(quote.note.clone()),
+                user_note: req.user_note,
+            },
+        )
+        .await;
+    }
 
     let accept_resp = make_market_request!(
         data.ws,
