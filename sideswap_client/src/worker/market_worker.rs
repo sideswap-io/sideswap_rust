@@ -321,7 +321,6 @@ fn get_price_taker(
 
     let base_amount_taker = asset_float_amount_(base_amount_taker, base.precision);
     let quote_amount_taker = asset_float_amount_(quote_amount_taker, quote.precision);
-    
 
     quote_amount_taker / base_amount_taker
 }
@@ -1565,10 +1564,10 @@ fn process_ws_new_event(worker: &mut super::Data, notif: mkt::NewEventNotif) {
 }
 
 pub fn process_ws_tx_broadcast(worker: &mut super::Data, notif: mkt::TxBroadcastNotif) {
-    for account_id in [Account::Reg, Account::Amp] {
+    for account in [Account::Reg, Account::Amp] {
         let tx = notif.tx.clone();
         wallet::callback(
-            account_id,
+            account,
             worker,
             move |ses| ses.broadcast_tx(&tx),
             |_data, res| match res {

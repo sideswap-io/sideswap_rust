@@ -54,6 +54,7 @@ enum Command {
         Vec<String>,
         ResSender<PartiallySignedTransaction>,
     ),
+    CheckConnection(ResSender<()>),
 }
 
 impl Signer for JadeData {
@@ -121,6 +122,13 @@ impl GdkSesAmp {
             blinding_nonces,
             res_sender.into(),
         ))?;
+        res_receiver.blocking_recv()?
+    }
+
+    pub fn check_connection(&self) -> Result<(), anyhow::Error> {
+        let (res_sender, res_receiver) = oneshot::channel();
+        self.command_sender
+            .send(Command::CheckConnection(res_sender.into()))?;
         res_receiver.blocking_recv()?
     }
 }
@@ -372,6 +380,12 @@ async fn green_backend_sign(
     Ok(pset)
 }
 
+async fn check_connection(wallet: &WalletOpt) -> Result<(), anyhow::Error> {
+    let wallet = get_wallet(wallet)?;
+    wallet.check_connection().await?;
+    Ok(())
+}
+
 async fn connect(
     login_info: gdk_ses::LoginInfo,
     event_callback: sideswap_amp::EventCallback,
@@ -471,24 +485,24 @@ fn process_reconnect_result(data: &mut Data, res: ConnectRes) {
 
 async fn process_command(data: &mut Data, command: Command) {
     match command {
-        Command::GetTransactions(opts, res_sender) => {
+        Command::GetTransactions(opts, sender) => {
             let res = get_transactions(data, opts).await;
-            res_sender.send(res);
+            sender.send(res);
         }
 
-        Command::GetAddress(res_sender) => {
+        Command::GetAddress(sender) => {
             let wallet = data.wallet.clone();
             tokio::spawn(async move {
                 let res = get_recv_address(&wallet).await;
-                res_sender.send(res);
+                sender.send(res);
             });
         }
 
-        Command::GetUtxos(res_sender) => {
+        Command::GetUtxos(sender) => {
             let wallet = data.wallet.clone();
             tokio::spawn(async move {
                 let res = get_utxos(&wallet).await;
-                res_sender.send(res);
+                sender.send(res);
             });
         }
 
@@ -500,17 +514,25 @@ async fn process_command(data: &mut Data, command: Command) {
             });
         }
 
-        Command::BroadcastTx(tx, res_sender) => {
+        Command::BroadcastTx(tx, sender) => {
             let wallet = data.wallet.clone();
             tokio::spawn(async move {
                 let res = broadcast_tx(&wallet, tx).await;
-                res_sender.send(res);
+                sender.send(res);
             });
         }
 
-        Command::GreenBackendSign(pset, blinding_nonces, res_sender) => {
+        Command::GreenBackendSign(pset, blinding_nonces, sender) => {
             let res = green_backend_sign(data, pset, blinding_nonces).await;
-            res_sender.send(res);
+            sender.send(res);
+        }
+
+        Command::CheckConnection(sender) => {
+            let wallet = data.wallet.clone();
+            tokio::spawn(async move {
+                let res = check_connection(&wallet).await;
+                sender.send(res);
+            });
         }
     }
 }

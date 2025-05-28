@@ -201,6 +201,9 @@ enum Command {
         credentials: Credentials,
         res_sender: ResSender<()>,
     },
+    CheckConnection {
+        res_sender: ResSender<()>,
+    },
 }
 
 fn to_value<T: serde::Serialize>(value: &T) -> rmpv::Value {
@@ -745,6 +748,14 @@ impl Wallet {
             network_fee: utxo_select.network_fee,
         })
     }
+
+    pub async fn check_connection(&self) -> Result<(), Error> {
+        let (res_sender, res_receiver) = oneshot::channel();
+        self.command_sender.send(Command::CheckConnection {
+            res_sender: res_sender.into(),
+        })?;
+        res_receiver.await?
+    }
 }
 
 // If the callback returns an error, the wallet connection is restarted
@@ -948,8 +959,6 @@ pub fn derive_prevout_script(
         .expect("should not fail")
         .to_pub();
 
-    
-
     elements::script::Builder::new()
         .push_opcode(elements::opcodes::all::OP_PUSHNUM_2)
         .push_slice(&pub_key_green.to_bytes())
@@ -986,7 +995,7 @@ fn get_address(
         Some(master_blinding_key) => {
             let blinder = master_blinding_key
                 .blinding_key(SECP256K1, &unconfidential_address.script_pubkey());
-            
+
             unconfidential_address.to_confidential(blinder)
         }
         None => unconfidential_address,
@@ -1248,16 +1257,28 @@ async fn get_wamp_msg(connection: &mut Connection) -> Result<Msg, Error> {
     }
 }
 
+#[derive(Copy, Clone)]
+enum RequestTimeout {
+    Default,
+    Short,
+}
+
 async fn make_request(
     data: &mut Data,
     procedure: &str,
     args: WampArgs,
     callback: Callback,
+    timeout: RequestTimeout,
 ) -> Result<(), Error> {
     let request = WampId::generate();
 
     let mut options = WampDict::new();
     options.insert("timeout".to_owned(), Arg::Integer(30000));
+
+    let timeout = match timeout {
+        RequestTimeout::Default => Duration::from_secs(60),
+        RequestTimeout::Short => Duration::from_secs(5),
+    };
 
     send(
         &mut data.connection,
@@ -1274,7 +1295,7 @@ async fn make_request(
         request,
         PendingRequest {
             callback,
-            expires_at: Instant::now() + Duration::from_secs(60),
+            expires_at: Instant::now() + timeout,
         },
     );
     assert!(old_request.is_none());
@@ -1293,6 +1314,7 @@ async fn recv_addr_request(data: &mut Data, callback: Callback) -> Result<(), Er
             addr_type.into(),
         ],
         callback,
+        RequestTimeout::Default,
     )
     .await
 }
@@ -1374,6 +1396,7 @@ async fn process_command(data: &mut Data, command: Command) -> Result<(), Error>
                     res_channel.send(res);
                     Ok(())
                 }),
+                RequestTimeout::Default,
             )
             .await
         }
@@ -1424,6 +1447,7 @@ async fn process_command(data: &mut Data, command: Command) -> Result<(), Error>
                     res_channel.send(res);
                     Ok(())
                 }),
+                RequestTimeout::Default,
             )
             .await
         }
@@ -1441,6 +1465,7 @@ async fn process_command(data: &mut Data, command: Command) -> Result<(), Error>
                     res_channel.send(res);
                     Ok(())
                 }),
+                RequestTimeout::Default,
             )
             .await
         }
@@ -1469,6 +1494,7 @@ async fn process_command(data: &mut Data, command: Command) -> Result<(), Error>
                     res_channel.send(res);
                     Ok(())
                 }),
+                RequestTimeout::Default,
             )
             .await
         }
@@ -1490,6 +1516,27 @@ async fn process_command(data: &mut Data, command: Command) -> Result<(), Error>
                     res_sender.send(res);
                     Ok(())
                 }),
+                RequestTimeout::Default,
+            )
+            .await
+        }
+
+        Command::CheckConnection { res_sender } => {
+            make_request(
+                data,
+                "com.greenaddress.addressbook.get_my_addresses",
+                vec![data.subaccount.into()],
+                Box::new(move |_data, res| match res {
+                    Ok(_resp) => {
+                        res_sender.send(Ok(()));
+                        Ok(())
+                    }
+                    Err(err) => {
+                        res_sender.send(Err(err));
+                        Err(Error::RequestTimeout)
+                    }
+                }),
+                RequestTimeout::Short,
             )
             .await
         }
@@ -2025,6 +2072,7 @@ async fn reload_wallet_utxos(data: &mut Data) -> Result<(), Error> {
             data.utxos = utxos;
             Ok(())
         }),
+        RequestTimeout::Default,
     )
     .await?;
     Ok(())
@@ -2051,6 +2099,7 @@ async fn connection_check(data: &mut Data) -> Result<(), Error> {
             log::debug!("connection check succeed");
             Ok(())
         }),
+        RequestTimeout::Default,
     )
     .await?;
     Ok(())
@@ -2100,6 +2149,7 @@ async fn send_ca_addresses(data: &mut Data) -> Result<(), Error> {
                 log::debug!("uploading {count} ca addresses succeed");
                 Ok(())
             }),
+            RequestTimeout::Default,
         )
         .await?;
     }

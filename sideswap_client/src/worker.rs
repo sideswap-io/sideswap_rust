@@ -244,7 +244,6 @@ pub struct Data {
     policy_asset: AssetId,
     active_page: proto::ActivePage,
     app_active: bool,
-    amp_active: bool,
     amp_connected: bool,
     ws_connected: bool,
     server_status: Option<api::ServerStatus>,
@@ -1144,9 +1143,8 @@ impl Data {
     }
 
     fn process_get_recv_address(&mut self, account: proto::Account) {
-        let account_id = account;
         wallet::callback(
-            account_id,
+            account,
             self,
             |ses| ses.get_receive_address(),
             move |data, res| match res {
@@ -1157,7 +1155,7 @@ impl Data {
                             addr: proto::Address {
                                 addr: addr_info.address.to_string(),
                             },
-                            account: account_id.into(),
+                            account: account.into(),
                         }));
                     wallet_data.last_recv_address = Some(addr_info);
                 }
@@ -2237,8 +2235,8 @@ impl Data {
         self.app_active = req.active;
         if req.active {
             self.check_ws_connection();
+            self.check_amp_connection();
         }
-        self.update_amp_connection();
     }
 
     fn subscribe_active_page(&mut self, subscribe: bool) {
@@ -2749,29 +2747,18 @@ impl Data {
             .unwrap();
     }
 
-    fn update_amp_connection(&mut self) {
-        let amp_active = self.app_active;
+    fn check_amp_connection(&mut self) {
+        if let Some(wallet_data) = &self.wallet_data {
+            let wallet = Arc::clone(&wallet_data.wallet_amp);
 
-        if self.amp_active == amp_active {
-            return;
+            std::thread::spawn(move || {
+                let res = wallet.check_connection();
+                match res {
+                    Ok(()) => log::debug!("AMP connection check succeed"),
+                    Err(err) => log::warn!("AMP connection check failed: {err}"),
+                }
+            });
         }
-        self.amp_active = amp_active;
-
-        // wallet::callback(
-        //     ACCOUNT_ID_AMP,
-        //     self,
-        //     move |data| {
-        //         if amp_active {
-        //             log::debug!("request AMP connect");
-        //             data.ses.connect();
-        //         } else {
-        //             log::debug!("request AMP disconnect");
-        //             data.ses.disconnect();
-        //         }
-        //         Ok(())
-        //     },
-        //     move |_data, _res| {},
-        // );
     }
 
     fn process_push_message(&mut self, req: String, _pending_sign: Option<mpsc::Sender<()>>) {
@@ -3613,7 +3600,6 @@ pub fn start_processing(
     let mut data = Data {
         app_active: true,
         active_page: proto::ActivePage::Other,
-        amp_active: true,
         amp_connected: false,
         ws_connected: false,
         server_status: None,
