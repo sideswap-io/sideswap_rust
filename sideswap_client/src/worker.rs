@@ -3620,6 +3620,7 @@ pub fn start_processing(
     assets_registry::init(&registry_path);
 
     data.load_default_assets();
+    data.process_proxy_settings(Default::default());
 
     while let Some(msg) = recv_message(&mut data, &msg_receiver) {
         let started = std::time::Instant::now();
