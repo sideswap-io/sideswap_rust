@@ -31,13 +31,6 @@ impl From<WalletType> for AddressType {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
-pub struct Address {
-    pub address: elements::Address,
-    pub pointer: u32,
-    pub is_internal: bool,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct InputOutput {
     pub unblinded: TxOutSecrets,
