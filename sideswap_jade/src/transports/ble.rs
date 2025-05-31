@@ -1,9 +1,7 @@
 use std::{
-    sync::{Arc, Mutex},
+    sync::{mpsc, Arc, Mutex},
     time::{Duration, Instant},
 };
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
-use tokio::sync::oneshot;
 
 use crate::JadeId;
 
@@ -12,20 +10,20 @@ use super::{Connection, Port, Transport, TransportType};
 const MAX_WRITE_SIZE: usize = 500;
 
 pub struct BleTransport {
-    msg_sender: tokio::sync::mpsc::UnboundedSender<Msg>,
+    msg_sender: mpsc::Sender<Msg>,
 }
 
 #[derive(Debug)]
 pub struct BleConnection {
-    msg_sender: tokio::sync::mpsc::UnboundedSender<Msg>,
+    msg_sender: mpsc::Sender<Msg>,
     jade_id: JadeId,
 }
 
 enum Msg {
-    Ports(oneshot::Sender<Result<Vec<Port>, anyhow::Error>>),
-    Open(JadeId, oneshot::Sender<Result<(), anyhow::Error>>),
-    Write(JadeId, Vec<u8>, oneshot::Sender<Result<(), anyhow::Error>>),
-    Read(JadeId, oneshot::Sender<Result<Vec<u8>, anyhow::Error>>),
+    Ports(mpsc::Sender<Result<Vec<Port>, anyhow::Error>>),
+    Open(JadeId, mpsc::Sender<Result<(), anyhow::Error>>),
+    Write(JadeId, Vec<u8>, mpsc::Sender<Result<(), anyhow::Error>>),
+    Read(JadeId, mpsc::Sender<Result<Vec<u8>, anyhow::Error>>),
     Close(JadeId),
 }
 
@@ -48,9 +46,9 @@ impl Transport for BleTransport {
     }
 
     fn ports(&self) -> Result<Vec<Port>, anyhow::Error> {
-        let (res_sender, res_receiver) = oneshot::channel();
+        let (res_sender, res_receiver) = mpsc::channel();
         self.msg_sender.send(Msg::Ports(res_sender))?;
-        res_receiver.blocking_recv()?
+        res_receiver.recv()?
     }
 
     fn belongs(&self, jade_id: &JadeId) -> bool {
@@ -58,10 +56,10 @@ impl Transport for BleTransport {
     }
 
     fn open(&self, jade_id: &JadeId) -> Result<Box<dyn Connection>, anyhow::Error> {
-        let (res_sender, res_receiver) = oneshot::channel();
+        let (res_sender, res_receiver) = mpsc::channel();
         self.msg_sender
             .send(Msg::Open(jade_id.clone(), res_sender))?;
-        res_receiver.blocking_recv()??;
+        res_receiver.recv()??;
 
         Ok(Box::new(BleConnection {
             msg_sender: self.msg_sender.clone(),
@@ -72,17 +70,17 @@ impl Transport for BleTransport {
 
 impl Connection for BleConnection {
     fn write(&mut self, data: &[u8]) -> Result<(), anyhow::Error> {
-        let (res_sender, res_receiver) = oneshot::channel();
+        let (res_sender, res_receiver) = mpsc::channel();
         self.msg_sender
             .send(Msg::Write(self.jade_id.clone(), data.to_vec(), res_sender))?;
-        res_receiver.blocking_recv()?
+        res_receiver.recv()?
     }
 
     fn read(&mut self) -> Result<Vec<u8>, anyhow::Error> {
-        let (res_sender, res_receiver) = oneshot::channel();
+        let (res_sender, res_receiver) = mpsc::channel();
         self.msg_sender
             .send(Msg::Read(self.jade_id.clone(), res_sender))?;
-        res_receiver.blocking_recv()?
+        res_receiver.recv()?
     }
 }
 
@@ -101,8 +99,8 @@ struct Data {
     scan_activated_at: Option<Instant>,
 }
 
-static MSG_SENDER: Mutex<Option<UnboundedSender<Msg>>> = Mutex::new(None);
-static MSG_RECEIVER: Mutex<Option<UnboundedReceiver<Msg>>> = Mutex::new(None);
+static MSG_SENDER: Mutex<Option<mpsc::Sender<Msg>>> = Mutex::new(None);
+static MSG_RECEIVER: Mutex<Option<mpsc::Receiver<Msg>>> = Mutex::new(None);
 
 fn start_scan(data: &mut Data) -> Result<(), BleApiError> {
     if data.scan_activated_at.is_none() {
@@ -223,15 +221,20 @@ fn process_msg(data: &mut Data, msg: Msg) {
     }
 }
 
-async fn run(mut msg_receiver: UnboundedReceiver<Msg>, mut data: Data) {
+fn run(msg_receiver: mpsc::Receiver<Msg>, mut data: Data) {
     loop {
-        tokio::select! {
-            msg = msg_receiver.recv() => {
-                let msg = msg.expect("channel is always open");
-                process_msg(&mut data, msg);
-            }
+        let timeout = if data.scan_activated_at.is_some() {
+            Duration::from_secs(1)
+        } else {
+            Duration::from_secs(u64::MAX)
+        };
 
-            _ = tokio::time::sleep(Duration::from_secs(1)), if data.scan_activated_at.is_some() => {}
+        let res = msg_receiver.recv_timeout(timeout);
+
+        match res {
+            Ok(msg) => process_msg(&mut data, msg),
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => panic!("channel must be open"),
         }
 
         stop_scan_if_needed(&mut data);
@@ -278,7 +281,7 @@ pub struct BleClient {
 impl BleClient {
     #[uniffi::constructor]
     pub fn new(ble_api: Arc<dyn BleApi>) -> Self {
-        let (msg_sender, msg_receiver) = tokio::sync::mpsc::unbounded_channel();
+        let (msg_sender, msg_receiver) = mpsc::channel();
         *MSG_SENDER.lock().expect("must not fail") = Some(msg_sender);
         *MSG_RECEIVER.lock().expect("must not fail") = Some(msg_receiver);
 
@@ -286,11 +289,6 @@ impl BleClient {
     }
 
     pub fn run(&self) {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("should not fail");
-
         let data = Data {
             ble_api: Arc::clone(&self.ble_api),
             scan_activated_at: None,
@@ -302,7 +300,7 @@ impl BleClient {
             .take()
             .expect("MSG_RECEIVER must be already initialized");
 
-        rt.block_on(run(msg_receiver, data));
+        run(msg_receiver, data);
     }
 }
 
