@@ -2235,7 +2235,10 @@ impl Data {
         self.app_active = req.active;
         if req.active {
             self.check_ws_connection();
-            self.check_amp_connection();
+        }
+
+        if let Some(wallet_data) = &self.wallet_data {
+            wallet_data.wallet_amp.set_app_state(req.active);
         }
     }
 
@@ -2745,20 +2748,6 @@ impl Data {
                 proxy: self.proxy().clone(),
             })
             .unwrap();
-    }
-
-    fn check_amp_connection(&mut self) {
-        if let Some(wallet_data) = &self.wallet_data {
-            let wallet = Arc::clone(&wallet_data.wallet_amp);
-
-            std::thread::spawn(move || {
-                let res = wallet.check_connection();
-                match res {
-                    Ok(()) => log::debug!("AMP connection check succeed"),
-                    Err(err) => log::warn!("AMP connection check failed: {err}"),
-                }
-            });
-        }
     }
 
     fn process_push_message(&mut self, req: String, _pending_sign: Option<mpsc::Sender<()>>) {

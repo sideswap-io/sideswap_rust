@@ -54,7 +54,7 @@ enum Command {
         Vec<String>,
         ResSender<PartiallySignedTransaction>,
     ),
-    CheckConnection(ResSender<()>),
+    SetAppState(bool),
 }
 
 impl Signer for JadeData {
@@ -125,11 +125,8 @@ impl GdkSesAmp {
         res_receiver.blocking_recv()?
     }
 
-    pub fn check_connection(&self) -> Result<(), anyhow::Error> {
-        let (res_sender, res_receiver) = oneshot::channel();
-        self.command_sender
-            .send(Command::CheckConnection(res_sender.into()))?;
-        res_receiver.blocking_recv()?
+    pub fn set_app_state(&self, active: bool) {
+        let _ = self.command_sender.send(Command::SetAppState(active));
     }
 }
 
@@ -185,6 +182,7 @@ struct Data {
     account: Account,
     notif_callback: NotifCallback,
     retry_delay: RetryDelay,
+    app_active: bool,
 }
 
 fn get_wallet(wallet: &WalletOpt) -> Result<&sideswap_amp::Wallet, anyhow::Error> {
@@ -380,12 +378,6 @@ async fn green_backend_sign(
     Ok(pset)
 }
 
-async fn check_connection(wallet: &WalletOpt) -> Result<(), anyhow::Error> {
-    let wallet = get_wallet(wallet)?;
-    wallet.check_connection().await?;
-    Ok(())
-}
-
 async fn connect(
     login_info: gdk_ses::LoginInfo,
     event_callback: sideswap_amp::EventCallback,
@@ -476,7 +468,7 @@ fn process_reconnect_result(data: &mut Data, res: ConnectRes) {
                         error_msg: err.to_string(),
                     },
                 );
-            } else {
+            } else if data.app_active {
                 reconnect(data);
             }
         }
@@ -527,12 +519,30 @@ async fn process_command(data: &mut Data, command: Command) {
             sender.send(res);
         }
 
-        Command::CheckConnection(sender) => {
-            let wallet = data.wallet.clone();
-            tokio::spawn(async move {
-                let res = check_connection(&wallet).await;
-                sender.send(res);
-            });
+        Command::SetAppState(active) => {
+            data.app_active = active;
+
+            if active {
+                let wallet = data.wallet.clone();
+
+                match wallet {
+                    Some(wallet) => {
+                        tokio::spawn(async move {
+                            let res = wallet.check_connection().await;
+                            match res {
+                                Ok(()) => log::debug!("AMP connection check succeed"),
+                                Err(err) => log::debug!("AMP connection check failed: {err}"),
+                            }
+                        });
+                    }
+
+                    None => {
+                        log::debug!("reconnect disconnected AMP");
+                        data.retry_delay = Default::default();
+                        reconnect(data);
+                    }
+                }
+            }
         }
     }
 }
@@ -553,7 +563,9 @@ async fn process_event(data: &mut Data, event: sideswap_amp::Event) {
         sideswap_amp::Event::Disconnected => {
             notif_callback(account, WalletNotif::AmpDisconnected);
             data.wallet = None;
-            reconnect(data);
+            if data.app_active {
+                reconnect(data);
+            }
         }
 
         sideswap_amp::Event::BalanceUpdated { balances: _ } => {
@@ -615,6 +627,7 @@ async fn run(
         account,
         notif_callback,
         retry_delay: Default::default(),
+        app_active: true,
     };
 
     reconnect(&mut data);
