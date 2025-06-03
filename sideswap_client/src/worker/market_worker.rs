@@ -29,6 +29,7 @@ use sideswap_api::{
 };
 use sideswap_common::{
     event_proofs::EventProofs,
+    float_utils,
     green_backend::GREEN_DUMMY_SIG,
     pset::p2pkh_script,
     pset_blind::get_blinding_nonces,
@@ -1424,7 +1425,16 @@ fn try_sign_maker_pset(
         ensure!(known_order.asset_pair == first_known_order.asset_pair);
         ensure!(known_order.trade_dir == first_known_order.trade_dir);
         if let Some(price) = known_order.price {
-            ensure!(swap.price == price);
+            ensure!(
+                float_utils::values_near_equal(
+                    swap.price.value(),
+                    price.value(),
+                    float_utils::PRICE_EPS
+                ),
+                "unexpected price: {}, expected: {}",
+                swap.price.value(),
+                price.value(),
+            );
         }
         if let Some(min_price) = known_order.min_price {
             ensure!(swap.price >= min_price);

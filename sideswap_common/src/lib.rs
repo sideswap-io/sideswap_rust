@@ -9,6 +9,7 @@ pub mod error_utils;
 pub mod event_proofs;
 pub mod exchange_pair;
 pub mod file_cache;
+pub mod float_utils;
 pub mod gdk_registry_cache;
 pub mod green_backend;
 pub mod http_client;
