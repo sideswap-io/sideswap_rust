@@ -709,6 +709,7 @@ message From {
       required uint64 amount = 3;
       required double price = 4;
       required AssetType fee_asset = 5;
+      required bool two_step = 6;
     }
 
     required uint64 order_id = 5;

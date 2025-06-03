@@ -2756,17 +2756,18 @@ pub fn start_order(
     );
 
     match res {
-        Ok(private) => {
+        Ok(order) => {
             worker
                 .ui
                 .send(proto::from::Msg::StartOrder(proto::from::StartOrder {
                     result: Some(proto::from::start_order::Result::Success(
                         proto::from::start_order::Success {
-                            asset_pair: private.asset_pair.into(),
-                            trade_dir: proto::TradeDir::from(private.trade_dir).into(),
-                            amount: private.amount,
-                            price: private.price.value(),
-                            fee_asset: proto::AssetType::from(private.fee_asset).into(),
+                            asset_pair: order.asset_pair.into(),
+                            trade_dir: proto::TradeDir::from(order.trade_dir).into(),
+                            amount: order.amount,
+                            price: order.price.value(),
+                            fee_asset: proto::AssetType::from(order.fee_asset).into(),
+                            two_step: !order.online,
                         },
                     )),
                     order_id,
@@ -2775,10 +2776,10 @@ pub fn start_order(
             start_quotes(
                 worker,
                 proto::to::StartQuotes {
-                    asset_pair: private.asset_pair.into(),
+                    asset_pair: order.asset_pair.into(),
                     asset_type: proto::AssetType::Base.into(),
                     amount: u64::MAX,
-                    trade_dir: proto::TradeDir::from(private.trade_dir.inv()).into(),
+                    trade_dir: proto::TradeDir::from(order.trade_dir.inv()).into(),
                     instant_swap: false,
                     client_sub_id: None,
                 },

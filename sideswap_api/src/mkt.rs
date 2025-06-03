@@ -570,6 +570,7 @@ pub struct GetOrderResponse {
     pub amount: u64,
     pub price: NormalFloat,
     pub fee_asset: AssetType,
+    pub online: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
