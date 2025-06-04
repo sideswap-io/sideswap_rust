@@ -81,7 +81,6 @@ pub struct ToLimitBalance {
 pub enum Command {
     Price(UpdatePrice),
     ResetPrices(Empty),
-    IndexPriceUpdate(PriceUpdateBroadcast),
 }
 
 pub enum Event {
@@ -937,15 +936,6 @@ async fn process_command(data: &mut Data, to: Command) {
         Command::ResetPrices(_) => {
             data.dealer_prices.clear();
             data.internal_sender.send(Internal::Timer).unwrap();
-        }
-
-        Command::IndexPriceUpdate(price_update) => {
-            if data.server_connected {
-                let price_update = make_request!(data.ws, PriceUpdateBroadcast, price_update);
-                if let Err(e) = price_update {
-                    error!("price update failed: {}", e);
-                }
-            }
         }
     }
 }

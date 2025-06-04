@@ -16,7 +16,6 @@ use serde::Deserialize;
 use sideswap_api::mkt::AssetPair;
 use sideswap_api::mkt::TradeDir;
 use sideswap_api::PricePair;
-use sideswap_api::PriceUpdateBroadcast;
 use sideswap_common::channel_helpers::UncheckedUnboundedSender;
 use sideswap_common::dealer_ticker::DealerTicker;
 use sideswap_common::dealer_ticker::TickerLoader;
@@ -550,18 +549,6 @@ fn submit_dealer_prices(data: &mut Data) {
         data.dealer_command_sender
             .send(Command::Price(UpdatePrice { ticker, price }))
             .unwrap();
-
-        if let Some(price) = data.bfx_prices.get(&exchange_pair) {
-            data.dealer_command_sender
-                .send(Command::IndexPriceUpdate(PriceUpdateBroadcast {
-                    asset: *data.ticker_loader.asset_id(ticker),
-                    price: PricePair {
-                        bid: price.bid,
-                        ask: price.ask,
-                    },
-                }))
-                .unwrap();
-        }
     }
 }
 
