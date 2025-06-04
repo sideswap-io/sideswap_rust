@@ -520,26 +520,28 @@ async fn process_command(data: &mut Data, command: Command) {
         }
 
         Command::SetAppState(active) => {
-            data.app_active = active;
+            if data.app_active != active {
+                data.app_active = active;
 
-            if active {
-                let wallet = data.wallet.clone();
+                if active {
+                    let wallet = data.wallet.clone();
 
-                match wallet {
-                    Some(wallet) => {
-                        tokio::spawn(async move {
-                            let res = wallet.check_connection().await;
-                            match res {
-                                Ok(()) => log::debug!("AMP connection check succeed"),
-                                Err(err) => log::debug!("AMP connection check failed: {err}"),
-                            }
-                        });
-                    }
+                    match wallet {
+                        Some(wallet) => {
+                            tokio::spawn(async move {
+                                let res = wallet.check_connection().await;
+                                match res {
+                                    Ok(()) => log::debug!("AMP connection check succeed"),
+                                    Err(err) => log::debug!("AMP connection check failed: {err}"),
+                                }
+                            });
+                        }
 
-                    None => {
-                        log::debug!("reconnect disconnected AMP");
-                        data.retry_delay = Default::default();
-                        reconnect(data);
+                        None => {
+                            log::debug!("reconnect disconnected AMP");
+                            data.retry_delay = Default::default();
+                            reconnect(data);
+                        }
                     }
                 }
             }
