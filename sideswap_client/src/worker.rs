@@ -434,6 +434,8 @@ impl Data {
                         }
                     }
 
+                    data.add_missing_gdk_assets(utxos.keys());
+
                     let balances = utxos
                         .iter()
                         .map(|(asset_id, list)| proto::Balance {
