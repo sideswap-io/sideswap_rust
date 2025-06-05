@@ -1,6 +1,6 @@
 use std::net::SocketAddr;
 use std::sync::{mpsc, Arc};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 use std::{
     collections::{BTreeMap, BTreeSet},
     str::FromStr,
@@ -41,6 +41,7 @@ use sideswap_common::recipient::Recipient;
 use sideswap_common::send_tx::pset::{
     construct_pset, ConstructPsetArgs, ConstructedPset, PsetInput, PsetOutput,
 };
+use sideswap_common::target_os::TargetOs;
 use sideswap_common::types::{self, peg_out_amount, Amount};
 use sideswap_common::utxo_select::{self, WalletType};
 use sideswap_common::ws::next_request_id;
@@ -270,6 +271,7 @@ pub struct Data {
     network_settings: proto::to::NetworkSettings,
     proxy_address: Option<ProxyAddress>,
     wallet_event_callback: wallet::EventCallback,
+    last_ui_message: SystemTime,
 }
 
 pub enum Message {
@@ -2766,7 +2768,30 @@ impl Data {
         true
     }
 
+    fn detect_sleep(&mut self) {
+        match TargetOs::get() {
+            TargetOs::Linux | TargetOs::Windows | TargetOs::MacOs => {
+                let now = SystemTime::now();
+                let elapsed = now.duration_since(self.last_ui_message).unwrap_or_default();
+                self.last_ui_message = now;
+
+                if elapsed > Duration::from_secs(60) {
+                    log::debug!("system suspend detected: {}s", elapsed.as_secs());
+                    if let Some(wallet_data) = &self.wallet_data {
+                        wallet_data.wallet_amp.set_app_state(false);
+                        wallet_data.wallet_amp.set_app_state(true);
+                    }
+                }
+            }
+            TargetOs::Android | TargetOs::IOS => {
+                // Not needed, the UI sends proto::to::AppState messages
+            }
+        }
+    }
+
     fn process_ui(&mut self, msg: ffi::ToMsg) {
+        self.detect_sleep();
+
         debug!(
             "from ui: {}",
             serde_json::to_string(&redact_to_msg(msg.clone())).unwrap()
@@ -3614,6 +3639,7 @@ pub fn start_processing(
         proxy_address: None,
         wallet_event_callback,
         wallet_data: None,
+        last_ui_message: SystemTime::now(),
     };
 
     debug!("proxy: {:?}", data.proxy());
