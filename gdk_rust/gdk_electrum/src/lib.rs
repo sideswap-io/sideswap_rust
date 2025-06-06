@@ -787,11 +787,12 @@ impl ElectrumSession {
 
                 let tip_before_sync = match tipper.server_tip(&client) {
                     Ok(height) => height,
-                    Err(Error::Common(BtcEncodingError(_)))
-                    | Err(Error::Common(ElementsEncodingError(_))) => {
+                    e @ (Err(Error::Common(BtcEncodingError(_)))
+                    | Err(Error::Common(ElementsEncodingError(_)))) => {
                         // We aren't able to decode the blockheaders returned by the server,
                         // do not sync further.
-                        break;
+                        warn!("tipper decoding error: {e:?}");
+                        continue;
                     }
                     Err(e) => {
                         state_updater.update_if_needed(false);

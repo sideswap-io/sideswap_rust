@@ -25,7 +25,7 @@ use crate::{
     models::{self, AddressType},
 };
 
-struct GdkSesRust {
+pub struct GdkSesRust {
     login_info: gdk_ses::LoginInfo,
     session: gdk_electrum::ElectrumSession,
     subaccounts: Vec<(WalletType, u32)>,
@@ -495,7 +495,7 @@ fn get_network_parameters(
 pub fn start_processing(
     login_info: gdk_ses::LoginInfo,
     notif_callback: NotifCallback,
-) -> Arc<dyn crate::gdk_ses::GdkSes> {
+) -> Arc<GdkSesRust> {
     let params = get_network_parameters(
         login_info.env,
         &login_info.electrum_server,

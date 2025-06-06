@@ -12,7 +12,7 @@ use crate::gdk_ses::{
     self, ElectrumServer, GdkSes, JadeData, NotifCallback, TransactionList, WalletInfo, WalletNotif,
 };
 use crate::gdk_ses_amp::{derive_amp_wo_login, GdkSesAmp};
-use crate::gdk_ses_rust::{self};
+use crate::gdk_ses_rust::{self, GdkSesRust};
 use crate::models::AddressType;
 use crate::settings::WatchOnly;
 use crate::utils::{
@@ -188,7 +188,7 @@ struct CreatedTx {
 
 pub struct WalletData {
     xpubs: XPubInfo,
-    wallet_reg: Arc<dyn GdkSes>,
+    wallet_reg: Arc<GdkSesRust>,
     wallet_amp: Arc<GdkSesAmp>,
     address_registration_active: bool,
     /// An updated UTXO list (updates whenever the wallet balance changes)

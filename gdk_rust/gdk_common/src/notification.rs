@@ -49,9 +49,9 @@ pub enum Kind {
 
 #[derive(Serialize, Deserialize)]
 pub struct NetworkNotification {
-    current_state: State,
-    next_state: State,
-    wait_ms: u32,
+    pub current_state: State,
+    pub next_state: State,
+    pub wait_ms: u32,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
