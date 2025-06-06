@@ -65,6 +65,8 @@ pub enum WalletNotif {
     Transaction(elements::Txid),
     Block,
     AccountSynced,
+    RustConnected,
+    RustDisconnected,
     AmpConnected { subaccount: u32, gaid: String },
     AmpDisconnected,
     AmpFailed { error_msg: String },

@@ -1,4 +1,10 @@
-use std::{collections::HashMap, path::Path, str::FromStr, sync::Arc, u32};
+use std::{
+    collections::HashMap,
+    path::Path,
+    str::FromStr,
+    sync::{Arc, RwLock},
+    u32,
+};
 
 use anyhow::bail;
 use elements::TxOutSecrets;
@@ -27,7 +33,7 @@ use crate::{
 
 pub struct GdkSesRust {
     login_info: gdk_ses::LoginInfo,
-    session: gdk_electrum::ElectrumSession,
+    session: RwLock<gdk_electrum::ElectrumSession>,
     subaccounts: Vec<(WalletType, u32)>,
     default_subaccount: u32,
 }
@@ -95,22 +101,45 @@ impl GdkSesRust {
 
         let _login_data = self
             .session
+            .write()
+            .expect("must not fail")
             .login_wo(WatchOnlyCredentials::Parsed(accounts))
             .expect("should not fail");
     }
 
-    fn connect(&mut self) {
+    pub fn disconnect(&self) {
+        log::info!("disconnected rust session");
+        self.session
+            .write()
+            .expect("must not fail")
+            .disconnect()
+            .expect("should not fail");
+    }
+
+    pub fn connect(&self) {
+        log::info!("connect rust session");
         let net_params = json!({
             "proxy": self.login_info.proxy.as_ref().map(ToString::to_string)
         });
-        self.session.connect(&net_params).expect("should not fail");
+        self.session
+            .write()
+            .expect("must not fail")
+            .connect(&net_params)
+            .expect("should not fail");
     }
 
     fn get_transactions_impl(
         &self,
         opts: GetTransactionsOpt,
     ) -> Result<TransactionList, gdk_electrum::error::Error> {
-        let tip_height = self.session.store()?.lock()?.cache.tip_height();
+        let tip_height = self
+            .session
+            .read()
+            .expect("must not fail")
+            .store()?
+            .lock()?
+            .cache
+            .tip_height();
 
         let pending_only = match opts {
             GetTransactionsOpt::PendingOnly => true,
@@ -122,6 +151,8 @@ impl GdkSesRust {
         for (_wallet_type, subaccount) in self.subaccounts.iter().copied() {
             let txs = self
                 .session
+                .read()
+                .expect("must not fail")
                 .get_transactions(&gdk_common::model::GetTransactionsOpt {
                     subaccount,
                     pending_only,
@@ -197,12 +228,16 @@ impl crate::gdk_ses::GdkSes for GdkSesRust {
     }
 
     fn get_address(&self, is_internal: bool) -> Result<models::AddressInfo, anyhow::Error> {
-        let address_info = self.session.get_receive_address(&GetAddressOpt {
-            subaccount: self.default_subaccount,
-            address_type: None,
-            is_internal: Some(is_internal),
-            ignore_gap_limit: None,
-        })?;
+        let address_info = self
+            .session
+            .read()
+            .expect("must not fail")
+            .get_receive_address(&GetAddressOpt {
+                subaccount: self.default_subaccount,
+                address_type: None,
+                is_internal: Some(is_internal),
+                ignore_gap_limit: None,
+            })?;
 
         let address_type = match address_info.address_type {
             gdk_common::scripts::ScriptType::P2shP2wpkh => AddressType::P2shP2wpkh,
@@ -234,7 +269,10 @@ impl crate::gdk_ses::GdkSes for GdkSesRust {
     }
 
     fn broadcast_tx(&self, tx: &str) -> Result<(), anyhow::Error> {
-        self.session.broadcast_transaction(tx)?;
+        self.session
+            .read()
+            .expect("must not fail")
+            .broadcast_transaction(tx)?;
         Ok(())
     }
 
@@ -242,12 +280,16 @@ impl crate::gdk_ses::GdkSes for GdkSesRust {
         let mut res = models::UtxoList::new();
 
         for (wallet_type, subaccount) in self.subaccounts.iter().copied() {
-            let utxos = self.session.get_unspent_outputs(&GetUnspentOpt {
-                subaccount,
-                num_confs: None,
-                confidential_utxos_only: None,
-                all_coins: None,
-            })?;
+            let utxos = self
+                .session
+                .read()
+                .expect("must not fail")
+                .get_unspent_outputs(&GetUnspentOpt {
+                    subaccount,
+                    num_confs: None,
+                    confidential_utxos_only: None,
+                    all_coins: None,
+                })?;
 
             for (asset_id, utxos) in utxos.0.into_iter() {
                 let asset_id = asset_id.expect("must be set");
@@ -298,6 +340,8 @@ impl crate::gdk_ses::GdkSes for GdkSesRust {
             for is_internal in [false, true] {
                 let resp = self
                     .session
+                    .read()
+                    .expect("must not fail")
                     .get_previous_addresses(&GetPreviousAddressesOpt {
                         subaccount,
                         last_pointer: None,
@@ -520,15 +564,25 @@ pub fn start_processing(
         );
 
         match notif.event {
-            gdk_common::notification::Kind::Network => {}
+            gdk_common::notification::Kind::Network => {
+                let network = notif.network.expect("must be set");
+                let event = match network.current_state {
+                    gdk_common::State::Disconnected => WalletNotif::RustDisconnected,
+                    gdk_common::State::Connected => WalletNotif::RustConnected,
+                };
+                notif_callback(account, event);
+            }
+
             gdk_common::notification::Kind::Transaction => {
                 let transaction = notif.transaction.expect("must be set");
                 let txid = elements::Txid::from_raw_hash(*transaction.txid.as_raw_hash());
                 notif_callback(account, WalletNotif::Transaction(txid));
             }
+
             gdk_common::notification::Kind::Block => {
                 notif_callback(account, WalletNotif::Block);
             }
+
             gdk_common::notification::Kind::Subaccount => {
                 let subaccount = notif.subaccount.expect("must be set");
                 match subaccount.event_type {
@@ -546,7 +600,7 @@ pub fn start_processing(
 
     let mut ses = GdkSesRust {
         login_info,
-        session,
+        session: RwLock::new(session),
         subaccounts,
         default_subaccount,
     };

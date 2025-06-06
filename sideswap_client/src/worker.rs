@@ -865,6 +865,20 @@ impl Data {
                 self.sync_wallet(account);
             }
 
+            WalletNotif::RustConnected => {
+                self.sync_wallet(account);
+            }
+
+            WalletNotif::RustDisconnected => {
+                if let Some(wallet) = self.wallet_data.as_ref() {
+                    let wallet = Arc::clone(&wallet.wallet_reg);
+                    std::thread::spawn(move || {
+                        wallet.disconnect();
+                        wallet.connect();
+                    });
+                }
+            }
+
             WalletNotif::AmpConnected { subaccount, gaid } => {
                 wallet_data.amp_subaccount = Some(subaccount);
                 wallet_data.gaid = Some(gaid.clone());
