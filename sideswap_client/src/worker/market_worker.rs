@@ -2283,12 +2283,18 @@ pub fn get_address(
                         .address
                     }
                 };
-                assert_eq!(
-                    expected_address, address.address.address,
-                    "wrong cached address"
-                );
 
-                return Ok(address.address.clone());
+                if expected_address == address.address.address {
+                    return Ok(address.address.clone());
+                }
+
+                log::error!(
+                    "unexpected entry in address_cache: {:?}, expected: {:?}",
+                    address.address,
+                    expected_address
+                );
+                worker.settings.address_cache.clear();
+                worker.save_settings();
             }
         }
         CachePolicy::Skip => {}
