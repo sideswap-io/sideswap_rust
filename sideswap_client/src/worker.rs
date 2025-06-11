@@ -176,6 +176,7 @@ enum TimerEvent {
     SyncUtxos,
     SendAck,
     CleanQuotes,
+    ReconnectWallets,
 }
 
 struct CreatedTx {
@@ -865,17 +866,11 @@ impl Data {
                 self.sync_wallet(account);
             }
 
-            WalletNotif::RustConnected => {
-                self.sync_wallet(account);
-            }
+            WalletNotif::RustConnected => {}
 
             WalletNotif::RustDisconnected => {
-                if let Some(wallet) = self.wallet_data.as_ref() {
-                    let wallet = Arc::clone(&wallet.wallet_reg);
-                    std::thread::spawn(move || {
-                        wallet.disconnect();
-                        wallet.connect();
-                    });
+                if self.app_active {
+                    replace_timers(self, Duration::from_secs(5), TimerEvent::ReconnectWallets);
                 }
             }
 
@@ -2257,6 +2252,10 @@ impl Data {
 
         if let Some(wallet_data) = &self.wallet_data {
             wallet_data.wallet_amp.set_app_state(req.active);
+
+            if req.active {
+                replace_timers(self, Duration::from_secs(5), TimerEvent::ReconnectWallets);
+            }
         }
     }
 
@@ -2791,10 +2790,12 @@ impl Data {
 
                 if elapsed > Duration::from_secs(60) {
                     log::debug!("system suspend detected: {}s", elapsed.as_secs());
-                    if let Some(wallet_data) = &self.wallet_data {
-                        wallet_data.wallet_amp.set_app_state(false);
-                        wallet_data.wallet_amp.set_app_state(true);
-                    }
+                    // if let Some(wallet_data) = &self.wallet_data {
+                    //     wallet_data.wallet_amp.set_app_state(false);
+                    //     wallet_data.wallet_amp.set_app_state(true);
+                    // }
+
+                    replace_timers(self, Duration::from_secs(5), TimerEvent::ReconnectWallets);
                 }
             }
             TargetOs::Android | TargetOs::IOS => {
@@ -3501,6 +3502,10 @@ fn process_timer_event(data: &mut Data, event: TimerEvent) {
 
         TimerEvent::CleanQuotes => {
             market_worker::clean_quotes(data);
+        }
+
+        TimerEvent::ReconnectWallets => {
+            data.recreate_wallets();
         }
     }
 }
