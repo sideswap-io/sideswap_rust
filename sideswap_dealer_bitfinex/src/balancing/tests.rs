@@ -1,6 +1,7 @@
 use super::*;
 
 #[test]
+#[ignore = "Temporarily disable USDt balancing"]
 fn test_balancing() {
     // Bitcoin is smaller
     assert_eq!(
