@@ -2475,7 +2475,12 @@ pub fn try_order_edit(
     Ok(())
 }
 
-pub fn order_edit(worker: &mut super::Data, msg: proto::to::OrderEdit) {
+pub fn order_edit(worker: &mut super::Data, mut msg: proto::to::OrderEdit) {
+    // Temporary workaround until the UI is fixed
+    if msg.price_tracking.is_some() {
+        msg.price = None;
+    }
+
     let res = try_order_edit(worker, msg);
     let result = proto::GenericResponse {
         success: res.is_ok(),
