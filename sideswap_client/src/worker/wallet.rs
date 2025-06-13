@@ -11,17 +11,16 @@ pub enum Event {
 pub type EventCallback = Arc<dyn Fn(Account, Event) + Send + Sync>;
 
 pub fn callback<Resp, WalletCallback, ResCallback>(
-    account_id: Account,
+    account: Account,
     worker: &mut super::Data,
     wallet_cb: WalletCallback,
     res_cb: ResCallback,
 ) where
     Resp: Send + 'static,
     WalletCallback: FnOnce(&dyn GdkSes) -> Result<Resp, anyhow::Error> + Send + Sync + 'static,
-    ResCallback:
-        FnOnce(&mut super::Data, Result<Resp, anyhow::Error>) + Send + Sync + 'static,
+    ResCallback: FnOnce(&mut super::Data, Result<Resp, anyhow::Error>) + Send + Sync + 'static,
 {
-    let wallet = match worker.get_wallet(account_id) {
+    let wallet = match worker.get_wallet(account) {
         Ok(wallet) => wallet,
         Err(err) => {
             res_cb(worker, Err(err));
@@ -30,11 +29,12 @@ pub fn callback<Resp, WalletCallback, ResCallback>(
     };
 
     let event_callback = Arc::clone(&worker.wallet_event_callback);
+
     // TODO: Use a thread pool
     std::thread::spawn(move || {
         let res = wallet_cb(wallet.as_ref());
         event_callback(
-            account_id,
+            account,
             Event::Run(Box::new(move |data| {
                 res_cb(data, res);
             })),
@@ -62,30 +62,4 @@ where
     });
 
     resp_receiver
-}
-
-pub fn call_wallet<Resp, WalletCallback>(
-    wallet: &Arc<dyn GdkSes>,
-    wallet_cb: WalletCallback,
-) -> Result<Resp, anyhow::Error>
-where
-    Resp: Send + 'static,
-    WalletCallback: FnOnce(&dyn GdkSes) -> Result<Resp, anyhow::Error> + Send + Sync + 'static,
-{
-    let resp_receiver = send_wallet(wallet, wallet_cb);
-    let resp = resp_receiver.recv()??;
-    Ok(resp)
-}
-
-pub fn call<Resp, WalletCallback>(
-    account_id: Account,
-    worker: &super::Data,
-    wallet_cb: WalletCallback,
-) -> Result<Resp, anyhow::Error>
-where
-    Resp: Send + 'static,
-    WalletCallback: FnOnce(&dyn GdkSes) -> Result<Resp, anyhow::Error> + Send + Sync + 'static,
-{
-    let wallet = worker.get_wallet(account_id)?;
-    call_wallet(&wallet, wallet_cb)
 }

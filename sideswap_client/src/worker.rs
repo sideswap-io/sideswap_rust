@@ -1653,10 +1653,8 @@ impl Data {
         let txid = tx.txid();
         let tx = elements::encode::serialize_hex(&tx);
 
-        wallet::call(Account::Reg, self, move |ses| {
-            ses.broadcast_tx(&tx)?;
-            Ok(())
-        })?;
+        let wallet = self.get_wallet(Account::Reg)?;
+        wallet.broadcast_tx(&tx)?;
 
         self.start_fast_sync();
 
@@ -2449,8 +2447,11 @@ impl Data {
         &mut self,
         account: proto::Account,
     ) -> Result<Vec<proto::from::load_utxos::Utxo>, anyhow::Error> {
+        let wallet = self.get_wallet(account)?;
+
         // Load utxos before loading address (to prevent a race)
-        let inputs = wallet::call(account, self, |ses| ses.get_utxos())?
+        let inputs = wallet
+            .get_utxos()?
             .into_values()
             .flat_map(|utxos| utxos.into_iter())
             .collect::<Vec<_>>();
