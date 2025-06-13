@@ -442,18 +442,6 @@ dependencies = [
 
 [[package]]
 name = "bitcoin"
-version = "0.29.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0694ea59225b0c5f3cb405ff3f670e4828358ed26aec49dc352f730f0cb1a8a3"
-dependencies = [
- "bech32 0.9.1",
- "bitcoin_hashes 0.11.0",
- "secp256k1 0.24.3",
- "serde 1.0.219",
-]
-
-[[package]]
-name = "bitcoin"
 version = "0.32.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ad8929a18b8e33ea6b3c09297b687baaa71fb1b97353243a3f1029fad5c59c5b"
@@ -467,7 +455,7 @@ dependencies = [
  "bitcoin_hashes 0.14.0",
  "hex-conservative 0.2.1",
  "hex_lit",
- "secp256k1 0.29.1",
+ "secp256k1",
  "serde 1.0.219",
 ]
 
@@ -505,15 +493,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5285c8bcaa25876d07f37e3d30c303f2609179716e11d688f51e8f1fe70063e2"
 dependencies = [
  "bitcoin-internals 0.3.0",
- "serde 1.0.219",
-]
-
-[[package]]
-name = "bitcoin_hashes"
-version = "0.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "90064b8dee6815a6470d60bad07bbbaee885c0e12d04177138fa3291a01b7bc4"
-dependencies = [
  "serde 1.0.219",
 ]
 
@@ -557,7 +536,7 @@ version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d8909583c5fab98508e80ef73e5592a651c954993dc6b7739963257d19f0e71a"
 dependencies = [
- "bitcoin 0.32.6",
+ "bitcoin",
  "serde 1.0.219",
  "serde_json",
 ]
@@ -1218,7 +1197,7 @@ version = "0.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7a0bd443023f9f5c4b7153053721939accc7113cbdf810a024434eed454b3db1"
 dependencies = [
- "bitcoin 0.32.6",
+ "bitcoin",
  "byteorder",
  "libc",
  "log",
@@ -1236,7 +1215,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "81b2569d3495bfdfce36c504fd4d78752ff4a7699f8a33e6f3ee523bddf9f6ad"
 dependencies = [
  "bech32 0.11.0",
- "bitcoin 0.32.6",
+ "bitcoin",
  "secp256k1-zkp",
  "serde 1.0.219",
  "serde_json",
@@ -1248,7 +1227,7 @@ version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "571fa105690f83c7833df2109eb2e14ca0e62d633d2624ffcb166ff18a3da870"
 dependencies = [
- "bitcoin 0.32.6",
+ "bitcoin",
  "elements",
  "miniscript",
  "serde 1.0.219",
@@ -1588,7 +1567,7 @@ dependencies = [
  "aes 0.7.5",
  "aes-gcm-siv 0.10.1",
  "bip39",
- "bitcoin 0.32.6",
+ "bitcoin",
  "electrum-client",
  "elements",
  "elements-miniscript",
@@ -1611,28 +1590,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "gdk-electrum"
-version = "0.1.0"
-dependencies = [
- "base64 0.13.1",
- "bitcoin 0.29.2",
- "block-modes",
- "env_logger",
- "gdk-common",
- "gdk-pin-client",
- "libc",
- "serde 1.0.219",
- "serde_json",
- "tempfile",
- "thiserror 1.0.69",
-]
-
-[[package]]
 name = "gdk-pin-client"
 version = "0.1.0"
 dependencies = [
  "aes 0.7.5",
- "bitcoin 0.32.6",
+ "bitcoin",
  "block-modes",
  "once_cell",
  "rand 0.8.5",
@@ -2598,8 +2560,7 @@ checksum = "112b39cec0b298b6c1999fee3e31427f74f676e4cb9879ed1a121b43661a4154"
 [[package]]
 name = "lwk_common"
 version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e055bce03c8a966bbdf11b1de04b2973d8c8854d7cc5877a37c5bb0c492a2909"
+source = "git+https://github.com/sideswap-io/lwk.git?rev=4e9204862819cfbd7fd846e699c829d3558a4a56#4e9204862819cfbd7fd846e699c829d3558a4a56"
 dependencies = [
  "base64 0.21.7",
  "elements",
@@ -2607,6 +2568,7 @@ dependencies = [
  "getrandom 0.2.16",
  "qr_code",
  "rand 0.8.5",
+ "serde 1.0.219",
  "thiserror 1.0.69",
 ]
 
@@ -2616,7 +2578,7 @@ version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "357528be7457df199f8835865ee0e823da41ed8bcbcb1b6f04fea6ebc97eb174"
 dependencies = [
- "bitcoin 0.32.6",
+ "bitcoin",
  "rand 0.8.5",
  "tempfile",
  "testcontainers",
@@ -2625,8 +2587,7 @@ dependencies = [
 [[package]]
 name = "lwk_jade"
 version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "13333941bb75e78781ef95c72130bbcdea42488bf71b9805a19e278a748c3d65"
+source = "git+https://github.com/sideswap-io/lwk.git?rev=4e9204862819cfbd7fd846e699c829d3558a4a56#4e9204862819cfbd7fd846e699c829d3558a4a56"
 dependencies = [
  "elements",
  "elements-miniscript",
@@ -2648,8 +2609,7 @@ dependencies = [
 [[package]]
 name = "lwk_signer"
 version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "97ed102b56d95656bd4dbab8e36f7c2d40cabf956409b9a3e81a46cca4657aae"
+source = "git+https://github.com/sideswap-io/lwk.git?rev=4e9204862819cfbd7fd846e699c829d3558a4a56#4e9204862819cfbd7fd846e699c829d3558a4a56"
 dependencies = [
  "base64 0.13.1",
  "bip39",
@@ -2662,8 +2622,7 @@ dependencies = [
 [[package]]
 name = "lwk_wollet"
 version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "44164918e75771585624098a328cf0d5e28931ccdd5af1c9a95a6ecf0c5cb67a"
+source = "git+https://github.com/sideswap-io/lwk.git?rev=4e9204862819cfbd7fd846e699c829d3558a4a56#4e9204862819cfbd7fd846e699c829d3558a4a56"
 dependencies = [
  "aes-gcm-siv 0.11.1",
  "age",
@@ -2673,6 +2632,7 @@ dependencies = [
  "electrum-client",
  "elements",
  "elements-miniscript",
+ "futures",
  "fxhash",
  "idna",
  "js-sys",
@@ -2751,7 +2711,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0760e92feaf4ee26bd2e616f557de64712bf1e75f3b1b218dfb475c0a84c7943"
 dependencies = [
  "bech32 0.11.0",
- "bitcoin 0.32.6",
+ "bitcoin",
 ]
 
 [[package]]
@@ -3908,34 +3868,14 @@ dependencies = [
 
 [[package]]
 name = "secp256k1"
-version = "0.24.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6b1629c9c557ef9b293568b338dddfc8208c98a18c59d722a9d53f859d9c9b62"
-dependencies = [
- "bitcoin_hashes 0.11.0",
- "secp256k1-sys 0.6.1",
- "serde 1.0.219",
-]
-
-[[package]]
-name = "secp256k1"
 version = "0.29.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9465315bc9d4566e1724f0fffcbcc446268cb522e60f9a27bcded6b19c108113"
 dependencies = [
  "bitcoin_hashes 0.14.0",
  "rand 0.8.5",
- "secp256k1-sys 0.10.1",
+ "secp256k1-sys",
  "serde 1.0.219",
-]
-
-[[package]]
-name = "secp256k1-sys"
-version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "83080e2c2fc1006e625be82e5d1eb6a43b7fd9578b617fcc55814daf286bba4b"
-dependencies = [
- "cc",
 ]
 
 [[package]]
@@ -3955,7 +3895,7 @@ checksum = "52a44aed3002b5ae975f8624c5df3a949cfbf00479e18778b6058fcd213b76e3"
 dependencies = [
  "bitcoin-private",
  "rand 0.8.5",
- "secp256k1 0.29.1",
+ "secp256k1",
  "secp256k1-zkp-sys",
  "serde 1.0.219",
 ]
@@ -3967,7 +3907,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "57f08b2d0b143a22e07f798ae4f0ab20d5590d7c68e0d090f2088a48a21d1654"
 dependencies = [
  "cc",
- "secp256k1-sys 0.10.1",
+ "secp256k1-sys",
 ]
 
 [[package]]
@@ -4201,7 +4141,7 @@ version = "0.1.2"
 dependencies = [
  "base64 0.21.7",
  "bip39",
- "bitcoin 0.32.6",
+ "bitcoin",
  "bitcoin_hashes 0.14.0",
  "bytes",
  "ciborium",
@@ -4214,7 +4154,7 @@ dependencies = [
  "rand 0.8.5",
  "rmp-serde",
  "rmpv",
- "secp256k1 0.29.1",
+ "secp256k1",
  "secp256k1-zkp",
  "serde 1.0.219",
  "serde_json",
@@ -4248,7 +4188,7 @@ dependencies = [
  "allo-isolate",
  "anyhow",
  "bip39",
- "bitcoin 0.32.6",
+ "bitcoin",
  "block-modes",
  "bytes",
  "chrono",
@@ -4258,16 +4198,17 @@ dependencies = [
  "elements-miniscript",
  "flexi_logger",
  "gdk-common",
- "gdk-electrum",
  "gdk-registry",
  "git2",
  "hex",
  "libc",
  "log",
+ "lwk_common",
+ "lwk_wollet",
  "prost",
  "prost-build",
  "rand 0.8.5",
- "secp256k1 0.29.1",
+ "secp256k1",
  "serde 1.0.219",
  "serde_bytes",
  "serde_json",
@@ -4293,7 +4234,7 @@ dependencies = [
  "anyhow",
  "arc-swap",
  "base64 0.21.7",
- "bitcoin 0.32.6",
+ "bitcoin",
  "blake3",
  "ciborium",
  "derive_more 0.99.20",

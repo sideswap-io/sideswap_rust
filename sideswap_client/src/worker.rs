@@ -29,6 +29,7 @@ use elements::pset::PartiallySignedTransaction;
 use elements::{AssetId, TxOutSecrets};
 use elements_miniscript::slip77::MasterBlindingKey;
 use log::{debug, error, info, warn};
+use lwk_wollet::Chain;
 use market_worker::{get_wallet_account, REGISTER_PATH};
 use serde::{Deserialize, Serialize};
 use sideswap_amp::sw_signer::SwSigner;
@@ -176,7 +177,6 @@ enum TimerEvent {
     SyncUtxos,
     SendAck,
     CleanQuotes,
-    ReconnectWallets,
 }
 
 struct CreatedTx {
@@ -852,7 +852,7 @@ impl Data {
                 self.ui.send(proto::from::Msg::NewBlock(proto::Empty {}));
             }
 
-            WalletNotif::AccountSynced => {
+            WalletNotif::LwkSynced => {
                 // GDK rust takes about 10 seconds to sync even if it's cached
                 debug!("sync_complete, account_id: {account:?}");
                 if !wallet_data.reg_sync_complete {
@@ -866,12 +866,8 @@ impl Data {
                 self.sync_wallet(account);
             }
 
-            WalletNotif::RustConnected => {}
-
-            WalletNotif::RustDisconnected => {
-                if self.app_active {
-                    replace_timers(self, Duration::from_secs(5), TimerEvent::ReconnectWallets);
-                }
+            WalletNotif::LwkFailed { error_msg } => {
+                self.show_message(&error_msg);
             }
 
             WalletNotif::AmpConnected { subaccount, gaid } => {
@@ -1108,9 +1104,7 @@ impl Data {
             .ok_or_else(|| anyhow!("device_key is None"))?
             .clone();
 
-        let account = Account::Reg;
-
-        let recv_addr = wallet::call(account, self, |ses| ses.get_receive_address())?.address;
+        let recv_addr = self.try_get_recv_address(Account::Reg)?.address;
 
         let resp = send_request!(
             self,
@@ -1155,26 +1149,65 @@ impl Data {
         }
     }
 
+    fn try_get_recv_address(
+        &mut self,
+        account: proto::Account,
+    ) -> Result<models::AddressInfo, anyhow::Error> {
+        let wallet_data = self
+            .wallet_data
+            .as_ref()
+            .ok_or_else(|| anyhow!("no wallet_data"))?;
+
+        match account {
+            Account::Reg => {
+                let gap_limit = 20;
+
+                let first_unused = wallet_data
+                    .wallet_reg
+                    .get_address(Chain::External, None)?
+                    .pointer;
+
+                let candidate_index =
+                    std::cmp::max(self.settings.next_recv_address_index, first_unused);
+
+                let max_allowed = first_unused + gap_limit - 1;
+
+                let index = std::cmp::min(max_allowed, candidate_index);
+
+                let address = wallet_data
+                    .wallet_reg
+                    .get_address(Chain::External, Some(index))?;
+
+                self.settings.next_recv_address_index = index + 1;
+                self.save_settings();
+
+                Ok(address)
+            }
+
+            Account::Amp => wallet_data.wallet_amp.get_address(),
+        }
+    }
+
     fn process_get_recv_address(&mut self, account: proto::Account) {
-        wallet::callback(
-            account,
-            self,
-            |ses| ses.get_receive_address(),
-            move |data, res| match res {
-                Ok(addr_info) => {
-                    let wallet_data = data.wallet_data.as_mut().expect("must be set");
-                    data.ui
-                        .send(proto::from::Msg::RecvAddress(proto::from::RecvAddress {
-                            addr: proto::Address {
-                                addr: addr_info.address.to_string(),
-                            },
-                            account: account.into(),
-                        }));
-                    wallet_data.last_recv_address = Some(addr_info);
-                }
-                Err(err) => data.show_message(&err.to_string()),
-            },
-        );
+        let res = self.try_get_recv_address(account);
+        match res {
+            Ok(addr_info) => {
+                self.ui
+                    .send(proto::from::Msg::RecvAddress(proto::from::RecvAddress {
+                        addr: proto::Address {
+                            addr: addr_info.address.to_string(),
+                        },
+                        account: account.into(),
+                    }));
+
+                let wallet_data = self.wallet_data.as_mut().expect("must be set");
+                wallet_data.last_recv_address = Some(addr_info);
+            }
+
+            Err(err) => {
+                self.show_message(&err.to_string());
+            }
+        }
     }
 
     fn get_selected_utxos<'a>(
@@ -1210,7 +1243,11 @@ impl Data {
     }
 
     fn get_change_address(&self) -> Result<models::AddressInfo, anyhow::Error> {
-        wallet::call(Account::Reg, self, |ses| ses.get_change_address())
+        let wallet_data = self
+            .wallet_data
+            .as_ref()
+            .ok_or_else(|| anyhow!("no wallet_data"))?;
+        wallet_data.wallet_reg.get_address(Chain::Internal, None)
     }
 
     fn try_create_tx(&mut self, req: proto::CreateTx) -> Result<proto::CreatedTx, anyhow::Error> {
@@ -1620,6 +1657,8 @@ impl Data {
             ses.broadcast_tx(&tx)?;
             Ok(())
         })?;
+
+        self.start_fast_sync();
 
         Ok(txid)
     }
@@ -2251,11 +2290,8 @@ impl Data {
         }
 
         if let Some(wallet_data) = &self.wallet_data {
+            wallet_data.wallet_reg.set_app_state(req.active);
             wallet_data.wallet_amp.set_app_state(req.active);
-
-            if req.active {
-                replace_timers(self, Duration::from_secs(5), TimerEvent::ReconnectWallets);
-            }
         }
     }
 
@@ -2383,8 +2419,17 @@ impl Data {
         &mut self,
         account: proto::Account,
     ) -> Result<Vec<WalletAddress>, anyhow::Error> {
-        let wallet = self.get_wallet(account)?;
-        let resp = wallet::call_wallet(&wallet, move |ses| ses.get_previous_addresses())?;
+        let wallet_data = self
+            .wallet_data
+            .as_ref()
+            .ok_or_else(|| anyhow!("no wallet_data"))?;
+
+        let resp = match account {
+            Account::Reg => wallet_data
+                .wallet_reg
+                .get_previous_addresses(self.settings.next_recv_address_index)?,
+            Account::Amp => wallet_data.wallet_amp.get_previous_addresses()?,
+        };
 
         let list = resp
             .list
@@ -2640,6 +2685,8 @@ impl Data {
     }
 
     fn process_local_message(&mut self, msg: api::LocalMessageNotification) {
+        self.start_fast_sync();
+
         self.ui
             .send(proto::from::Msg::LocalMessage(proto::from::LocalMessage {
                 title: msg.title,
@@ -2790,17 +2837,21 @@ impl Data {
 
                 if elapsed > Duration::from_secs(60) {
                     log::debug!("system suspend detected: {}s", elapsed.as_secs());
-                    // if let Some(wallet_data) = &self.wallet_data {
-                    //     wallet_data.wallet_amp.set_app_state(false);
-                    //     wallet_data.wallet_amp.set_app_state(true);
-                    // }
-
-                    replace_timers(self, Duration::from_secs(5), TimerEvent::ReconnectWallets);
+                    if let Some(wallet_data) = self.wallet_data.as_ref() {
+                        wallet_data.wallet_amp.check_connection();
+                    }
                 }
             }
+
             TargetOs::Android | TargetOs::IOS => {
                 // Not needed, the UI sends proto::to::AppState messages
             }
+        }
+    }
+
+    fn start_fast_sync(&self) {
+        if let Some(wallet_data) = self.wallet_data.as_ref() {
+            wallet_data.wallet_reg.start_fast_sync();
         }
     }
 
@@ -3502,10 +3553,6 @@ fn process_timer_event(data: &mut Data, event: TimerEvent) {
 
         TimerEvent::CleanQuotes => {
             market_worker::clean_quotes(data);
-        }
-
-        TimerEvent::ReconnectWallets => {
-            data.recreate_wallets();
         }
     }
 }

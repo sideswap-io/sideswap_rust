@@ -88,6 +88,9 @@ pub struct Settings {
 
     #[serde(default)]
     pub tx_memos: BTreeMap<elements::Txid, String>,
+
+    #[serde(default)]
+    pub next_recv_address_index: u32,
 }
 
 const SETTINGS_NAME: &str = "settings.json";

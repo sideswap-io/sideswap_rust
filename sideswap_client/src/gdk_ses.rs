@@ -64,9 +64,8 @@ pub struct LoginInfo {
 pub enum WalletNotif {
     Transaction(elements::Txid),
     Block,
-    AccountSynced,
-    RustConnected,
-    RustDisconnected,
+    LwkSynced,
+    LwkFailed { error_msg: String },
     AmpConnected { subaccount: u32, gaid: String },
     AmpDisconnected,
     AmpFailed { error_msg: String },
@@ -130,19 +129,7 @@ pub trait GdkSes: Send + Sync {
 
     fn get_transactions(&self, opts: GetTransactionsOpt) -> Result<TransactionList, anyhow::Error>;
 
-    fn get_address(&self, is_internal: bool) -> Result<models::AddressInfo, anyhow::Error>;
-
     fn broadcast_tx(&self, tx: &str) -> Result<(), anyhow::Error>;
 
     fn get_utxos(&self) -> Result<models::UtxoList, anyhow::Error>;
-
-    fn get_previous_addresses(&self) -> Result<AddressList, anyhow::Error>;
-
-    fn get_receive_address(&self) -> Result<models::AddressInfo, anyhow::Error> {
-        self.get_address(false)
-    }
-
-    fn get_change_address(&self) -> Result<models::AddressInfo, anyhow::Error> {
-        self.get_address(true)
-    }
 }

@@ -39,8 +39,7 @@ impl<'de> serde::Deserialize<'de> for ScriptVariant {
         D: serde::Deserializer<'de>,
     {
         let value = String::deserialize(deserializer)?;
-        let value =
-            lwk_common::Singlesig::from_str(&value).map_err(serde::de::Error::custom)?;
+        let value = lwk_common::Singlesig::from_str(&value).map_err(serde::de::Error::custom)?;
         Ok(ScriptVariant(value))
     }
 }
@@ -435,7 +434,6 @@ impl Wallet {
             &signer,
             script_variant.0,
             lwk_common::DescriptorBlindingKey::Slip77,
-            is_mainnet,
         )
         .expect("must not fail");
 

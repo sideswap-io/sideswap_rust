@@ -54,7 +54,10 @@ enum Command {
         Vec<String>,
         ResSender<PartiallySignedTransaction>,
     ),
-    SetAppState(bool),
+    SetAppState {
+        active: bool,
+    },
+    CheckConnection,
 }
 
 impl Signer for JadeData {
@@ -126,7 +129,25 @@ impl GdkSesAmp {
     }
 
     pub fn set_app_state(&self, active: bool) {
-        let _ = self.command_sender.send(Command::SetAppState(active));
+        let _ = self.command_sender.send(Command::SetAppState { active });
+    }
+
+    pub fn check_connection(&self) {
+        let _ = self.command_sender.send(Command::CheckConnection);
+    }
+
+    pub fn get_address(&self) -> Result<models::AddressInfo, anyhow::Error> {
+        let (res_sender, res_receiver) = oneshot::channel();
+        self.command_sender
+            .send(Command::GetAddress(res_sender.into()))?;
+        res_receiver.blocking_recv()?
+    }
+
+    pub fn get_previous_addresses(&self) -> Result<AddressList, anyhow::Error> {
+        let (res_sender, res_receiver) = oneshot::channel();
+        self.command_sender
+            .send(Command::GetPreviousAddresses(res_sender.into()))?;
+        res_receiver.blocking_recv()?
     }
 }
 
@@ -142,13 +163,6 @@ impl crate::gdk_ses::GdkSes for GdkSesAmp {
         res_receiver.blocking_recv()?
     }
 
-    fn get_address(&self, _is_internal: bool) -> Result<models::AddressInfo, anyhow::Error> {
-        let (res_sender, res_receiver) = oneshot::channel();
-        self.command_sender
-            .send(Command::GetAddress(res_sender.into()))?;
-        res_receiver.blocking_recv()?
-    }
-
     fn broadcast_tx(&self, tx: &str) -> Result<(), anyhow::Error> {
         let (res_sender, res_receiver) = oneshot::channel();
         self.command_sender
@@ -160,13 +174,6 @@ impl crate::gdk_ses::GdkSes for GdkSesAmp {
         let (res_sender, res_receiver) = oneshot::channel();
         self.command_sender
             .send(Command::GetUtxos(res_sender.into()))?;
-        res_receiver.blocking_recv()?
-    }
-
-    fn get_previous_addresses(&self) -> Result<AddressList, anyhow::Error> {
-        let (res_sender, res_receiver) = oneshot::channel();
-        self.command_sender
-            .send(Command::GetPreviousAddresses(res_sender.into()))?;
         res_receiver.blocking_recv()?
     }
 }
@@ -475,6 +482,28 @@ fn process_reconnect_result(data: &mut Data, res: ConnectRes) {
     }
 }
 
+fn check_connection(data: &mut Data) {
+    let wallet = data.wallet.clone();
+
+    match wallet {
+        Some(wallet) => {
+            tokio::spawn(async move {
+                let res = wallet.check_connection().await;
+                match res {
+                    Ok(()) => log::debug!("AMP connection check succeed"),
+                    Err(err) => log::debug!("AMP connection check failed: {err}"),
+                }
+            });
+        }
+
+        None => {
+            log::debug!("reconnect disconnected AMP");
+            data.retry_delay = Default::default();
+            reconnect(data);
+        }
+    }
+}
+
 async fn process_command(data: &mut Data, command: Command) {
     match command {
         Command::GetTransactions(opts, sender) => {
@@ -519,32 +548,18 @@ async fn process_command(data: &mut Data, command: Command) {
             sender.send(res);
         }
 
-        Command::SetAppState(active) => {
+        Command::SetAppState { active } => {
             if data.app_active != active {
                 data.app_active = active;
 
                 if active {
-                    let wallet = data.wallet.clone();
-
-                    match wallet {
-                        Some(wallet) => {
-                            tokio::spawn(async move {
-                                let res = wallet.check_connection().await;
-                                match res {
-                                    Ok(()) => log::debug!("AMP connection check succeed"),
-                                    Err(err) => log::debug!("AMP connection check failed: {err}"),
-                                }
-                            });
-                        }
-
-                        None => {
-                            log::debug!("reconnect disconnected AMP");
-                            data.retry_delay = Default::default();
-                            reconnect(data);
-                        }
-                    }
+                    check_connection(data);
                 }
             }
+        }
+
+        Command::CheckConnection => {
+            check_connection(data);
         }
     }
 }

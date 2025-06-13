@@ -15,6 +15,7 @@ use elements::{
     secp256k1_zkp, AssetId, EcdsaSighashType, OutPoint, Transaction, TxOut, TxOutSecrets, Txid,
     UnblindError,
 };
+use lwk_wollet::Chain;
 use rand::Rng;
 use secp256k1::{SecretKey, SECP256K1};
 use serde_bytes::ByteBuf;
@@ -2230,11 +2231,11 @@ pub enum AddressType {
 
 pub fn get_address(
     worker: &mut super::Data,
-    account_id: Account,
+    account: Account,
     address_type: AddressType,
     cache_policy: CachePolicy,
 ) -> Result<models::AddressInfo, anyhow::Error> {
-    let address_wallet = match (account_id, address_type) {
+    let address_wallet = match (account, address_type) {
         (Account::Reg, AddressType::Receive) => AddressWallet::NativeReceive,
         (Account::Reg, AddressType::Change) => AddressWallet::NativeChange,
         (Account::Amp, _) => AddressWallet::Amp,
@@ -2283,27 +2284,31 @@ pub fn get_address(
                         .address
                     }
                 };
-
-                if expected_address == address.address.address {
-                    return Ok(address.address.clone());
-                }
-
-                log::error!(
-                    "unexpected entry in address_cache: {:?}, expected: {:?}",
-                    address.address,
-                    expected_address
+                assert_eq!(
+                    expected_address, address.address.address,
+                    "wrong cached address"
                 );
-                worker.settings.address_cache.clear();
-                worker.save_settings();
+
+                return Ok(address.address.clone());
             }
         }
         CachePolicy::Skip => {}
     }
 
-    let address = wallet::call(account_id, worker, move |ses| match address_type {
-        AddressType::Receive => ses.get_receive_address(),
-        AddressType::Change => ses.get_change_address(),
-    })?;
+    let wallet_data = worker
+        .wallet_data
+        .as_ref()
+        .ok_or_else(|| anyhow!("no wallet_data"))?;
+
+    let chain = match address_type {
+        AddressType::Receive => Chain::External,
+        AddressType::Change => Chain::Internal,
+    };
+
+    let address = match account {
+        Account::Reg => wallet_data.wallet_reg.get_address(chain, None)?,
+        Account::Amp => wallet_data.wallet_amp.get_address()?,
+    };
 
     match cache_policy {
         CachePolicy::Use => {
@@ -2481,12 +2486,7 @@ pub fn try_order_edit(
     Ok(())
 }
 
-pub fn order_edit(worker: &mut super::Data, mut msg: proto::to::OrderEdit) {
-    // Temporary workaround until the UI is fixed
-    if msg.price_tracking.is_some() {
-        msg.price = None;
-    }
-
+pub fn order_edit(worker: &mut super::Data, msg: proto::to::OrderEdit) {
     let res = try_order_edit(worker, msg);
     let result = proto::GenericResponse {
         success: res.is_ok(),
@@ -2930,6 +2930,7 @@ pub fn accept_quote(worker: &mut super::Data, msg: proto::to::AcceptQuote) {
 
     let resp = match res {
         Ok(txid) => {
+            worker.start_fast_sync();
             proto::from::accept_quote::Result::Success(proto::from::accept_quote::Success {
                 txid: txid.to_string(),
             })

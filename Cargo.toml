@@ -87,3 +87,9 @@ ureq = { version = "2.9", features = ["json", "socks-proxy"] }
 url = "2.3"
 uuid = { version = "1.8" }
 vergen = { version = "5.1", default-features = false, features = ["build", "rustc", "git"] }
+
+[patch.crates-io]
+lwk_common = { git = "https://github.com/sideswap-io/lwk.git", rev = "4e9204862819cfbd7fd846e699c829d3558a4a56" }
+lwk_signer = { git = "https://github.com/sideswap-io/lwk.git", rev = "4e9204862819cfbd7fd846e699c829d3558a4a56" }
+lwk_wollet = { git = "https://github.com/sideswap-io/lwk.git", rev = "4e9204862819cfbd7fd846e699c829d3558a4a56" }
+lwk_jade = { git = "https://github.com/sideswap-io/lwk.git", rev = "4e9204862819cfbd7fd846e699c829d3558a4a56" }
