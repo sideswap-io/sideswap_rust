@@ -287,10 +287,13 @@ impl GdkSesRust {
                 let wallet = account.wallet.read().expect("must not fail");
 
                 let count = match ext_int {
-                    Chain::External => {
-                        let last_unused = wallet.address(None)?.index();
-                        std::cmp::max(last_unused, next_recv_address_index)
-                    }
+                    Chain::External => match account.singlesig {
+                        Singlesig::Wpkh => {
+                            let last_unused = wallet.address(None)?.index();
+                            std::cmp::max(last_unused, next_recv_address_index)
+                        }
+                        Singlesig::ShWpkh => wallet.address(None)?.index(),
+                    },
                     Chain::Internal => wallet.change(None)?.index(),
                 };
 
