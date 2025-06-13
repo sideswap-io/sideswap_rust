@@ -2,19 +2,20 @@ use std::time::Duration;
 
 use rand::Rng;
 
-#[derive(Clone, Debug)]
-pub struct RetryDelay {
-    base: f64,
-    max: f64,
-    multiply: f64,
-    spread: f64,
-}
-
 pub struct RetryDelayOptions {
     pub base: f64,
     pub max: f64,
     pub multiply: f64,
     pub spread: f64,
+}
+
+#[derive(Clone, Debug)]
+pub struct RetryDelay {
+    initial_base: f64,
+    base: f64,
+    max: f64,
+    multiply: f64,
+    spread: f64,
 }
 
 impl RetryDelay {
@@ -25,7 +26,11 @@ impl RetryDelay {
             multiply,
             spread,
         } = options;
+
+        let initial_base = base;
+
         RetryDelay {
+            initial_base,
             base,
             max,
             multiply,
@@ -39,6 +44,10 @@ impl RetryDelay {
         let value = self.base * (1.0 + random);
         self.base = f64::min(self.max, value * self.multiply);
         Duration::from_secs_f64(value)
+    }
+
+    pub fn reset(&mut self) {
+        self.base = self.initial_base;
     }
 }
 
