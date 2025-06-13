@@ -530,10 +530,14 @@ fn run(mut data: WorkerData, command_receiver: Receiver<Command>) {
 
     // FIXME: Rework this
     let mut electrum_client = loop {
-        let socks5 = data.proxy.clone().map(|proxy| Socks5Config {
-            addr: proxy.to_string(),
-            credentials: None,
-        });
+        let socks5 = data
+            .proxy
+            .as_ref()
+            .and_then(ProxyAddress::socks5_address)
+            .map(|socket| Socks5Config {
+                addr: socket.to_string(),
+                credentials: None,
+            });
 
         let res = ElectrumClient::with_options(
             &electrum_url,

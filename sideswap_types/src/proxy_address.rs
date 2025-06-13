@@ -23,6 +23,14 @@ pub enum Error {
     ResolveFailed(#[source] std::io::Error),
 }
 
+impl ProxyAddress {
+    pub fn socks5_address(&self) -> Option<&SocketAddr> {
+        match self {
+            ProxyAddress::Socks5 { address } => Some(address),
+        }
+    }
+}
+
 impl FromStr for ProxyAddress {
     type Err = Error;
 
