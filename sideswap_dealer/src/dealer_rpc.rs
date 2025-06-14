@@ -594,18 +594,22 @@ async fn process_timer(data: &mut Data) {
             dealer_price.dealer.limit_btc_dealer_recv,
             wallet_asset_amount / submit_price.bid,
         ) * INSTANT_SWAP_WORK_AMOUNT;
-        if max_send_asset_amount > 0.0 {
+
+        let max_send_asset_amount = Amount::from_bitcoin(max_send_asset_amount).to_sat();
+        let max_send_bitcoin_amount = Amount::from_bitcoin(max_send_bitcoin_amount).to_sat();
+
+        if max_send_asset_amount > 0 {
             list.push(PriceOffer {
                 client_send_bitcoins: false,
                 price: submit_price.ask,
-                max_send_amount: Amount::from_bitcoin(max_send_asset_amount).to_sat(),
+                max_send_amount: max_send_asset_amount,
             });
         }
-        if max_send_bitcoin_amount > 0.0 {
+        if max_send_bitcoin_amount > 0 {
             list.push(PriceOffer {
                 client_send_bitcoins: true,
                 price: submit_price.bid,
-                max_send_amount: Amount::from_bitcoin(max_send_bitcoin_amount).to_sat(),
+                max_send_amount: max_send_bitcoin_amount,
             });
         }
 
