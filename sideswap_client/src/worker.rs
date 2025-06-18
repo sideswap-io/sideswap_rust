@@ -823,7 +823,7 @@ impl Data {
 
     fn process_wallet_notif(&mut self, account: Account, notification: WalletNotif) {
         if self.get_wallet(account).is_err() {
-            debug!("ignore notification from a deleted wallet, account_id: {account:?}");
+            debug!("ignore notification from a deleted wallet, account: {account:?}");
             return;
         }
 
@@ -2786,6 +2786,7 @@ impl Data {
             let _ = self.ws_hint.send(());
             return;
         }
+
         let ping_response = send_request!(self, Ping, None, SERVER_REQUEST_TIMEOUT_SHORT);
         if ping_response.is_err() {
             debug!("WS connection check failed, reconnecting...");
@@ -2841,6 +2842,7 @@ impl Data {
                     if let Some(wallet_data) = self.wallet_data.as_ref() {
                         wallet_data.wallet_amp.check_connection();
                     }
+                    self.check_ws_connection();
                 }
             }
 
