@@ -435,14 +435,16 @@ async fn connect(
 fn reconnect(data: &mut Data) {
     data.wallet = None;
 
-    let handle = tokio::spawn(connect(
-        data.login_info.clone(),
-        data.event_callback.clone(),
-        false,
-        data.retry_delay.next_delay(),
-    ));
+    if data.connection_task.is_none() {
+        let handle = tokio::spawn(connect(
+            data.login_info.clone(),
+            data.event_callback.clone(),
+            false,
+            data.retry_delay.next_delay(),
+        ));
 
-    data.connection_task = Some(handle);
+        data.connection_task = Some(handle);
+    }
 }
 
 async fn get_reconnect_result(data: &mut Data) -> ConnectRes {
@@ -461,7 +463,7 @@ fn process_reconnect_result(data: &mut Data, res: ConnectRes) {
     match res {
         Ok(wallet) => {
             log::debug!("amp connection succeed");
-            data.retry_delay = Default::default();
+            data.retry_delay.reset();
             data.wallet = Some(wallet);
         }
 
@@ -498,7 +500,7 @@ fn check_connection(data: &mut Data) {
 
         None => {
             log::debug!("reconnect disconnected AMP");
-            data.retry_delay = Default::default();
+            data.retry_delay.reset();
             reconnect(data);
         }
     }
