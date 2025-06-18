@@ -25,9 +25,9 @@ pub enum AssetBalancing {
 }
 
 const RATIO_BTC: Ratio = Ratio {
-    min: 0.45,
+    min: 0.25,
     norm: 0.5,
-    max: 0.55,
+    max: 0.75,
 };
 const RATIO_USDT: Ratio = Ratio {
     min: 0.25,
@@ -115,14 +115,6 @@ pub fn get_balancing(
     {
         return AssetBalancing::None;
     }
-
-    let res =
-        match get_balancing_smaller(balance_wallet_bitcoin, balance_exchange_bitcoin, &RATIO_BTC) {
-            Balancing::None => AssetBalancing::None,
-            Balancing::Recv(amount) => AssetBalancing::RecvBtc(amount),
-            Balancing::Send(amount) => AssetBalancing::SendBtc(amount),
-        };
-    return res;
 
     let bitcoin_total = balance_wallet_bitcoin + balance_exchange_bitcoin;
     let usdt_total = balance_wallet_usdt + balance_exchange_usdt;
