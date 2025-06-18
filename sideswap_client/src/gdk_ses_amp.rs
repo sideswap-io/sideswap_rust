@@ -628,7 +628,7 @@ async fn run(
         b"sideswap_client/amp_cache_key",
     );
 
-    let cache_dir_path = login_info.cache_dir.join(dir_name);
+    let cache_dir_path = login_info.cache_dir.join("amp").join(dir_name);
     std::fs::create_dir_all(&cache_dir_path).expect("must not fail");
     let cache_file_path = cache_dir_path.join("amp_cache.bin");
 

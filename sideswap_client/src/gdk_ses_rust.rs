@@ -23,8 +23,8 @@ use secp256k1::SECP256K1;
 use sideswap_amp::{sw_signer::SwSigner, Signer};
 use sideswap_api::{AssetBlindingFactor, ValueBlindingFactor};
 use sideswap_common::{
-    env::Env, network::Network, path_helpers::path_from_u32, retry_delay::RetryDelay,
-    utxo_select::WalletType,
+    cipher::derive_key, env::Env, network::Network, path_helpers::path_from_u32,
+    retry_delay::RetryDelay, utxo_select::WalletType,
 };
 use sideswap_types::{proxy_address::ProxyAddress, timestamp_ms::TimestampMs};
 
@@ -742,12 +742,38 @@ pub fn start_processing(
                 .parse::<WolletDescriptor>()
                 .expect("must not fail");
 
-            let wallet = lwk_wollet::Wollet::with_fs_persist(
+            let cache_dir_name = hex::encode(&derive_key(
+                &xpub.encode(),
+                b"sideswap_client/lwk_wallet_path",
+            ));
+
+            // TODO: Should we load wallets in backgroun?
+
+            let wallet_dir = login_info.cache_dir.join("lwk").join(&cache_dir_name);
+            let wallet = match lwk_wollet::Wollet::with_fs_persist(
                 lwk_network,
                 descriptor.clone(),
-                &login_info.cache_dir,
-            )
-            .expect("must not fail");
+                &wallet_dir,
+            ) {
+                Ok(wallet) => {
+                    log::debug!("lwk wallet loading succeed, path: {wallet_dir:?}");
+                    wallet
+                }
+                Err(err) => {
+                    log::warn!("lwk wallet loading failed: {err}");
+
+                    log::debug!("try to remove the cache directory: {wallet_dir:?}");
+                    std::fs::remove_dir_all(&wallet_dir)
+                        .expect("removing lwk wallet directory should not fail");
+
+                    lwk_wollet::Wollet::with_fs_persist(
+                        lwk_network,
+                        descriptor.clone(),
+                        &wallet_dir,
+                    )
+                    .expect("creating lwk wallet with a clean cache directory should not fail")
+                }
+            };
 
             let wallet = Arc::new(RwLock::new(wallet));
 
