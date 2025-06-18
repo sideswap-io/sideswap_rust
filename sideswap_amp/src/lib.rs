@@ -1732,11 +1732,12 @@ async fn authenticate(
             let args = arguments.ok_or(Error::ProtocolError("empty response"))?;
 
             if args.first().and_then(|resp| resp.as_bool()) == Some(false) {
-                log::debug!("login failed, not account found");
+                log::debug!("login failed, no account found, resp: {args:?}");
                 return Ok(None);
             }
 
             let auth_res = parse_args1::<models::AuthenticateResult>(args)?;
+            log::debug!("green accounts: {:?}", auth_res.subaccounts);
 
             let next_subaccount = auth_res
                 .subaccounts

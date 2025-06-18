@@ -3,7 +3,7 @@ use sideswap_types::{hex_encoded::HexEncoded, timestamp_us::TimestampUs};
 
 mod helpers;
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct Subaccount {
     pub name: String,
     pub pointer: u32,
