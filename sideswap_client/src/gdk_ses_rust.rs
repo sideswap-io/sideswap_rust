@@ -1,5 +1,4 @@
 use std::{
-    cmp::Ordering,
     collections::HashMap,
     sync::{
         atomic::AtomicUsize,
@@ -164,7 +163,7 @@ impl GdkSesRust {
             let pending_tip_height = tip_height.saturating_sub(1);
             max_tip_height = std::cmp::max(tip_height, max_tip_height);
 
-            let mut my_txids = wallet
+            let my_txids = wallet
                 .store
                 .cache
                 .heights
@@ -176,16 +175,6 @@ impl GdkSesRust {
                             .unwrap_or(true)
                 })
                 .collect::<Vec<_>>();
-
-            my_txids.sort_by(|a, b| {
-                let height_cmp =
-                    b.1.unwrap_or(std::u32::MAX)
-                        .cmp(&a.1.unwrap_or(std::u32::MAX));
-                match height_cmp {
-                    Ordering::Equal => b.0.cmp(a.0),
-                    h @ _ => h,
-                }
-            });
 
             for (txid, _height) in my_txids {
                 let tx = wallet
