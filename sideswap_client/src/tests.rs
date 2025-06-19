@@ -111,6 +111,7 @@ impl Data {
             | proto::from::Msg::LoadUtxos(_)
             | proto::from::Msg::LoadAddresses(_)
             | proto::from::Msg::LoadTransactions(_)
+            | proto::from::Msg::ShowTransaction(_)
             | proto::from::Msg::ShowMessage(_)
             | proto::from::Msg::InsufficientFunds(_)
             | proto::from::Msg::AssetDetails(_)

@@ -312,6 +312,10 @@ message To {
     required string txid = 1;
   }
 
+  message ShowTransaction {
+    optional string txid = 1;
+  }
+
   message UpdatePushToken {
     required string token = 1;
   }
@@ -392,6 +396,7 @@ message To {
     Account load_utxos = 17;
     Account load_addresses = 18;
     Empty load_transactions = 20;
+    ShowTransaction show_transaction = 15;
 
     PegInRequest peg_in_request = 21;
     PegOutAmount peg_out_amount = 24;
@@ -559,6 +564,10 @@ message From {
   message LoadTransactions {
     repeated TransItem txs = 1;
     optional string error_msg = 3;
+  }
+
+  message ShowTransaction {
+    required TransItem tx = 1;
   }
 
   message CreateTxResult {
@@ -831,6 +840,7 @@ message From {
     LoadUtxos load_utxos = 35;
     LoadAddresses load_addresses = 36;
     LoadTransactions load_transactions = 37;
+    ShowTransaction show_transaction = 38;
 
     ShowMessage show_message = 50;
     ShowInsufficientFunds insufficient_funds = 55;

@@ -206,6 +206,7 @@ pub struct WalletData {
     active_extern_peg: Option<ActivePeg>,
     peg_out_server_amounts: Option<LastPegOutAmount>,
     last_recv_address: Option<models::AddressInfo>,
+    watching_txid: Option<elements::Txid>,
 }
 
 #[derive(Clone)]
@@ -375,6 +376,8 @@ impl Data {
     fn send_pending_txs(&mut self) {
         let wallet_data = self.wallet_data.as_mut().expect("must be set");
 
+        let watching_txid = wallet_data.watching_txid;
+
         let merged_txs = Self::merge_txs(wallet_data.pending_txs.clone());
 
         let sent_tx = wallet_data
@@ -392,16 +395,52 @@ impl Data {
             self.wallet_data.as_mut().expect("must be set").sent_txhash = None;
         }
 
+        if let Some(txid) = watching_txid {
+            if let Some(tx) = merged_txs.list.iter().find(|tx| tx.txid == txid) {
+                let tx = convert_tx(&self.settings.tx_memos, merged_txs.tip_height, &tx);
+                self.ui.send(proto::from::Msg::ShowTransaction(
+                    proto::from::ShowTransaction { tx },
+                ));
+            }
+        }
+
         let items = merged_txs
             .list
             .into_iter()
             .map(|tx| convert_tx(&self.settings.tx_memos, merged_txs.tip_height, &tx))
+            .filter(|tx| tx.confs.is_some())
             .collect::<Vec<_>>();
 
         self.ui
             .send(proto::from::Msg::UpdatedTxs(proto::from::UpdatedTxs {
                 items,
             }));
+    }
+
+    fn reload_pending(&mut self, account: Account) {
+        let watching_txid = self
+            .wallet_data
+            .as_ref()
+            .and_then(|wallet_data| wallet_data.watching_txid);
+
+        wallet::callback(
+            account,
+            self,
+            move |ses| {
+                ses.get_transactions(gdk_ses::GetTransactionsOpt::PendingOnly { watching_txid })
+            },
+            move |data, res| match res {
+                Ok(resp) => {
+                    if let Some(wallet_data) = data.wallet_data.as_mut() {
+                        wallet_data.pending_txs.insert(account, resp);
+                        data.send_pending_txs();
+                    }
+                }
+                Err(err) => {
+                    log::error!("loading pending txs failed: {err}");
+                }
+            },
+        );
     }
 
     fn sync_wallet(&mut self, account: Account) {
@@ -458,27 +497,12 @@ impl Data {
                         },
                     ));
 
+                    data.reload_pending(account);
+
                     data.update_address_registrations();
                 }
                 Err(err) => {
                     log::error!("loading utxos failed: {err}");
-                }
-            },
-        );
-
-        wallet::callback(
-            account,
-            self,
-            |ses| ses.get_transactions(gdk_ses::GetTransactionsOpt::PendingOnly),
-            move |data, res| match res {
-                Ok(resp) => {
-                    if let Some(wallet_data) = data.wallet_data.as_mut() {
-                        wallet_data.pending_txs.insert(account, resp);
-                        data.send_pending_txs();
-                    }
-                }
-                Err(err) => {
-                    log::error!("loading pending txs failed: {err}");
                 }
             },
         );
@@ -2052,6 +2076,7 @@ impl Data {
             active_extern_peg: None,
             peg_out_server_amounts: None,
             last_recv_address: None,
+            watching_txid: None,
         });
 
         if self.skip_wallet_sync() {
@@ -2120,6 +2145,7 @@ impl Data {
             active_extern_peg,
             peg_out_server_amounts,
             last_recv_address,
+            watching_txid,
         } = wallet_data;
 
         let mut login_info_reg = wallet_reg.login_info().clone();
@@ -2154,6 +2180,7 @@ impl Data {
             active_extern_peg,
             peg_out_server_amounts,
             last_recv_address,
+            watching_txid,
         });
     }
 
@@ -2593,6 +2620,17 @@ impl Data {
         ));
     }
 
+    fn process_show_transaction(&mut self, req: proto::to::ShowTransaction) {
+        if let Some(wallet_data) = self.wallet_data.as_mut() {
+            let txid = req
+                .txid
+                .map(|txid| elements::Txid::from_str(&txid).expect("must be valid txid"));
+            wallet_data.watching_txid = txid;
+            self.reload_pending(Account::Reg);
+            self.reload_pending(Account::Amp);
+        }
+    }
+
     fn process_update_push_token(&mut self, req: proto::to::UpdatePushToken) {
         self.push_token = Some(req.token);
         self.update_push_token();
@@ -2892,6 +2930,7 @@ impl Data {
                 self.process_load_addresses(Account::try_from(req).expect("must be valid"))
             }
             proto::to::Msg::LoadTransactions(_req) => self.process_load_transactions(),
+            proto::to::Msg::ShowTransaction(req) => self.process_show_transaction(req),
             proto::to::Msg::UpdatePushToken(req) => self.process_update_push_token(req),
             proto::to::Msg::AssetDetails(req) => self.process_asset_details(req),
             proto::to::Msg::PortfolioPrices(_) => self.process_portfolio_prices(),

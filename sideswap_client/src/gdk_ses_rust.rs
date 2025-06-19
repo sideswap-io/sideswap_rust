@@ -147,9 +147,9 @@ impl GdkSesRust {
         &self,
         opts: GetTransactionsOpt,
     ) -> Result<TransactionList, anyhow::Error> {
-        let pending_only = match opts {
-            GetTransactionsOpt::PendingOnly => true,
-            GetTransactionsOpt::All => false,
+        let (pending_only, watching_txid) = match opts {
+            GetTransactionsOpt::PendingOnly { watching_txid } => (true, watching_txid),
+            GetTransactionsOpt::All => (false, None),
         };
 
         let mut combined = HashMap::<Txid, models::Transaction>::new();
@@ -168,11 +168,12 @@ impl GdkSesRust {
                 .cache
                 .heights
                 .iter()
-                .filter(|(_, height)| {
+                .filter(|(txid, height)| {
                     !pending_only
                         || height
                             .map(|height| height >= pending_tip_height)
                             .unwrap_or(true)
+                        || watching_txid == Some(**txid)
                 })
                 .collect::<Vec<_>>();
 

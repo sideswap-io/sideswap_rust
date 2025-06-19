@@ -214,9 +214,9 @@ async fn get_transactions(
         Err(err) => log::error!("tx cache save failed: {err}"),
     }
 
-    let pending_only = match opts {
-        GetTransactionsOpt::PendingOnly => true,
-        GetTransactionsOpt::All => false,
+    let (pending_only, watching_txid) = match opts {
+        GetTransactionsOpt::PendingOnly { watching_txid } => (true, watching_txid),
+        GetTransactionsOpt::All => (false, None),
     };
 
     let txs = data
@@ -224,7 +224,12 @@ async fn get_transactions(
         .data()
         .txs()
         .iter()
-        .filter(|tx| !pending_only || tx.block_height == 0 || tx.block_height >= pending_tip_height)
+        .filter(|tx| {
+            !pending_only
+                || tx.block_height == 0
+                || tx.block_height >= pending_tip_height
+                || watching_txid == Some(tx.txid)
+        })
         .map(|tx| models::Transaction {
             txid: tx.txid,
             network_fee: tx.network_fee,

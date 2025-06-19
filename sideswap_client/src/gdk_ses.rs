@@ -110,7 +110,9 @@ impl WalletInfo {
 
 #[derive(Copy, Clone)]
 pub enum GetTransactionsOpt {
-    PendingOnly,
+    PendingOnly {
+        watching_txid: Option<elements::Txid>,
+    },
     All,
 }
 
