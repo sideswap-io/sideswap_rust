@@ -521,7 +521,6 @@ fn run(mut data: WorkerData, command_receiver: Receiver<Command>) {
 
     let mut retry_delay = RetryDelay::default();
 
-    // FIXME: Rework this
     let mut electrum_client = loop {
         let socks5 = data
             .proxy
@@ -606,8 +605,6 @@ fn run(mut data: WorkerData, command_receiver: Receiver<Command>) {
 
         match res {
             Ok(Some(update)) => {
-                error_delay.reset();
-
                 let new_tip_height = update.tip.height;
 
                 let new_txids = update
@@ -638,6 +635,8 @@ fn run(mut data: WorkerData, command_receiver: Receiver<Command>) {
                         for new_txid in new_txids {
                             (data.notif_callback)(Account::Reg, WalletNotif::Transaction(new_txid));
                         }
+
+                        error_delay.reset();
                     }
 
                     Err(err) => {
