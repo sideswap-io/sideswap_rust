@@ -38,6 +38,7 @@ use sideswap_common::{
     target_os::TargetOs,
     types::{asset_float_amount_, asset_int_amount_, asset_scale},
     utxo_select::{self, WalletType},
+    verify,
 };
 use sideswap_jade::jade_mng::{self, AE_STUB_DATA};
 use sideswap_types::{
@@ -110,6 +111,12 @@ struct ReceivedQuote {
     expires_at: Instant,
 }
 
+struct RetryStartQuote {
+    msg: proto::to::StartQuotes,
+    order_id: Option<u64>,
+    private_id: Option<String>,
+}
+
 pub struct Data {
     selected_market: Option<AssetPair>,
     own_orders: BTreeMap<OrdId, OwnOrder>,
@@ -121,6 +128,7 @@ pub struct Data {
     server_markets: Vec<MarketInfo>,
     token_quotes: Vec<AssetId>,
     ui_markets: Vec<proto::MarketInfo>,
+    retry_start_quote: Option<RetryStartQuote>,
 }
 
 pub fn new() -> Data {
@@ -135,6 +143,7 @@ pub fn new() -> Data {
         server_markets: Vec::new(),
         token_quotes: Vec::new(),
         ui_markets: Vec::new(),
+        retry_start_quote: None,
     }
 }
 
@@ -2520,6 +2529,22 @@ pub fn order_cancel(worker: &mut super::Data, msg: proto::to::OrderCancel) {
     worker.ui.send(proto::from::Msg::OrderCancel(result));
 }
 
+#[derive(thiserror::Error, Debug)]
+pub enum StartQuoteError {
+    #[error(transparent)]
+    Call(#[from] CallError),
+    #[error("asset is not registered, asset_id: {0}")]
+    UnknownAsset(AssetId),
+    #[error("min_order_amounts is not known")]
+    NoMinAmount,
+    #[error("can't find asset in min_order_amounts")]
+    UnknownMinAmountAsset,
+    #[error("no wallet_data")]
+    NoWalletData,
+    #[error(transparent)]
+    Address(anyhow::Error),
+}
+
 fn try_start_quotes(
     worker: &mut super::Data,
     msg: proto::to::StartQuotes,
@@ -2527,15 +2552,15 @@ fn try_start_quotes(
     receive_address: models::AddressInfo,
     order_id: Option<u64>,
     private_id: Option<String>,
-) -> Result<StartedQuote, anyhow::Error> {
+) -> Result<StartedQuote, StartQuoteError> {
     let asset_pair = AssetPair::from(&msg.asset_pair);
 
     worker.add_gdk_assets_for_asset_pair(std::iter::once(&asset_pair));
 
     for asset_id in [asset_pair.base, asset_pair.quote] {
-        ensure!(
+        verify!(
             worker.assets.contains_key(&asset_id),
-            "asset is not registered, asset_id: {asset_id}"
+            StartQuoteError::UnknownAsset(asset_id)
         );
     }
 
@@ -2550,7 +2575,7 @@ fn try_start_quotes(
             .settings
             .min_order_amounts
             .as_ref()
-            .ok_or_else(|| anyhow!("min_order_amounts is not known"))?;
+            .ok_or(StartQuoteError::NoMinAmount)?;
         let known_assets = &worker.env.nd().known_assets;
 
         let selected_assets = [
@@ -2564,7 +2589,7 @@ fn try_start_quotes(
             .find(|(asset_id, _min_amount)| {
                 *asset_id == asset_pair.base || *asset_id == asset_pair.quote
             })
-            .ok_or_else(|| anyhow!("can't find asset in min_order_amounts"))?;
+            .ok_or_else(|| StartQuoteError::UnknownMinAmountAsset)?;
 
         let orig_asset_type = AssetType::from(msg.asset_type());
         let orig_trade_dir = TradeDir::from(msg.trade_dir());
@@ -2596,7 +2621,7 @@ fn try_start_quotes(
     let wallet_data = worker
         .wallet_data
         .as_ref()
-        .ok_or_else(|| anyhow!("no wallet_data"))?;
+        .ok_or(StartQuoteError::NoWalletData)?;
     let utxos = wallet_data
         .wallet_utxos
         .iter()
@@ -2612,7 +2637,8 @@ fn try_start_quotes(
         swap_info.change_wallet,
         AddressType::Change,
         CachePolicy::Use,
-    )?;
+    )
+    .map_err(StartQuoteError::Address)?;
 
     let resp = send_market_request!(
         worker,
@@ -2745,7 +2771,7 @@ pub fn start_quotes(
         }
         Err(err) => {
             worker.ui.send(proto::from::Msg::Quote(proto::from::Quote {
-                asset_pair: msg.asset_pair,
+                asset_pair: msg.asset_pair.clone(),
                 asset_type: msg.asset_type,
                 amount: msg.amount,
                 trade_dir: msg.trade_dir,
@@ -2753,6 +2779,37 @@ pub fn start_quotes(
                 client_sub_id: msg.client_sub_id,
                 result: Some(proto::from::quote::Result::Error(err.to_string())),
             }));
+
+            let retry = match err {
+                StartQuoteError::Call(err) => match err {
+                    CallError::UnknownUtxo | CallError::Disconnected => true,
+
+                    CallError::Backend(_)
+                    | CallError::UnregisteredGaid(_)
+                    | CallError::Timeout
+                    | CallError::UnexpectedResponse => false,
+                },
+
+                StartQuoteError::UnknownAsset(_)
+                | StartQuoteError::NoMinAmount
+                | StartQuoteError::UnknownMinAmountAsset
+                | StartQuoteError::NoWalletData
+                | StartQuoteError::Address(_) => false,
+            };
+
+            if retry {
+                worker.market.retry_start_quote = Some(RetryStartQuote {
+                    msg,
+                    order_id,
+                    private_id,
+                });
+
+                worker::replace_timers(
+                    worker,
+                    Duration::from_secs(1),
+                    worker::TimerEvent::RetryStartQuote,
+                );
+            }
         }
     }
 }
@@ -2824,6 +2881,9 @@ pub fn stop_quotes(worker: &mut super::Data, _msg: proto::Empty) {
     worker.market.started_quote = None;
 
     send_market_req(worker, mkt::Request::StopQuotes(mkt::StopQuotesRequest {}));
+
+    worker.market.retry_start_quote = None;
+    super::remove_timers(worker, worker::TimerEvent::RetryStartQuote);
 }
 
 fn try_accept_quote(
@@ -3160,4 +3220,15 @@ pub fn clean_quotes(worker: &mut super::Data) {
         Duration::from_secs(1),
         worker::TimerEvent::CleanQuotes,
     );
+}
+
+pub fn retry_start_quote(worker: &mut super::Data) {
+    if let Some(RetryStartQuote {
+        msg,
+        order_id,
+        private_id,
+    }) = worker.market.retry_start_quote.take()
+    {
+        start_quotes(worker, msg, order_id, private_id);
+    }
 }

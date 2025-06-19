@@ -178,6 +178,7 @@ enum TimerEvent {
     SyncUtxos,
     SendAck,
     CleanQuotes,
+    RetryStartQuote,
 }
 
 struct CreatedTx {
@@ -3632,6 +3633,10 @@ fn process_timer_event(data: &mut Data, event: TimerEvent) {
 
         TimerEvent::CleanQuotes => {
             market_worker::clean_quotes(data);
+        }
+
+        TimerEvent::RetryStartQuote => {
+            market_worker::retry_start_quote(data);
         }
     }
 }
