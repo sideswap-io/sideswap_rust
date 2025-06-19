@@ -48,6 +48,7 @@ use sideswap_common::utxo_select::{self, WalletType};
 use sideswap_common::ws::next_request_id;
 use sideswap_common::{abort, b64, pin, verify};
 use sideswap_jade::jade_mng::{self, JadeStatus, JadeStatusCallback, ManagedJade};
+use sideswap_types::asset_precision::AssetPrecision;
 use sideswap_types::fee_rate::FeeRateSats;
 use sideswap_types::proxy_address::ProxyAddress;
 use tokio::sync::mpsc::UnboundedSender;
@@ -476,7 +477,7 @@ impl Data {
                         }
                     }
 
-                    data.add_missing_gdk_assets(utxos.keys());
+                    data.add_missing_assets(utxos.keys(), true);
 
                     let balances = utxos
                         .iter()
@@ -3062,18 +3063,54 @@ impl Data {
         }
     }
 
-    fn add_missing_gdk_assets<'a>(&mut self, asset_ids: impl Iterator<Item = &'a AssetId>) {
+    fn add_missing_assets<'a>(
+        &mut self,
+        asset_ids: impl Iterator<Item = &'a AssetId>,
+        add_unregistered: bool,
+    ) {
         // Do not replace existing asset information (like market_type)
         let new_asset_ids = asset_ids
+            .copied()
             .filter(|asset_id| !self.assets.contains_key(asset_id))
             .collect::<BTreeSet<_>>();
         if !new_asset_ids.is_empty() {
+            let expected_asset_count = new_asset_ids.len();
             let new_assets = self
-                .load_gdk_assets(new_asset_ids.into_iter())
+                .load_gdk_assets(new_asset_ids.iter())
                 .ok()
                 .unwrap_or_default();
+            let gdk_asset_count = new_assets.len();
+
             for asset in new_assets {
                 self.register_asset(asset);
+            }
+
+            if expected_asset_count != gdk_asset_count && add_unregistered {
+                for asset_id in new_asset_ids {
+                    if !self.assets.contains_key(&asset_id) {
+                        let asset_id_str = asset_id.to_string();
+                        self.register_asset(api::Asset {
+                            asset_id,
+                            name: asset_id_str[0..12].to_owned(),
+                            ticker: api::Ticker(asset_id_str[0..6].to_owned()),
+                            icon: None,
+                            precision: AssetPrecision::BITCOIN_PRECISION,
+                            icon_url: None,
+                            instant_swaps: None,
+                            domain: None,
+                            domain_agent: None,
+                            domain_agent_link: None,
+                            always_show: None,
+                            issuance_prevout: None,
+                            issuer_pubkey: None,
+                            contract: None,
+                            market_type: None,
+                            server_fee: None,
+                            amp_asset_restrictions: None,
+                            payjoin: None,
+                        });
+                    }
+                }
             }
         }
     }
@@ -3085,7 +3122,7 @@ impl Data {
         let assets = asset_pairs
             .into_iter()
             .flat_map(|asset_pair| [&asset_pair.base, &asset_pair.quote]);
-        self.add_missing_gdk_assets(assets);
+        self.add_missing_assets(assets, false);
     }
 
     pub fn register_asset(&mut self, asset: api::Asset) {

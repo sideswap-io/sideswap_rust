@@ -3101,7 +3101,7 @@ fn sync_market_list(worker: &mut super::Data) {
         .union(&wallet_token_assets)
         .copied()
         .collect::<Vec<_>>();
-    worker.add_missing_gdk_assets(all_assets.iter());
+    worker.add_missing_assets(all_assets.iter(), false);
 
     let mut market_list = Vec::<proto::MarketInfo>::new();
     let mut asset_pairs = BTreeSet::<AssetPair>::new();
