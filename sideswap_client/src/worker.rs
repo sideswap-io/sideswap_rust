@@ -34,6 +34,7 @@ use market_worker::{get_wallet_account, REGISTER_PATH};
 use serde::{Deserialize, Serialize};
 use sideswap_amp::sw_signer::SwSigner;
 use sideswap_api::mkt::AssetPair;
+use sideswap_common::cipher::derive_key;
 use sideswap_common::env::Env;
 use sideswap_common::event_proofs::EventProofs;
 use sideswap_common::network::Network;
@@ -142,6 +143,12 @@ struct ActivePeg {
 struct ServerResp(String, Result<api::Response, api::Error>);
 
 type FromCallback = Arc<dyn Fn(proto::from::Msg) -> bool + Send + Sync>;
+
+#[derive(Serialize)]
+enum LoginId {
+    Mnemonic { mnemonic: bip39::Mnemonic },
+    Jade { jade_id: String },
+}
 
 enum LoginData {
     Mnemonic { mnemonic: bip39::Mnemonic },
@@ -1899,20 +1906,49 @@ impl Data {
 
         let wallet = req.wallet.ok_or_else(|| anyhow!("empty login request"))?;
 
-        let login_data = match wallet {
+        let (login_data, login_id) = match wallet {
             proto::to::login::Wallet::Mnemonic(mnemonic) => {
                 let mnemonic = bip39::Mnemonic::from_str(&mnemonic)?;
-                LoginData::Mnemonic { mnemonic }
+                (
+                    LoginData::Mnemonic {
+                        mnemonic: mnemonic.clone(),
+                    },
+                    LoginId::Mnemonic { mnemonic },
+                )
             }
 
             proto::to::login::Wallet::JadeId(jade_id) => {
                 let proxy = self.proxy().clone();
                 let jade = self.jade_mng.open(&jade_id, &proxy)?;
-                LoginData::Jade {
-                    jade: Arc::new(jade),
-                }
+                (
+                    LoginData::Jade {
+                        jade: Arc::new(jade),
+                    },
+                    LoginId::Jade { jade_id },
+                )
             }
         };
+
+        let login_id = serde_json::to_string(&login_id).expect("must not fail");
+        let login_id = hex::encode(&derive_key(
+            &login_id.as_bytes(),
+            b"sideswap_client/login_id",
+        ));
+        match self.settings.login_id.as_ref() {
+            Some(old_login_id) => {
+                if *old_login_id != login_id {
+                    log::warn!("new login_id detected: {login_id}, old_login_id: {old_login_id}, reset settings...");
+                    self.settings = settings::Settings::default();
+                    self.settings.login_id = Some(login_id);
+                    self.save_settings();
+                    self.restart_websocket();
+                }
+            }
+            None => {
+                self.settings.login_id = Some(login_id);
+                self.save_settings();
+            }
+        }
 
         let reg_info = match self.settings.reg_info.clone() {
             Some(reg_info) => reg_info,

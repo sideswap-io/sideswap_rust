@@ -91,6 +91,10 @@ pub struct Settings {
 
     #[serde(default)]
     pub next_recv_address_index: u32,
+
+    /// The previous hash of the mnemonic or jade id used for login.
+    /// The old settings must be cleared when it changes.
+    pub login_id: Option<String>,
 }
 
 const SETTINGS_NAME: &str = "settings.json";
