@@ -95,7 +95,6 @@ struct SwapInfo {
     send_asset: AssetId,
     recv_asset: AssetId,
     recv_amp_asset: bool,
-    utxo_wallets: BTreeSet<Account>,
     receive_wallet: Account,
     change_wallet: Account,
 }
@@ -1959,7 +1958,6 @@ fn try_offline_order_submit(
     let utxo = wallet_data
         .wallet_utxos
         .iter()
-        .filter(|(account, _utxos)| swap_info.utxo_wallets.contains(*account))
         .flat_map(|(_account, utxos)| utxos.values())
         .flatten()
         .find(|utxo| {
@@ -2622,15 +2620,19 @@ fn try_start_quotes(
         .wallet_data
         .as_ref()
         .ok_or(StartQuoteError::NoWalletData)?;
-    let utxos = wallet_data
-        .wallet_utxos
-        .iter()
-        .filter(|(account, _utxos)| swap_info.utxo_wallets.contains(*account) && !ind_price)
-        .flat_map(|(_account, utxos)| utxos.values())
-        .flatten()
-        .filter(|utxo| utxo.asset_id == swap_info.send_asset)
-        .cloned()
-        .collect::<Vec<_>>();
+
+    let utxos = if !ind_price {
+        wallet_data
+            .wallet_utxos
+            .iter()
+            .flat_map(|(_account, utxos)| utxos.values())
+            .flatten()
+            .filter(|utxo| utxo.asset_id == swap_info.send_asset)
+            .cloned()
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
 
     let change_address = get_address(
         worker,
@@ -2688,9 +2690,6 @@ fn get_swap_info(
     let send_amp_asset = worker.amp_assets.contains(&send_asset);
     let recv_amp_asset = worker.amp_assets.contains(&recv_asset);
 
-    // Use both wallets, Jade can now sign from both
-    let utxo_wallets = BTreeSet::from([Account::Reg, Account::Amp]);
-
     let receive_wallet = if recv_amp_asset {
         Account::Amp
     } else {
@@ -2707,7 +2706,6 @@ fn get_swap_info(
         send_asset,
         recv_asset,
         recv_amp_asset,
-        utxo_wallets,
         receive_wallet,
         change_wallet,
     }
