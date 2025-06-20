@@ -387,6 +387,14 @@ impl Data {
             .as_ref()
             .and_then(|sent_txhash| merged_txs.list.iter().find(|tx| tx.txid == *sent_txhash));
 
+        let all_asset_ids = merged_txs
+            .list
+            .iter()
+            .flat_map(|tx| [tx.inputs.iter(), tx.outputs.iter()])
+            .flatten()
+            .map(|in_out| &in_out.unblinded.asset);
+        self.add_missing_assets(all_asset_ids, true);
+
         if let Some(sent_tx) = sent_tx {
             let sent_tx = convert_tx(&self.settings.tx_memos, merged_txs.tip_height, sent_tx);
             let result = proto::from::send_result::Result::TxItem(sent_tx);
@@ -2601,6 +2609,14 @@ impl Data {
         }
 
         let merged_txs = Self::merge_txs(txs);
+
+        let all_asset_ids = merged_txs
+            .list
+            .iter()
+            .flat_map(|tx| [tx.inputs.iter(), tx.outputs.iter()])
+            .flatten()
+            .map(|in_out| &in_out.unblinded.asset);
+        self.add_missing_assets(all_asset_ids, true);
 
         let merged_list = merged_txs
             .list
