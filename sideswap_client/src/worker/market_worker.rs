@@ -975,6 +975,8 @@ fn process_ws_quote(worker: &mut super::Data, notif: mkt::QuoteNotif) {
                     fixed_fee,
                     ttl_milliseconds: ttl.as_millis(),
                     price_taker,
+                    send_amount,
+                    recv_amount,
                 })
             }
         }
@@ -1035,6 +1037,8 @@ fn process_ws_quote(worker: &mut super::Data, notif: mkt::QuoteNotif) {
                     fixed_fee,
                     available,
                     price_taker,
+                    send_amount,
+                    recv_amount,
                 })
             }
         }

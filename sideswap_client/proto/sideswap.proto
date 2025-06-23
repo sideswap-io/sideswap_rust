@@ -739,6 +739,8 @@ message From {
       required uint64 ttl_milliseconds = 6;
       // The price that includes `server_fee` but excludes `fixed_fee`
       required double price_taker = 7;
+      required uint64 send_amount = 8;
+      required uint64 recv_amount = 9;
     }
 
     message LowBalance {
@@ -749,6 +751,8 @@ message From {
       required uint64 available = 5;
       // The price that includes `server_fee` but excludes `fixed_fee`
       required double price_taker = 6;
+      required uint64 send_amount = 7;
+      required uint64 recv_amount = 8;
     }
 
     message IndPrice {
