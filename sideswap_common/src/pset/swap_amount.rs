@@ -9,7 +9,7 @@ use sideswap_api::{AssetBlindingFactor, ValueBlindingFactor};
 
 use crate::verify;
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SwapAmount {
     pub send_asset: AssetId,
     pub send_amount: u64,
@@ -28,8 +28,8 @@ pub fn get_swap_amount(
     utxos: &[sideswap_api::Utxo],
     receive_address: &elements::Address,
     change_address: &elements::Address,
-    receive_ephemeral_sk: SecretKey,
-    change_ephemeral_sk: Option<SecretKey>,
+    receive_ephemeral_sk: &SecretKey,
+    change_ephemeral_sk: &Option<SecretKey>,
 ) -> Result<SwapAmount, Error> {
     let txid = tx.txid();
     let mut inputs = BTreeMap::<AssetId, u64>::new();
@@ -62,8 +62,9 @@ pub fn get_swap_amount(
         let (address, ephemeral_sk) = if output.script_pubkey == receive_pubkey {
             (receive_address, receive_ephemeral_sk)
         } else if output.script_pubkey == change_pubkey {
-            let change_ephemeral_sk =
-                change_ephemeral_sk.ok_or(Error::Protocol("change_ephemeral_sk is not set"))?;
+            let change_ephemeral_sk = change_ephemeral_sk
+                .as_ref()
+                .ok_or(Error::Protocol("change_ephemeral_sk is not set"))?;
             (change_address, change_ephemeral_sk)
         } else {
             continue;
@@ -73,8 +74,11 @@ pub fn get_swap_amount(
             .blinding_pubkey
             .ok_or(Error::Protocol("addresses must be confidential"))?;
 
-        let (nonce, shared_secret) =
-            elements::confidential::Nonce::with_ephemeral_sk(SECP256K1, ephemeral_sk, &blinding_pk);
+        let (nonce, shared_secret) = elements::confidential::Nonce::with_ephemeral_sk(
+            SECP256K1,
+            *ephemeral_sk,
+            &blinding_pk,
+        );
 
         let commitment = output
             .value

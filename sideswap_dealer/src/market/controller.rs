@@ -13,7 +13,7 @@ use sideswap_common::{
     types::asset_int_amount_,
     verify,
 };
-use sideswap_types::{normal_float::NormalFloat, timestamp_ms::TimestampMs};
+use sideswap_types::{chain::Chain, normal_float::NormalFloat, timestamp_ms::TimestampMs};
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
 
 use super::{
@@ -157,9 +157,10 @@ impl Controller {
         Ok(resp)
     }
 
-    pub async fn new_address(&self) -> Result<Address, Error> {
+    pub async fn new_address(&self, chain: Chain) -> Result<Address, Error> {
         let (res_sender, res_receiver) = oneshot::channel();
         self.make_request(ClientCommand::NewAddress {
+            chain,
             res_sender: res_sender.into(),
         })?;
         let address = res_receiver.await?.map_err(Error::Wallet)?;
@@ -174,7 +175,7 @@ impl Controller {
             let gaid = self.get_gaid().await?;
             self.resolve_gaid(recv_asset_id, gaid).await?
         } else {
-            self.new_address().await?
+            self.new_address(Chain::External).await?
         };
         Ok(receive_address)
     }
@@ -194,7 +195,7 @@ impl Controller {
         let recv_asset_id = self.ticker_loader.asset_id(recv_asset);
 
         let receive_address = self.resolve_recv_address(*recv_asset_id).await?;
-        let change_address = self.new_address().await?;
+        let change_address = self.new_address(Chain::Internal).await?;
 
         let (res_sender, res_receiver) = oneshot::channel();
         self.make_request(ClientCommand::SubmitOrder {
@@ -320,7 +321,7 @@ impl Controller {
         let receive_asset_id = asset_pair.asset(recv_asset);
 
         let receive_address = self.resolve_recv_address(receive_asset_id).await?;
-        let change_address = self.new_address().await?;
+        let change_address = self.new_address(Chain::Internal).await?;
 
         let asset = exchange_pair.asset(asset_type);
         let asset_precision = self.ticker_loader.precision(asset);

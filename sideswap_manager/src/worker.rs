@@ -23,8 +23,8 @@ use sideswap_common::{
     },
 };
 use sideswap_dealer::utxo_data::UtxoData;
-use sideswap_types::utxo_ext::UtxoExt;
 use sideswap_types::{asset_precision::AssetPrecision, timestamp_ms::TimestampMs};
+use sideswap_types::{chain::Chain, utxo_ext::UtxoExt};
 use sqlx::types::Text;
 use tokio::{
     sync::mpsc::{unbounded_channel, UnboundedReceiver},
@@ -320,13 +320,13 @@ async fn del_peg(
 
 async fn get_new_address(
     data: &Data,
-    change: bool,
+    chain: Chain,
     index: Option<u32>,
 ) -> Result<sideswap_lwk::NewAddrResp, Error> {
     let (res_sender, res_receiver) = tokio::sync::oneshot::channel();
     data.wallet_command_sender
         .send(sideswap_lwk::Command::NewAdddress {
-            req: sideswap_lwk::NewAddrReq { change, index },
+            req: sideswap_lwk::NewAddrReq { chain, index },
             res_sender: res_sender.into(),
         })?;
     let resp = res_receiver.await??;
@@ -337,7 +337,7 @@ async fn new_address(
     data: &mut Data,
     api::NewAddressReq { user_note }: api::NewAddressReq,
 ) -> Result<api::NewAddressResp, Error> {
-    let first_unused_wallet = get_new_address(data, false, None).await?.index;
+    let first_unused_wallet = get_new_address(data, Chain::External, None).await?.index;
     let first_unused_db = data
         .addresses
         .last_key_value()
@@ -346,7 +346,7 @@ async fn new_address(
     let new_index = u32::max(first_unused_wallet, first_unused_db);
     verify!(new_index - first_unused_wallet < GAP_LIMIT, Error::GapLimit);
 
-    let new_address = get_new_address(data, false, Some(new_index)).await?;
+    let new_address = get_new_address(data, Chain::External, Some(new_index)).await?;
 
     let addr = models::Address {
         ind: new_index.into(),
@@ -569,7 +569,7 @@ async fn get_quote(data: &mut Data, req: api::GetQuoteReq) -> Result<api::GetQuo
 
     // TODO: Reuse addresses
     let receive_address = req.receive_address;
-    let change_address = get_new_address(data, true, None).await?.address;
+    let change_address = get_new_address(data, Chain::Internal, None).await?.address;
 
     let utxos = data
         .utxo_data
@@ -696,8 +696,8 @@ async fn get_quote(data: &mut Data, req: api::GetQuoteReq) -> Result<api::GetQuo
                 utxo_data.utxos(),
                 &receive_address,
                 &change_address,
-                quote_resp.receive_ephemeral_sk,
-                quote_resp.change_ephemeral_sk,
+                &quote_resp.receive_ephemeral_sk,
+                &quote_resp.change_ephemeral_sk,
             )?;
 
             let expected_swap_amount = SwapAmount {

@@ -4417,6 +4417,7 @@ dependencies = [
  "sideswap_api",
  "sideswap_common",
  "sideswap_dealer",
+ "sideswap_types",
  "thiserror 1.0.69",
  "tokio",
 ]

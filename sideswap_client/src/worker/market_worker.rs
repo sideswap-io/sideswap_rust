@@ -2968,8 +2968,8 @@ fn try_accept_quote(
             .collect::<Vec<_>>(),
         &started_quote.receive_address.address,
         &started_quote.change_address.address,
-        resp.receive_ephemeral_sk,
-        resp.change_ephemeral_sk,
+        &resp.receive_ephemeral_sk,
+        &resp.change_ephemeral_sk,
     )
     .with_context(|| "swap amount error")?;
 

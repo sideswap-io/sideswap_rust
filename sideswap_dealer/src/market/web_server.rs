@@ -9,7 +9,7 @@ use poem_openapi::{
 use serde::Deserialize;
 use sideswap_api::mkt::OrdId;
 use sideswap_common::{dealer_ticker::DealerTicker, exchange_pair::ExchangePair};
-use sideswap_types::{normal_float::NormalFloat, timestamp_ms::TimestampMs};
+use sideswap_types::{chain::Chain, normal_float::NormalFloat, timestamp_ms::TimestampMs};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
@@ -49,7 +49,11 @@ impl Api {
     /// Get a new receiving address
     #[oai(path = "/new_address", method = "get")]
     async fn new_address(&self) -> Result<PlainText<String>, ErrorResponse> {
-        let resp = self.controller.new_address().await?.to_string();
+        let resp = self
+            .controller
+            .new_address(Chain::External)
+            .await?
+            .to_string();
         Ok(PlainText(resp))
     }
 

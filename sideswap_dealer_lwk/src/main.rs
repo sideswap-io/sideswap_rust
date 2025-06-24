@@ -8,6 +8,7 @@ use sideswap_common::channel_helpers::{UncheckedOneshotSender, UncheckedUnbounde
 use sideswap_common::dealer_ticker::{TickerLoader, WhitelistedAssets};
 use sideswap_dealer::utxo_data::UtxoData;
 use sideswap_dealer::{market, price_stream, utxo_data};
+use sideswap_types::chain::Chain;
 use tokio::sync::oneshot;
 
 #[derive(Debug, serde::Deserialize)]
@@ -47,15 +48,12 @@ fn process_wallet_event(data: &mut Data, event: sideswap_lwk::Event) {
 
 async fn try_loading_new_address(
     wallet_command_sender: Sender<sideswap_lwk::Command>,
-    change: bool,
+    chain: Chain,
 ) -> Result<elements::Address, anyhow::Error> {
     // FIXME: This returns the same address
     let (res_sender, res_receiver) = oneshot::channel();
     wallet_command_sender.send(sideswap_lwk::Command::NewAdddress {
-        req: sideswap_lwk::NewAddrReq {
-            index: None,
-            change,
-        },
+        req: sideswap_lwk::NewAddrReq { index: None, chain },
         res_sender: res_sender.into(),
     })?;
     let addr_info = res_receiver.await??;
@@ -64,10 +62,10 @@ async fn try_loading_new_address(
 
 async fn new_address_task(
     wallet_command_sender: Sender<sideswap_lwk::Command>,
-    change: bool,
+    chain: Chain,
     res_sender: UncheckedOneshotSender<Result<elements::Address, anyhow::Error>>,
 ) {
-    let res = try_loading_new_address(wallet_command_sender, change).await;
+    let res = try_loading_new_address(wallet_command_sender, chain).await;
     res_sender.send(res);
 }
 
@@ -82,10 +80,10 @@ fn process_market_event(data: &mut Data, event: market::Event) {
                 .send(market::Command::SignedSwap { quote_id, pset });
         }
 
-        market::Event::NewAddress { change, res_sender } => {
+        market::Event::NewAddress { chain, res_sender } => {
             tokio::spawn(new_address_task(
                 data.wallet_command_sender.clone(),
-                change,
+                chain,
                 res_sender,
             ));
         }

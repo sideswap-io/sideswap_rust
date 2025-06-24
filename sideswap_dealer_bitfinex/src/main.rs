@@ -1056,7 +1056,7 @@ fn process_market_event(data: &mut Data, event: market::Event) {
         }
 
         market::Event::NewAddress {
-            change: _,
+            chain: _,
             res_sender,
         } => {
             let rpc_server = data.settings.rpc.clone();

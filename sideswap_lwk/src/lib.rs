@@ -28,6 +28,7 @@ use sideswap_dealer::{
     market::{SendAssetReq, SendAssetResp},
     utxo_data::{self, UtxoData, UtxoWithKey},
 };
+use sideswap_types::chain::Chain;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 
 pub use lwk_wollet::{WalletTx, WalletTxOut};
@@ -64,12 +65,12 @@ pub struct Wallet {
 }
 
 pub struct NewAddrReq {
-    pub change: bool,
+    pub chain: Chain,
     pub index: Option<u32>,
 }
 
 pub struct NewAddrResp {
-    pub change: bool,
+    pub chain: Chain,
     pub index: u32,
     pub address: elements::Address,
 }
@@ -348,17 +349,16 @@ fn run(
             match res {
                 Ok(command) => match command {
                     Command::NewAdddress { req, res_sender } => {
-                        let res = if req.change {
-                            wallet.change(req.index)
-                        } else {
-                            wallet.address(req.index)
+                        let res = match req.chain {
+                            Chain::External => wallet.address(req.index),
+                            Chain::Internal => wallet.change(req.index),
                         };
 
                         let res = res
                             .map(|addr| NewAddrResp {
                                 index: addr.index(),
                                 address: addr.address().clone(),
-                                change: req.change,
+                                chain: req.chain,
                             })
                             .map_err(Error::WolletError);
 

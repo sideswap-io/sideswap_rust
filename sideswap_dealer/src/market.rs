@@ -26,6 +26,7 @@ use sideswap_common::{
     dealer_ticker::{DealerTicker, InvalidTickerError, TickerLoader},
     exchange_pair::ExchangePair,
     make_market_request, make_request,
+    pset::swap_amount::{self, get_swap_amount, SwapAmount},
     types::{asset_float_amount_, asset_int_amount_},
     verify,
     ws::{
@@ -35,6 +36,7 @@ use sideswap_common::{
 };
 use sideswap_types::{
     asset_precision::AssetPrecision,
+    chain::Chain,
     normal_float::{NormalFloat, NotNormalError},
     timestamp_ms::TimestampMs,
     utxo_ext::UtxoExt,
@@ -107,7 +109,7 @@ pub enum Event {
         pset: PartiallySignedTransaction,
     },
     NewAddress {
-        change: bool,
+        chain: Chain,
         res_sender: UncheckedOneshotSender<Result<Address, anyhow::Error>>,
     },
     SwapSucceed {
@@ -225,30 +227,45 @@ struct AcceptQuoteResp {
 enum Error {
     #[error("WS request error: {0}")]
     WsRequest(#[from] ws_req_sender::Error),
-    #[error("Unexpected response, expected: {0}")]
+    #[error("unexpected response, expected: {0}")]
     UnexpectedResponse(&'static str),
-    #[error("Server connection is down")]
+    #[error("server connection is down")]
     ServerDisconnected,
-    #[error("Channel closed, please report bug")]
+    #[error("channel closed, please report bug")]
     ChannelClosed,
-    #[error("Invalid ticker: {0}")]
+    #[error("invalid ticker: {0}")]
     InvalidTicker(#[from] InvalidTickerError),
-    #[error("Unknown ticker: {0}")]
+    #[error("unknown ticker: {0}")]
     UnknownTicker(String),
-    #[error("Invalid float: {0}")]
+    #[error("invalid float: {0}")]
     InvalidFloat(NotNormalError),
-    #[error("No gaid")]
+    #[error("no gaid")]
     NoGaid,
-    #[error("Wallet error: {0}")]
+    #[error("wallet error: {0}")]
     Wallet(anyhow::Error),
-    #[error("Unknown order id")]
+    #[error("unknown order id")]
     UnknownOrderId,
-    #[error("Unknown asset id: {0}")]
+    #[error("unknown asset id: {0}")]
     UnknownAssetId(AssetId),
-    #[error("Invalid asset amount: {0} (asset_precison: {1})")]
+    #[error("invalid asset amount: {0} (asset_precison: {1})")]
     InvalidAssetAmount(f64, AssetPrecision),
-    #[error("Invalid address: {0}: {1}")]
+    #[error("invalid address: {0}: {1}")]
     InvalidAddress(String, anyhow::Error),
+    #[error("unknown quote id")]
+    UnknownQuoteId,
+    #[error("base64 error: {0}")]
+    Base64(#[from] b64::Error),
+    #[error("decode error: {0}")]
+    Decode(#[from] elements::encode::Error),
+    #[error("PSET error: {0}")]
+    Pset(#[from] elements::pset::Error),
+    #[error("swap amount error: {0}")]
+    SwapAmount(#[from] swap_amount::Error),
+    #[error("wrong swap amount: {actual:?}, expected: {expected:?}")]
+    WrongSwapAmount {
+        actual: SwapAmount,
+        expected: SwapAmount,
+    },
 }
 
 impl Error {
@@ -263,14 +280,20 @@ impl Error {
             | Error::UnexpectedResponse(_)
             | Error::NoGaid
             | Error::Wallet(_)
-            | Error::ServerDisconnected => api::ErrorCode::ServerError,
+            | Error::ServerDisconnected
+            | Error::Base64(_)
+            | Error::Decode(_)
+            | Error::Pset(_)
+            | Error::SwapAmount(_)
+            | Error::WrongSwapAmount { .. } => api::ErrorCode::ServerError,
             Error::UnknownTicker(_)
             | Error::InvalidFloat(_)
             | Error::UnknownOrderId
             | Error::UnknownAssetId(_)
             | Error::InvalidAssetAmount(_, _)
             | Error::InvalidTicker(_)
-            | Error::InvalidAddress(_, _) => api::ErrorCode::InvalidRequest,
+            | Error::InvalidAddress(_, _)
+            | Error::UnknownQuoteId => api::ErrorCode::InvalidRequest,
         }
     }
 
@@ -288,7 +311,13 @@ impl Error {
             | Error::UnknownAssetId(_)
             | Error::InvalidAssetAmount(_, _)
             | Error::InvalidTicker(_)
-            | Error::InvalidAddress(_, _) => None,
+            | Error::InvalidAddress(_, _)
+            | Error::UnknownQuoteId
+            | Error::Base64(_)
+            | Error::Decode(_)
+            | Error::Pset(_)
+            | Error::SwapAmount(_)
+            | Error::WrongSwapAmount { .. } => None,
         }
     }
 }
@@ -367,6 +396,7 @@ enum ClientCommand {
         res_sender: UncheckedOneshotSender<Result<String, Error>>,
     },
     NewAddress {
+        chain: Chain,
         res_sender: UncheckedOneshotSender<Result<Address, anyhow::Error>>,
     },
     Balances {
@@ -487,6 +517,14 @@ struct StartedQuote {
     quote_sub_id: QuoteSubId,
     fee_asset: AssetType,
     base_trade_dir: TradeDir,
+    receive_address: elements::Address,
+    change_address: elements::Address,
+    utxos: Vec<sideswap_api::Utxo>,
+}
+
+struct ReceivedQuote {
+    expected_swap_amount: SwapAmount,
+    started_quote: Arc<StartedQuote>,
 }
 
 struct AcceptingQuote {
@@ -523,7 +561,9 @@ struct Data {
 
     subscribed: BTreeMap<ExchangePair, PublicSubscribe>,
 
-    started_quote: Option<StartedQuote>,
+    started_quote: Option<Arc<StartedQuote>>,
+
+    received_quotes: BTreeMap<QuoteId, ReceivedQuote>,
 
     accepting_quotes: BTreeMap<QuoteId, AcceptingQuote>,
 }
@@ -795,6 +835,7 @@ struct QuoteAmounts {
     receive_asset: DealerTicker,
     deliver_amount: f64,
     receive_amount: f64,
+    swap_amount: SwapAmount,
 }
 
 fn get_quote_amounts(
@@ -811,7 +852,7 @@ fn get_quote_amounts(
 ) -> QuoteAmounts {
     let total_fee = server_fee + fixed_fee;
 
-    let (deliver_amount, receive_amount) = match (base_trade_dir, fee_asset) {
+    let (deliver_amount_sats, receive_amount_sats) = match (base_trade_dir, fee_asset) {
         (TradeDir::Sell, AssetType::Base) => (base_amount + total_fee, quote_amount),
         (TradeDir::Sell, AssetType::Quote) => (base_amount, quote_amount - total_fee),
         (TradeDir::Buy, AssetType::Base) => (quote_amount, base_amount - total_fee),
@@ -825,6 +866,13 @@ fn get_quote_amounts(
         TradeDir::Buy => (exchange_pair.quote, exchange_pair.base),
     };
 
+    let swap_amount = SwapAmount {
+        send_asset: *ticker_loader.asset_id(deliver_asset),
+        send_amount: deliver_amount_sats,
+        recv_asset: *ticker_loader.asset_id(receive_asset),
+        recv_amount: receive_amount_sats,
+    };
+
     QuoteAmounts {
         base_amount: asset_float_amount_(base_amount, ticker_loader.precision(exchange_pair.base)),
         quote_amount: asset_float_amount_(
@@ -835,8 +883,15 @@ fn get_quote_amounts(
         fixed_fee: asset_float_amount_(fixed_fee, ticker_loader.precision(fee_asset)),
         deliver_asset,
         receive_asset,
-        deliver_amount: asset_float_amount_(deliver_amount, ticker_loader.precision(deliver_asset)),
-        receive_amount: asset_float_amount_(receive_amount, ticker_loader.precision(receive_asset)),
+        deliver_amount: asset_float_amount_(
+            deliver_amount_sats,
+            ticker_loader.precision(deliver_asset),
+        ),
+        receive_amount: asset_float_amount_(
+            receive_amount_sats,
+            ticker_loader.precision(receive_asset),
+        ),
+        swap_amount,
     }
 }
 
@@ -880,6 +935,7 @@ fn process_quote(data: &mut Data, notif: mkt::QuoteNotif) {
                     receive_asset,
                     deliver_amount,
                     receive_amount,
+                    swap_amount,
                 } = get_quote_amounts(
                     GetQuoteAmounts {
                         exchange_pair,
@@ -892,6 +948,19 @@ fn process_quote(data: &mut Data, notif: mkt::QuoteNotif) {
                     },
                     &data.ticker_loader,
                 );
+
+                while data.received_quotes.len() > 30 {
+                    data.received_quotes.pop_first();
+                }
+
+                data.received_quotes.insert(
+                    quote_id,
+                    ReceivedQuote {
+                        expected_swap_amount: swap_amount,
+                        started_quote: Arc::clone(started_quote),
+                    },
+                );
+
                 api::QuoteStatus::Success {
                     quote_id,
                     base_amount,
@@ -921,6 +990,7 @@ fn process_quote(data: &mut Data, notif: mkt::QuoteNotif) {
                     receive_asset,
                     deliver_amount,
                     receive_amount,
+                    swap_amount: _,
                 } = get_quote_amounts(
                     GetQuoteAmounts {
                         exchange_pair,
@@ -1222,7 +1292,7 @@ fn start_quotes(
         .iter()
         .filter(|utxo| utxo.asset == send_asset_id)
         .cloned()
-        .collect();
+        .collect::<Vec<_>>();
 
     ws_callback(
         data,
@@ -1231,9 +1301,9 @@ fn start_quotes(
             asset_type,
             amount,
             trade_dir,
-            utxos,
-            receive_address,
-            change_address,
+            utxos: utxos.clone(),
+            receive_address: receive_address.clone(),
+            change_address: change_address.clone(),
             order_id,
             private_id,
             instant_swap: false,
@@ -1241,12 +1311,15 @@ fn start_quotes(
         Box::new(move |data, res| {
             let res = match res {
                 Ok(mkt::Response::StartQuotes(resp)) => {
-                    data.started_quote = Some(StartedQuote {
+                    data.started_quote = Some(Arc::new(StartedQuote {
                         client_id,
                         quote_sub_id: resp.quote_sub_id,
                         fee_asset: resp.fee_asset,
                         base_trade_dir,
-                    });
+                        utxos,
+                        receive_address,
+                        change_address,
+                    }));
 
                     Ok(StartQuotesResp {
                         quote_sub_id: resp.quote_sub_id,
@@ -1306,27 +1379,65 @@ fn accept_quote(
     );
 }
 
-fn sign_accepted_quote(
+fn try_sign_accepted_quote(
     data: &mut Data,
     quote_id: QuoteId,
     mkt::GetQuoteResponse {
         pset,
         ttl: _,
-        receive_ephemeral_sk: _,
-        change_ephemeral_sk: _,
+        receive_ephemeral_sk,
+        change_ephemeral_sk,
     }: mkt::GetQuoteResponse,
-    res_sender: UncheckedOneshotSender<Result<AcceptQuoteResp, Error>>,
-) {
-    data.accepting_quotes
-        .insert(quote_id, AcceptingQuote { res_sender });
+) -> Result<(), Error> {
+    let received_quote = data
+        .received_quotes
+        .get(&quote_id)
+        .ok_or(Error::UnknownQuoteId)?;
 
-    // FIXME: Verify PSET amounts
+    let pset = b64::decode(&pset)?;
+    let pset = elements::encode::deserialize::<PartiallySignedTransaction>(&pset)?;
 
-    let pset = b64::decode(&pset).expect("invalid base64 pset");
-    let pset =
-        elements::encode::deserialize::<PartiallySignedTransaction>(&pset).expect("invalid pset");
+    let tx = pset.extract_tx()?;
+
+    let actual_swap_amount = get_swap_amount(
+        &tx,
+        &received_quote.started_quote.utxos,
+        &received_quote.started_quote.receive_address,
+        &received_quote.started_quote.change_address,
+        &receive_ephemeral_sk,
+        &change_ephemeral_sk,
+    )?;
+
+    verify!(
+        actual_swap_amount == received_quote.expected_swap_amount,
+        Error::WrongSwapAmount {
+            actual: actual_swap_amount,
+            expected: received_quote.expected_swap_amount.clone(),
+        }
+    );
 
     data.event_sender.send(Event::SignSwap { quote_id, pset });
+
+    Ok(())
+}
+
+fn sign_accepted_quote(
+    data: &mut Data,
+    quote_id: QuoteId,
+    resp: mkt::GetQuoteResponse,
+    res_sender: UncheckedOneshotSender<Result<AcceptQuoteResp, Error>>,
+) {
+    let res = try_sign_accepted_quote(data, quote_id, resp);
+
+    match res {
+        Ok(()) => {
+            data.accepting_quotes
+                .insert(quote_id, AcceptingQuote { res_sender });
+        }
+        Err(err) => {
+            res_sender.send(Err(err));
+        }
+    }
 }
 
 fn signed_accepted_quote(
@@ -1354,11 +1465,11 @@ fn signed_accepted_quote(
 
 async fn new_address(
     event_sender: &UncheckedUnboundedSender<Event>,
-    change: bool,
+    chain: Chain,
 ) -> Result<Address, Error> {
     let (res_sender, res_receiver) = oneshot::channel();
     event_sender.send(Event::NewAddress {
-        change,
+        chain,
         res_sender: res_sender.into(),
     });
     let address = res_receiver.await?.map_err(Error::Wallet)?;
@@ -1441,11 +1552,9 @@ async fn process_client_command(data: &mut Data, command: ClientCommand) {
             res_sender.send(res);
         }
 
-        ClientCommand::NewAddress { res_sender } => {
-            data.event_sender.send(Event::NewAddress {
-                change: false,
-                res_sender,
-            });
+        ClientCommand::NewAddress { chain, res_sender } => {
+            data.event_sender
+                .send(Event::NewAddress { chain, res_sender });
         }
 
         ClientCommand::Balances { res_sender } => {
@@ -1917,10 +2026,10 @@ async fn try_sync_market(data: &mut Data, key: &OrderGroupKey) -> Result<(), any
 
             resp.address
         } else {
-            new_address(&data.event_sender, false).await?
+            new_address(&data.event_sender, Chain::External).await?
         };
 
-        let change_address = new_address(&data.event_sender, true).await?;
+        let change_address = new_address(&data.event_sender, Chain::Internal).await?;
 
         let resp = make_market_request!(
             data.ws,
@@ -2034,6 +2143,7 @@ async fn run(
         clients: BTreeMap::new(),
         subscribed: BTreeMap::new(),
         started_quote: None,
+        received_quotes: BTreeMap::new(),
         accepting_quotes: BTreeMap::new(),
     };
 

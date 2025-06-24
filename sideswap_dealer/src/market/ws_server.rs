@@ -2,7 +2,7 @@ use std::net::SocketAddr;
 
 use futures::{SinkExt, StreamExt};
 use serde::Deserialize;
-use sideswap_types::normal_float::NormalFloat;
+use sideswap_types::{chain::Chain, normal_float::NormalFloat};
 use tokio::{
     net::{TcpListener, TcpStream},
     sync::mpsc::{unbounded_channel, UnboundedReceiver},
@@ -41,7 +41,7 @@ async fn send_notif(data: &mut Data, notif: api::Notif) {
 async fn process_ws_req(data: &mut Data, req: api::Req) -> Result<api::Resp, Error> {
     match req {
         api::Req::NewAddress(api::NewAddressReq {}) => {
-            let address = data.controller.new_address().await?;
+            let address = data.controller.new_address(Chain::External).await?;
             Ok(api::Resp::NewAddress(api::NewAddressResp { address }))
         }
 
