@@ -1,6 +1,8 @@
 use anyhow::{anyhow, ensure};
 use bitcoin::hashes::Hash;
 
+pub mod swap_amount;
+
 /// Server fee that clients pay to the server for each swap.
 /// For swap markets it's applied to both sides (0.1% each side).
 /// For instant swaps it's applied to dealers.

@@ -2,6 +2,7 @@ use elements::AssetId;
 use sideswap_common::{
     b64,
     dealer_ticker::{DealerTicker, InvalidTickerError},
+    pset::swap_amount::SwapAmount,
     ws::ws_req_sender,
 };
 use sideswap_types::asset_precision::AssetPrecision;
@@ -52,6 +53,13 @@ pub enum Error {
     UtxoCheckFailed(String),
     #[error("gap limit reached")]
     GapLimit,
+    #[error("wrong swap amounts: {0}")]
+    SwapAmount(#[from] sideswap_common::pset::swap_amount::Error),
+    #[error("wrong swap amount: {actual:?}, expected: {expected:?}")]
+    WrongSwapAmount {
+        actual: SwapAmount,
+        expected: SwapAmount,
+    },
 }
 
 impl From<tokio::sync::oneshot::error::RecvError> for Error {
@@ -90,7 +98,10 @@ impl Error {
             | Error::NoCreatedTx
             | Error::GapLimit => api::ErrorCode::InvalidRequest,
 
-            Error::ChannelClosed | Error::NoUtxos => api::ErrorCode::ServerError,
+            Error::ChannelClosed
+            | Error::NoUtxos
+            | Error::SwapAmount(_)
+            | Error::WrongSwapAmount { .. } => api::ErrorCode::ServerError,
 
             Error::WsError(error) => match error {
                 ws_req_sender::Error::Disconnected => api::ErrorCode::NetworkError,

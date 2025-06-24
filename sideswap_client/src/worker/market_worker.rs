@@ -5,7 +5,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use anyhow::{anyhow, bail, ensure};
+use anyhow::{anyhow, bail, ensure, Context};
 use bitcoin::{
     bip32::{ChildNumber, Xpriv},
     hashes::Hash,
@@ -32,7 +32,10 @@ use sideswap_common::{
     event_proofs::EventProofs,
     float_utils,
     green_backend::GREEN_DUMMY_SIG,
-    pset::p2pkh_script,
+    pset::{
+        p2pkh_script,
+        swap_amount::{get_swap_amount, SwapAmount},
+    },
     pset_blind::get_blinding_nonces,
     send_tx::pset::{construct_pset, ConstructPsetArgs, ConstructedPset, PsetInput, PsetOutput},
     target_os::TargetOs,
@@ -2953,6 +2956,32 @@ fn try_accept_quote(
         }],
     };
 
+    let tx = pset.extract_tx()?;
+
+    let actual_swap_amounts = get_swap_amount(
+        &tx,
+        &started_quote
+            .utxos
+            .iter()
+            .cloned()
+            .map(convert_to_swap_utxo)
+            .collect::<Vec<_>>(),
+        &started_quote.receive_address.address,
+        &started_quote.change_address.address,
+        resp.receive_ephemeral_sk,
+        resp.change_ephemeral_sk,
+    )
+    .with_context(|| "swap amount error")?;
+
+    let expected_swap_amount = SwapAmount {
+        send_asset,
+        send_amount,
+        recv_asset,
+        recv_amount,
+    };
+
+    ensure!(actual_swap_amounts == expected_swap_amount);
+
     let pset = if is_jade(worker) {
         let utxos = started_quote.utxos.iter().collect::<Vec<_>>();
         try_sign_pset_jade(
@@ -2967,7 +2996,6 @@ fn try_accept_quote(
             jade_mng::TxType::Swap,
         )?
     } else {
-        // FIXME: Verify PSET amounts before signing it
         try_sign_pset_software(worker, pset)?
     };
 

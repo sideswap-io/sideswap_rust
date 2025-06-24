@@ -14,6 +14,7 @@ use sideswap_common::{
     channel_helpers::{UncheckedOneshotSender, UncheckedUnboundedSender},
     dealer_ticker::{DealerTicker, TickerLoader},
     make_market_request, make_request,
+    pset::swap_amount::{get_swap_amount, SwapAmount},
     types::{asset_float_amount, asset_float_amount_, asset_int_amount_},
     verify,
     ws::{
@@ -601,7 +602,7 @@ async fn get_quote(data: &mut Data, req: api::GetQuoteReq) -> Result<api::GetQuo
             trade_dir: TradeDir::Sell,
             utxos,
             receive_address: receive_address.clone(),
-            change_address,
+            change_address: change_address.clone(),
             order_id: None,
             private_id: None,
             instant_swap: req.instant_swap,
@@ -681,22 +682,46 @@ async fn get_quote(data: &mut Data, req: api::GetQuoteReq) -> Result<api::GetQuo
                 }
             );
 
-            let quote_recv_amount = asset_float_amount_(quote_recv_amount, recv_asset.precision);
-
             let quote_resp =
                 make_market_request!(data.ws, GetQuote, mkt::GetQuoteRequest { quote_id })?;
 
             let pset = decode_pset(&quote_resp.pset)?;
 
-            let txid = pset.extract_tx()?.txid();
+            let utxo_data = data.utxo_data.as_ref().ok_or(Error::NoUtxos)?;
+
+            let tx = pset.extract_tx()?;
+
+            let actual_swap_amounts = get_swap_amount(
+                &tx,
+                utxo_data.utxos(),
+                &receive_address,
+                &change_address,
+                quote_resp.receive_ephemeral_sk,
+                quote_resp.change_ephemeral_sk,
+            )?;
+
+            let expected_swap_amount = SwapAmount {
+                send_asset: send_asset.asset_id,
+                send_amount: quote_send_amount,
+                recv_asset: recv_asset.asset_id,
+                recv_amount: quote_recv_amount,
+            };
+
+            let quote_recv_amount = asset_float_amount_(quote_recv_amount, recv_asset.precision);
+
+            verify!(
+                actual_swap_amounts == expected_swap_amount,
+                Error::WrongSwapAmount {
+                    actual: actual_swap_amounts,
+                    expected: expected_swap_amount,
+                }
+            );
+
+            let txid = tx.txid();
 
             let expires_at = Instant::now() + quote_resp.ttl.duration();
 
-            let pset = data
-                .utxo_data
-                .as_ref()
-                .ok_or(Error::NoUtxos)?
-                .sign_pset(pset);
+            let pset = utxo_data.sign_pset(pset);
 
             let note = format!(
                 "swap {} {} for {} {} to {}",

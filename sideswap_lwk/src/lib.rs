@@ -13,8 +13,10 @@ use elements::{
 };
 use lwk_common::{singlesig_desc, Signer};
 use lwk_wollet::{
-    blocking::BlockchainBackend, elements_miniscript, secp256k1::SECP256K1, ElementsNetwork,
-    WolletDescriptor,
+    blocking::BlockchainBackend,
+    elements_miniscript::{self, slip77::MasterBlindingKey},
+    secp256k1::SECP256K1,
+    ElementsNetwork, WolletDescriptor,
 };
 use sideswap_common::{
     channel_helpers::{UncheckedOneshotSender, UncheckedUnboundedSender},
@@ -56,6 +58,7 @@ pub struct Wallet {
     script_variant: ScriptVariant,
     descriptor: lwk_wollet::WolletDescriptor,
     master_key: bip32::Xpriv,
+    master_blinding_key: MasterBlindingKey,
     wallet: lwk_wollet::Wollet,
     signer: lwk_signer::SwSigner,
 }
@@ -222,6 +225,7 @@ fn run(
         script_variant,
         descriptor,
         master_key,
+        master_blinding_key: _,
         mut wallet,
         signer,
     }: Wallet,
@@ -426,6 +430,7 @@ impl Wallet {
         let seed = mnemonic.to_seed("");
         let bitcoin_network = network.d().bitcoin_network;
         let master_key = bip32::Xpriv::new_master(bitcoin_network, &seed).unwrap();
+        let master_blinding_key = MasterBlindingKey::from_seed(&seed);
 
         let signer =
             lwk_signer::SwSigner::new(&mnemonic.to_string(), is_mainnet).expect("must not fail");
@@ -458,6 +463,7 @@ impl Wallet {
             script_variant,
             descriptor,
             master_key,
+            master_blinding_key,
             wallet,
             signer,
         }
@@ -465,6 +471,10 @@ impl Wallet {
 
     pub fn descriptor(&self) -> &lwk_wollet::WolletDescriptor {
         &self.descriptor
+    }
+
+    pub fn master_blinding_key(&self) -> &MasterBlindingKey {
+        &self.master_blinding_key
     }
 
     pub fn wallet_id(&self) -> String {

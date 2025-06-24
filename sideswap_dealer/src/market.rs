@@ -1309,7 +1309,12 @@ fn accept_quote(
 fn sign_accepted_quote(
     data: &mut Data,
     quote_id: QuoteId,
-    mkt::GetQuoteResponse { pset, ttl: _ }: mkt::GetQuoteResponse,
+    mkt::GetQuoteResponse {
+        pset,
+        ttl: _,
+        receive_ephemeral_sk: _,
+        change_ephemeral_sk: _,
+    }: mkt::GetQuoteResponse,
     res_sender: UncheckedOneshotSender<Result<AcceptQuoteResp, Error>>,
 ) {
     data.accepting_quotes

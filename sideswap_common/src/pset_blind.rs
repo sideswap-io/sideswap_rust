@@ -133,6 +133,7 @@ pub struct BlindedOutput {
     pub value: u64,
     pub abf: AssetBlindingFactor,
     pub vbf: ValueBlindingFactor,
+    pub ephemeral_sk: SecretKey,
     pub blinding_nonce: SecretKey,
 }
 
@@ -159,7 +160,7 @@ pub fn blind_pset(
     blinding_factors: &[(AssetBlindingFactor, ValueBlindingFactor, SecretKey)],
 ) -> Result<OptBlindedOutputs, Error> {
     let input_count = pset.inputs().len();
-    // Prevent failed asset - n_input_tags <= SECP256K1_SURJECTIONPROOF_MAX_N_INPUTS
+    // Prevent failed assert: n_input_tags <= SECP256K1_SURJECTIONPROOF_MAX_N_INPUTS
     let input_limit = 256;
     verify!(
         input_count <= input_limit,
@@ -260,6 +261,7 @@ pub fn blind_pset(
             blinding_nonces.push(Some(BlindedOutput {
                 abf: out_abf,
                 vbf: out_vbf,
+                ephemeral_sk,
                 blinding_nonce: shared_secret,
                 asset_id,
                 value,

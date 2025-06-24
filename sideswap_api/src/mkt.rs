@@ -1,5 +1,6 @@
 use elements::{
     confidential::{AssetBlindingFactor, ValueBlindingFactor},
+    secp256k1_zkp::SecretKey,
     Address, AssetId, OutPoint, Txid,
 };
 use serde::{Deserialize, Serialize};
@@ -544,6 +545,8 @@ pub struct GetQuoteRequest {
 pub struct GetQuoteResponse {
     pub pset: String,
     pub ttl: DurationMs,
+    pub receive_ephemeral_sk: SecretKey,
+    pub change_ephemeral_sk: Option<SecretKey>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
