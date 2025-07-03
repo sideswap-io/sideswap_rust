@@ -541,9 +541,15 @@ fn run(mut data: WorkerData, command_receiver: Receiver<Command>) {
 
         match res {
             Ok(electrum_client) => break electrum_client,
+
             Err(err) => {
                 log::error!("electrum_client connect failed: {err}");
                 std::thread::sleep(retry_delay.next_delay());
+
+                if data.wallet.upgrade().is_none() {
+                    log::debug!("stop update thread (wallet dropped)");
+                    return;
+                }
             }
         }
     };
