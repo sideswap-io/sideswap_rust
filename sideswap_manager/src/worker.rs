@@ -383,6 +383,7 @@ async fn create_tx(
     data: &mut Data,
     api::CreateTxReq { recipients }: api::CreateTxReq,
 ) -> Result<api::CreateTxResp, Error> {
+    log::debug!("start create_tx...");
     let note = recipients
         .iter()
         .map(|recipient| {
@@ -427,6 +428,8 @@ async fn create_tx(
 
     data.created_txs
         .insert(txid, CreatedTx { tx: resp.tx, note });
+
+    log::debug!("create_tx done");
 
     Ok(api::CreateTxResp { txid, network_fee })
 }

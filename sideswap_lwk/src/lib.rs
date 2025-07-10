@@ -263,7 +263,9 @@ fn run(
     });
 
     'outer: loop {
+        log::debug!("start wallet scan...");
         let res = electrum_client.full_scan(&wallet);
+        log::debug!("scan wallet done, status: {}", res.is_ok());
 
         let update = match res {
             Ok(update) => update,
@@ -366,7 +368,9 @@ fn run(
                     }
 
                     Command::CreateTx { req, res_sender } => {
+                        log::debug!("start create_tx...");
                         let res = create_tx(req, &wallet, &signer);
+                        log::debug!("create_tx done");
                         res_sender.send(res);
                     }
 
