@@ -37,6 +37,7 @@ async fn send_msg(data: &mut Data, msg: Message) {
 
 async fn send_from(data: &mut Data, from: api::From) {
     let msg = serde_json::to_string(&from).expect("must not fail");
+    log::debug!("send response: {msg}");
     send_msg(data, Message::text(msg)).await;
 }
 
@@ -88,6 +89,7 @@ fn get_req_id(msg: &str) -> api::ReqId {
 async fn process_ws_msg(data: &mut Data, msg: Message) {
     match msg {
         Message::Text(msg) => {
+            log::debug!("received request: {msg}");
             let res = serde_json::from_str::<api::To>(&msg);
             match res {
                 Ok(to) => {
