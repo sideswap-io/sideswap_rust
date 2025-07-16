@@ -66,6 +66,7 @@ pub struct Params {
     pub ws_server: Option<WsServerConfig>,
     pub ticker_loader: Arc<TickerLoader>,
     pub user_agent: String,
+    pub dealer_api_key: Option<String>,
 }
 
 // Public messages
@@ -537,6 +538,7 @@ struct Data {
     user_agent: String,
     state: persistent_state::Data,
     ticker_loader: Arc<TickerLoader>,
+    dealer_api_key: Option<String>,
 
     ws: WsReqSender,
     async_requests: BTreeMap<RequestId, WsCallback>,
@@ -671,6 +673,14 @@ async fn try_login(data: &mut Data) -> Result<mkt::LoginResponse, anyhow::Error>
             version: crate::logs::GIT_COMMIT_HASH.to_owned(),
         },
     ));
+
+    if let Some(api_key) = data.dealer_api_key.as_ref() {
+        data.ws.send_request(sideswap_api::Request::LoginDealer(
+            sideswap_api::LoginDealerRequest {
+                api_key: api_key.clone(),
+            },
+        ));
+    }
 
     let assets = make_request!(
         data.ws,
@@ -1307,6 +1317,7 @@ fn start_quotes(
             order_id,
             private_id,
             instant_swap: false,
+            dealer_filter: None,
         }),
         Box::new(move |data, res| {
             let res = match res {
@@ -2129,6 +2140,7 @@ async fn run(
         user_agent: params.user_agent,
         state,
         ticker_loader: Arc::clone(&params.ticker_loader),
+        dealer_api_key: params.dealer_api_key.clone(),
         ws,
         async_requests: BTreeMap::new(),
         wallet_utxos: Vec::new(),

@@ -2663,6 +2663,7 @@ fn try_start_quotes(
             order_id: order_id.map(OrdId::new),
             private_id: private_id.clone().map(Box::new),
             instant_swap,
+            dealer_filter: None,
         },
         SERVER_REQUEST_TIMEOUT_LONG
     )?;

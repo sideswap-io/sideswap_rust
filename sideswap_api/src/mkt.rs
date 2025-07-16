@@ -513,6 +513,7 @@ pub struct StartQuotesRequest {
     pub private_id: Option<Box<String>>,
     #[serde(default)]
     pub instant_swap: bool,
+    pub dealer_filter: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

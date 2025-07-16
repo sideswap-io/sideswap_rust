@@ -32,6 +32,7 @@ struct Settings {
     ws_server: Option<market::WsServerConfig>,
     price_stream: sideswap_common::price_stream::Markets,
     whitelisted_assets: Option<WhitelistedAssets>,
+    dealer_api_key: Option<String>,
 }
 
 struct Data {
@@ -197,6 +198,7 @@ async fn main() {
         ws_server: settings.ws_server.clone(),
         ticker_loader: Arc::clone(&ticker_loader),
         user_agent: "SideSwapDealer-Elements".to_owned(),
+        dealer_api_key: settings.dealer_api_key.clone(),
     };
     let (market_command_sender, mut market_event_receiver) = market::start(market_params);
 

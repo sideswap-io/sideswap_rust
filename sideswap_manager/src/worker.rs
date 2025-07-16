@@ -606,6 +606,7 @@ async fn get_quote(data: &mut Data, req: api::GetQuoteReq) -> Result<api::GetQuo
             order_id: None,
             private_id: None,
             instant_swap: req.instant_swap,
+            dealer_filter: None,
         }
     )?;
 
