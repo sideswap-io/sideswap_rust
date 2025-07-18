@@ -1236,6 +1236,7 @@ async fn main() {
         ticker_loader: Arc::clone(&ticker_loader),
         user_agent: "SideSwapDealer-Bfx".to_owned(),
         dealer_api_key: settings.api_key.clone(),
+        no_price_stream: false,
     };
     let (market_command_sender, mut market_event_receiver) = market::start(market_params);
 

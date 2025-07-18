@@ -67,6 +67,7 @@ pub struct Params {
     pub ticker_loader: Arc<TickerLoader>,
     pub user_agent: String,
     pub dealer_api_key: Option<String>,
+    pub no_price_stream: bool,
 }
 
 // Public messages
@@ -267,6 +268,8 @@ enum Error {
         actual: SwapAmount,
         expected: SwapAmount,
     },
+    #[error("can't manage orders with automatic price streaming")]
+    AutomaticPriceStreaming,
 }
 
 impl Error {
@@ -294,7 +297,8 @@ impl Error {
             | Error::InvalidAssetAmount(_, _)
             | Error::InvalidTicker(_)
             | Error::InvalidAddress(_, _)
-            | Error::UnknownQuoteId => api::ErrorCode::InvalidRequest,
+            | Error::UnknownQuoteId
+            | Error::AutomaticPriceStreaming => api::ErrorCode::InvalidRequest,
         }
     }
 
@@ -318,7 +322,8 @@ impl Error {
             | Error::Decode(_)
             | Error::Pset(_)
             | Error::SwapAmount(_)
-            | Error::WrongSwapAmount { .. } => None,
+            | Error::WrongSwapAmount { .. }
+            | Error::AutomaticPriceStreaming => None,
         }
     }
 }
@@ -489,17 +494,6 @@ struct OrderData {
 enum Mode {
     PriceStream,
     WebServer,
-}
-
-impl Mode {
-    fn check_ws_edit_allowed(self) {
-        match self {
-            Mode::PriceStream => {
-                panic!("Web server is not allowed to control orders");
-            }
-            Mode::WebServer => {}
-        }
-    }
 }
 
 type ClientSender = UncheckedUnboundedSender<ClientEvent>;
@@ -1665,8 +1659,6 @@ async fn process_client_command(data: &mut Data, command: ClientCommand) {
             receive_address,
             change_address,
         } => {
-            data.mode.check_ws_edit_allowed();
-
             let base_precision = data.ticker_loader.precision(exchange_pair.base);
             let base_amount = asset_int_amount_(base_amount, base_precision);
 
@@ -1713,8 +1705,6 @@ async fn process_client_command(data: &mut Data, command: ClientCommand) {
             price,
             res_sender,
         } => {
-            data.mode.check_ws_edit_allowed();
-
             let ticker_loader = Arc::clone(&data.ticker_loader);
             data.ws.callback_request(
                 sideswap_api::Request::Market(Request::EditOrder(mkt::EditOrderRequest {
@@ -1747,8 +1737,6 @@ async fn process_client_command(data: &mut Data, command: ClientCommand) {
             order_id,
             res_sender,
         } => {
-            data.mode.check_ws_edit_allowed();
-
             data.ws.callback_request(
                 sideswap_api::Request::Market(Request::CancelOrder(mkt::CancelOrderRequest {
                     order_id,
@@ -1831,13 +1819,6 @@ async fn process_client_command(data: &mut Data, command: ClientCommand) {
 fn process_command(data: &mut Data, command: Command) {
     match command {
         Command::AutomaticOrders { orders } => {
-            match data.mode {
-                Mode::PriceStream => {}
-                Mode::WebServer => {
-                    assert!(orders.is_empty(), "Please disable automatic price streaming as the web server is used to control orders");
-                }
-            }
-
             for market in data.orders.values_mut() {
                 market.dealer_orders.clear();
             }
@@ -2110,10 +2091,17 @@ async fn run(
 
     let (client_sender, mut client_receiver) = unbounded_channel::<ClientCommand>();
 
+    let mode = if params.no_price_stream {
+        Mode::WebServer
+    } else {
+        Mode::PriceStream
+    };
+
     let controller = Controller::new(
         params.env.d().network,
         Arc::clone(&params.ticker_loader),
         client_sender.clone(),
+        mode,
     );
 
     if let Some(config) = params.web_server.clone() {
@@ -2123,14 +2111,6 @@ async fn run(
     if let Some(config) = params.ws_server.clone() {
         ws_server::start(config, controller);
     }
-
-    // FIXME: Allow using web server with automatic price streaming
-
-    let mode = if params.web_server.is_some() {
-        Mode::WebServer
-    } else {
-        Mode::PriceStream
-    };
 
     let state = persistent_state::load(&params.work_dir);
 

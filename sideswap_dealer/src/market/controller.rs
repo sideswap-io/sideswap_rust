@@ -16,6 +16,8 @@ use sideswap_common::{
 use sideswap_types::{chain::Chain, normal_float::NormalFloat, timestamp_ms::TimestampMs};
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
 
+use crate::market::Mode;
+
 use super::{
     try_convert_asset_amount, Balances, ClientCommand, ClientEvent, ClientId, Error, HistoryOrders,
     Metadata, OrderBook, OwnOrder, OwnOrders, StartQuotesResp,
@@ -26,6 +28,7 @@ pub struct Controller {
     network: Network,
     ticker_loader: Arc<TickerLoader>,
     command_sender: UnboundedSender<ClientCommand>,
+    mode: Mode,
 }
 
 async fn recv<T>(receiver: oneshot::Receiver<T>) -> Result<T, Error> {
@@ -42,11 +45,20 @@ impl Controller {
         network: Network,
         ticker_loader: Arc<TickerLoader>,
         command_sender: UnboundedSender<ClientCommand>,
+        mode: Mode,
     ) -> Controller {
         Controller {
             network,
             ticker_loader,
             command_sender,
+            mode,
+        }
+    }
+
+    fn check_ws_edit_allowed(&self) -> Result<(), Error> {
+        match self.mode {
+            Mode::PriceStream => Err(Error::AutomaticPriceStreaming),
+            Mode::WebServer => Ok(()),
         }
     }
 
@@ -188,6 +200,8 @@ impl Controller {
         trade_dir: TradeDir,
         client_order_id: Option<Box<String>>,
     ) -> Result<OwnOrder, Error> {
+        self.check_ws_edit_allowed()?;
+
         let recv_asset = match trade_dir {
             TradeDir::Sell => exchange_pair.quote,
             TradeDir::Buy => exchange_pair.base,
@@ -218,6 +232,8 @@ impl Controller {
         base_amount: Option<f64>,
         price: Option<NormalFloat>,
     ) -> Result<OwnOrder, Error> {
+        self.check_ws_edit_allowed()?;
+
         let order = self.own_order(order_id).await?;
         let base_precision = self.ticker_loader.precision(order.exchange_pair.base);
         let base_amount = base_amount.map(|amount| asset_int_amount_(amount, base_precision));
@@ -234,6 +250,8 @@ impl Controller {
     }
 
     pub async fn cancel_order(&self, order_id: OrdId) -> Result<(), Error> {
+        self.check_ws_edit_allowed()?;
+
         let (res_sender, res_receiver) = oneshot::channel();
         self.make_request(ClientCommand::CancelOrder {
             order_id,

@@ -166,6 +166,7 @@ async fn main() -> Result<(), anyhow::Error> {
         ticker_loader: Arc::clone(&ticker_loader),
         user_agent: "SideSwapDealer-LWK".to_owned(),
         dealer_api_key: settings.dealer_api_key.clone(),
+        no_price_stream: settings.price_stream.is_empty(),
     };
     let (market_command_sender, mut market_event_receiver) = market::start(market_params);
 
