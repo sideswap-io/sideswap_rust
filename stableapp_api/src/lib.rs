@@ -74,14 +74,6 @@ pub struct VerifyPhoneResp {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct RegisterWalletReq {
-    pub phone_key: PhoneKey,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct RegisterWalletResp {}
-
-#[derive(Serialize, Deserialize, Debug)]
 pub struct ChallengeReq {}
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -97,6 +89,20 @@ pub struct WalletLoginReq {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct WalletLoginResp {}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct RegisterWalletReq {
+    pub phone_key: PhoneKey,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct RegisterWalletResp {}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct UnregisterWalletReq {}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct UnregisterWalletResp {}
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct UploadFcmTokenReq {
@@ -236,6 +242,7 @@ pub enum Req {
     Challenge(ChallengeReq),
     WalletLogin(WalletLoginReq),
     RegisterWallet(RegisterWalletReq),
+    UnregisterWallet(UnregisterWalletReq),
     UploadFcmToken(UploadFcmTokenReq),
     UploadContacts(UploadContactsReq),
     UploadAvatar(UploadAvatarReq),
@@ -250,6 +257,7 @@ pub enum Resp {
     Challenge(ChallengeResp),
     WalletLogin(WalletLoginResp),
     RegisterWallet(RegisterWalletResp),
+    UnregisterWallet(UnregisterWalletResp),
     UploadFcmToken(UploadFcmTokenResp),
     UploadContacts(UploadContactsResp),
     UploadAvatar(UploadAvatarResp),
