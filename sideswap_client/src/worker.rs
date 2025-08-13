@@ -2414,6 +2414,9 @@ impl Data {
             api::SubscribedValue::PegOutWalletBalance { available } => {
                 proto::from::subscribed_value::Result::PegOutWalletBalance(available)
             }
+            api::SubscribedValue::PegOutNextBlockFeeRate { fee_rate } => {
+                proto::from::subscribed_value::Result::PegOutNextBlockFeeRate(fee_rate.raw())
+            }
         };
 
         self.ui.send(proto::from::Msg::SubscribedValue(

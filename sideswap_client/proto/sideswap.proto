@@ -604,6 +604,7 @@ message From {
       uint64 peg_in_wallet_balance = 2;
       uint64 peg_out_min_amount = 3;
       uint64 peg_out_wallet_balance = 4;
+      double peg_out_next_block_fee_rate = 5;
     }
   }
 

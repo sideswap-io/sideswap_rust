@@ -48,6 +48,7 @@ pub enum SubscribedValueType {
     PegInWalletBalance,
     PegOutMinAmount,
     PegOutWalletBalance,
+    PegOutNextBlockFeeRate,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -73,6 +74,12 @@ pub enum SubscribedValue {
         /// If the peg-out amount is less than or equal to this amount, it will be paid after 2 confirmations.
         /// If the peg-out amount is greater than this amount, it is usually paid within 20-30 minutes.
         available: u64,
+    },
+
+    PegOutNextBlockFeeRate {
+        /// The fee rate threshold for the peg-out payments (the tenth percentile of all transaction fee rates from the current block candidate).
+        /// A peg-out payment is made when the selected fee rate exceeds than this threshold.
+        fee_rate: FeeRateSats,
     },
 }
 

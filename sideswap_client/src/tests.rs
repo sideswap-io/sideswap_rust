@@ -17,6 +17,7 @@ struct SubscribedValues {
     peg_in_wallet_balance: Option<u64>,
     peg_out_min_amount: Option<u64>,
     peg_out_wallet_balance: Option<u64>,
+    peg_out_next_block_fee_rate: Option<f64>,
 }
 
 struct Data {
@@ -82,6 +83,9 @@ impl Data {
                 }
                 proto::from::subscribed_value::Result::PegOutWalletBalance(value) => {
                     self.subscribed_values.peg_out_wallet_balance = Some(*value);
+                }
+                proto::from::subscribed_value::Result::PegOutNextBlockFeeRate(value) => {
+                    self.subscribed_values.peg_out_next_block_fee_rate = Some(*value);
                 }
             },
 
