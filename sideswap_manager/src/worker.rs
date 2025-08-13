@@ -85,7 +85,7 @@ struct PegData {
 }
 
 struct Data {
-    _settings: Settings,
+    settings: Settings,
 
     policy_asset: AssetId,
 
@@ -933,7 +933,7 @@ async fn process_command(data: &mut Data, command: Command) {
 fn process_ws_connected(data: &mut Data) {
     data.ws.send_request(sideswap_api::Request::LoginClient(
         sideswap_api::LoginClientRequest {
-            api_key: None,
+            api_key: data.settings.affiliate_api_key.clone(),
             cookie: None,
             user_agent: "SideSwapManager".to_owned(),
             version: sideswap_dealer::logs::GIT_COMMIT_HASH.to_owned(),
@@ -1220,7 +1220,7 @@ pub async fn run(
         .collect::<BTreeMap<_, _>>();
 
     let mut data = Data {
-        _settings: settings,
+        settings,
         policy_asset,
         ticker_loader,
         db,

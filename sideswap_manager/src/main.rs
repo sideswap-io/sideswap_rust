@@ -19,6 +19,7 @@ struct Settings {
     script_variant: sideswap_lwk::ScriptVariant,
     ws_server: ws_server::Config,
     whitelisted_assets: Option<WhitelistedAssets>,
+    affiliate_api_key: Option<String>,
 }
 
 #[tokio::main]
