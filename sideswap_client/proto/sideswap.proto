@@ -298,6 +298,13 @@ message To {
     required int32 blocks = 7;
   }
 
+  message PegEdit {
+    // order_id is from the UpdatedPegs message
+    required string order_id = 1;
+    // If set, the peg-out fee rate will be changed
+    optional double fee_rate = 2;
+  }
+
   message SetMemo {
     required Account account = 1;
     required string txid = 2;
@@ -401,6 +408,7 @@ message To {
     PegInRequest peg_in_request = 21;
     PegOutAmount peg_out_amount = 24;
     PegOutRequest peg_out_request = 22;
+    PegEdit peg_edit = 23;
 
     AssetId asset_details = 57;
 
@@ -499,6 +507,7 @@ message From {
   message UpdatedPegs {
     required string order_id = 1;
     repeated TransItem items = 2;
+    optional double fee_rate = 3;
   }
 
   message BalanceUpdate {
@@ -837,6 +846,7 @@ message From {
     PegOutAmount peg_out_amount = 24;
     TransItem swap_succeed = 22;
     string swap_failed = 23;
+    GenericResponse peg_edit = 25;
 
     RecvAddress recv_address = 30;
     CreateTxResult create_tx_result = 31;

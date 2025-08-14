@@ -1190,6 +1190,22 @@ impl Data {
         }
     }
 
+    fn process_peg_edit(&mut self, proto::to::PegEdit { order_id, fee_rate }: proto::to::PegEdit) {
+        self.make_async_request(
+            api::Request::PegEdit(api::PegEditRequest {
+                order_id: order_id.parse().expect("must be valid"),
+                fee_rate: fee_rate.map(FeeRateSats::from_raw),
+            }),
+            move |data, res| {
+                let result = proto::GenericResponse {
+                    success: res.is_ok(),
+                    error_msg: res.err().map(|err| err.to_string()),
+                };
+                data.ui.send(proto::from::Msg::PegEdit(result));
+            },
+        );
+    }
+
     fn try_get_recv_address(
         &mut self,
         account: proto::Account,
@@ -2461,6 +2477,7 @@ impl Data {
             .send(proto::from::Msg::UpdatedPegs(proto::from::UpdatedPegs {
                 order_id: status.order_id.to_string(),
                 items: pegs,
+                fee_rate: status.fee_rate.as_ref().map(FeeRateSats::raw),
             }));
 
         for msg in queue_msgs.into_iter() {
@@ -2973,6 +2990,7 @@ impl Data {
             proto::to::Msg::PegInRequest(_) => self.process_pegin_request(),
             proto::to::Msg::PegOutAmount(req) => self.process_pegout_amount(req),
             proto::to::Msg::PegOutRequest(req) => self.process_pegout_request(req),
+            proto::to::Msg::PegEdit(req) => self.process_peg_edit(req),
             proto::to::Msg::GetRecvAddress(req) => {
                 self.process_get_recv_address(Account::try_from(req).expect("must be valid"))
             }
@@ -3021,6 +3039,7 @@ impl Data {
             api::Response::Peg(_) => {}
             api::Response::PegStatus(msg) => self.process_peg_status(msg),
             api::Response::PegReturnAddress(_) => {}
+            api::Response::PegEdit(_) => {}
             api::Response::PriceUpdateBroadcast(_) => {}
             api::Response::PriceUpdateSubscribe(_) => {}
             api::Response::LoginClient(_) => {}

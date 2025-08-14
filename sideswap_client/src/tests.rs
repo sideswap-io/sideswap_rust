@@ -106,6 +106,7 @@ impl Data {
             | proto::from::Msg::DecryptPin(_)
             | proto::from::Msg::PeginWaitTx(_)
             | proto::from::Msg::PegOutAmount(_)
+            | proto::from::Msg::PegEdit(_)
             | proto::from::Msg::SwapSucceed(_)
             | proto::from::Msg::SwapFailed(_)
             | proto::from::Msg::RecvAddress(_)

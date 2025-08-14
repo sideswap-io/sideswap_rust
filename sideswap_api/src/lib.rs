@@ -288,6 +288,14 @@ pub struct PegReturnAddressRequest {
 
 pub type PegReturnAddressResponse = Empty;
 
+#[derive(Serialize, Deserialize, Debug)]
+pub struct PegEditRequest {
+    pub order_id: OrderId,
+    pub fee_rate: Option<FeeRateSats>,
+}
+
+pub type PegEditResponse = Empty;
+
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct Swap {
     pub send_asset: AssetId,
@@ -385,6 +393,7 @@ pub struct PegStatus {
     pub created_at: Timestamp,
     pub expires_at: Timestamp,
     pub return_address: Option<String>,
+    pub fee_rate: Option<FeeRateSats>,
 }
 
 pub type RequestIdInt = i64;
@@ -1056,6 +1065,7 @@ pub enum Request {
     Peg(PegRequest),
     PegStatus(PegStatusRequest),
     PegReturnAddress(PegReturnAddressRequest),
+    PegEdit(PegEditRequest),
 
     PriceUpdateBroadcast(PriceUpdateBroadcast),
     PriceUpdateSubscribe(PriceUpdateSubscribe),
@@ -1115,6 +1125,7 @@ pub enum Response {
     Peg(PegResponse),
     PegStatus(PegStatus),
     PegReturnAddress(PegReturnAddressResponse),
+    PegEdit(PegEditResponse),
 
     PriceUpdateBroadcast(Empty),
     PriceUpdateSubscribe(Empty),
