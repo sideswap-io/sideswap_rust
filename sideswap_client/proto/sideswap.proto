@@ -508,6 +508,7 @@ message From {
     required string order_id = 1;
     repeated TransItem items = 2;
     optional double fee_rate = 3;
+    optional uint64 bitcoin_network_fee = 4;
   }
 
   message BalanceUpdate {

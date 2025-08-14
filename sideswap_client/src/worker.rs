@@ -2473,11 +2473,18 @@ impl Data {
             }
         }
 
+        let bitcoin_network_fee = self.server_status.as_ref().and_then(|server_status| {
+            status.fee_rate.map(|fee_rate| {
+                (server_status.peg_out_bitcoin_tx_vsize as f64 * fee_rate.raw()).round() as u64
+            })
+        });
+
         self.ui
             .send(proto::from::Msg::UpdatedPegs(proto::from::UpdatedPegs {
                 order_id: status.order_id.to_string(),
                 items: pegs,
                 fee_rate: status.fee_rate.as_ref().map(FeeRateSats::raw),
+                bitcoin_network_fee,
             }));
 
         for msg in queue_msgs.into_iter() {
