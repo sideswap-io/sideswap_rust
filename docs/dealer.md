@@ -8,13 +8,13 @@ There are 3 types of markets - Stablecoin, AMP and Token. Stablecoin markets are
 
 ## Decide which wallet to use
 
-- LWK (https://github.com/sideswap-io/sideswapclient/tree/master/rust/sideswap_dealer_lwk)
+- LWK (https://github.com/sideswap-io/sideswap_rust/tree/main/sideswap_dealer_lwk)
 Uses a single-sig native or nested segwit account.  Easy to start, as only a mnemonic is needed. Can't be used to hold AMP assets. However, loading UTXOs can become slow after accumulating a lot of history.
 
-- AMP (https://github.com/sideswap-io/sideswapclient/tree/master/rust/sideswap_dealer_amp)
+- AMP (https://github.com/sideswap-io/sideswap_rust/tree/main/sideswap_dealer_amp)
 Uses AMP account and the Green backend. Easy to start, as only a mnemonic is needed. Can be used to trade all types of assets (including AMP).
 
-- Elements node (https://github.com/sideswap-io/sideswapclient/tree/master/rust/sideswap_dealer_elements).
+- Elements node (https://github.com/sideswap-io/sideswap_rust/tree/main/sideswap_dealer_elements).
 Uses single-sig native and nested segwit addresses. Can't be used to hold AMP assets. Recommended for high volume of transactions, as setup is more complicated. It also supports the old instant swaps API (API key required).
 
 The listed clients share most of the same code and configuration format. Only the wallet code is different.
@@ -39,7 +39,7 @@ Demo dealer (with HTTP and WebSocket endpoints) is hosted by SideSwap for testin
 OpenAPI specification: https://sideswap.io/dealer-demo/spec
 Swagger UI: https://sideswap.io/dealer-demo/
 WebSocket: wss://sideswap.io/dealer-demo-ws/
-Use https://github.com/sideswap-io/sideswapclient/blob/master/rust/sideswap_dealer/src/market/api.rs to see the WebSocket messages format (starting from the `To` and `From` messages).
+Use https://github.com/sideswap-io/sideswap_rust/blob/main/sideswap_dealer/src/market/api.rs to see the WebSocket messages format (starting from the `To` and `From` messages).
 
 Liquid Testnet demo with some balance is available at https://testnet.sideswap.io/dealer-demo/ and wss://testnet.sideswap.io/dealer-demo-ws/.
 
@@ -49,12 +49,12 @@ Liquid Testnet demo with some balance is available at https://testnet.sideswap.i
 1. Install Rust compiler. See https://rustup.rs for instructions.
 2. Clone sources:
 ```shell
-git clone https://github.com/sideswap-io/sideswapclient
+git clone https://github.com/sideswap-io/sideswap_rust
 ```
 3. Build the dealer.
 Example for `sideswap_dealer_lwk`:
 ```shell
-cd sideswapclient/rust/sideswap_dealer_lwk
+cd sideswap_rust/sideswap_dealer_lwk
 cargo build --release
 ```
 ### Download compiled binary
