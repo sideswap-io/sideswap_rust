@@ -295,7 +295,6 @@ message To {
     required bool is_send_entered = 4;
     required double fee_rate = 5;
     required string recv_addr = 6;
-    required int32 blocks = 7;
   }
 
   message PegEdit {

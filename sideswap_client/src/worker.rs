@@ -1083,7 +1083,7 @@ impl Data {
                 send_amount: None,
                 peg_in: false,
                 device_key: Some(device_key),
-                blocks: Some(req.blocks),
+                blocks: None,
                 peg_out_amounts: Some(api::PegOutAmounts {
                     send_amount: peg_out_server_amounts.send_amount,
                     recv_amount: peg_out_server_amounts.recv_amount,
