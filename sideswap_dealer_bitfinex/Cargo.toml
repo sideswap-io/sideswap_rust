@@ -1,7 +1,7 @@
 [package]
 name = "sideswap_dealer_bitfinex"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 [dependencies]
 sideswap_api = { path = "../sideswap_api" }

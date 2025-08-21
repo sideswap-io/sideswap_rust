@@ -5,28 +5,27 @@ use std::{
     time::{Duration, Instant},
 };
 
-use anyhow::{anyhow, bail, ensure, Context};
+use anyhow::{Context, anyhow, bail, ensure};
 use bitcoin::{
     bip32::{ChildNumber, Xpriv},
     hashes::Hash,
 };
 use elements::{
-    pset::{serialize::Serialize, PartiallySignedTransaction},
-    secp256k1_zkp, AssetId, EcdsaSighashType, OutPoint, Transaction, TxOut, TxOutSecrets, Txid,
-    UnblindError,
+    AssetId, EcdsaSighashType, OutPoint, Transaction, TxOut, TxOutSecrets, Txid, UnblindError,
+    pset::{PartiallySignedTransaction, serialize::Serialize},
+    secp256k1_zkp,
 };
 use lwk_wollet::Chain;
 use rand::Rng;
-use secp256k1::{SecretKey, SECP256K1};
+use secp256k1::{SECP256K1, SecretKey};
 use serde_bytes::ByteBuf;
 use sideswap_api::{
-    self as api,
+    self as api, AssetBlindingFactor, MarketType, ValueBlindingFactor,
     mkt::{
         self, AssetPair, AssetType, ClientEvent, HistStatus, HistoryOrder, MarketInfo,
         Notification, OrdId, OwnOrder, PublicOrder, QuoteId, QuoteSubId, Request, Response,
         TradeDir,
     },
-    AssetBlindingFactor, MarketType, ValueBlindingFactor,
 };
 use sideswap_common::{
     event_proofs::EventProofs,
@@ -34,10 +33,10 @@ use sideswap_common::{
     green_backend::GREEN_DUMMY_SIG,
     pset::{
         p2pkh_script,
-        swap_amount::{get_swap_amount, SwapAmount},
+        swap_amount::{SwapAmount, get_swap_amount},
     },
     pset_blind::get_blinding_nonces,
-    send_tx::pset::{construct_pset, ConstructPsetArgs, ConstructedPset, PsetInput, PsetOutput},
+    send_tx::pset::{ConstructPsetArgs, ConstructedPset, PsetInput, PsetOutput, construct_pset},
     target_os::TargetOs,
     types::{asset_float_amount_, asset_int_amount_, asset_scale},
     utxo_select::{self, WalletType},
@@ -680,7 +679,7 @@ pub fn send_ack(worker: &mut super::Data) {
         None => return,
     };
 
-    let nonce = rand::thread_rng().gen::<u32>();
+    let nonce = rand::thread_rng().r#gen::<u32>();
     log::debug!("send ack request, nonce: {nonce}...");
     xprivs.expected_nonce = Some(nonce);
     xprivs.ack_succeed = false;
@@ -1120,8 +1119,8 @@ pub fn unblind(txout: &TxOut, shared_secret: SecretKey) -> Result<TxOutSecrets, 
     let (commitment, additional_generator) = match (txout.value, txout.asset) {
         (
             elements::confidential::Value::Confidential(com),
-            elements::confidential::Asset::Confidential(gen),
-        ) => (com, gen),
+            elements::confidential::Asset::Confidential(r#gen),
+        ) => (com, r#gen),
         _ => return Err(UnblindError::NotConfidential),
     };
 
@@ -1467,7 +1466,10 @@ fn try_sign_maker_pset(
                 / asset_scale(base_precision);
         let actual_quote_amount = swap.quote_amount as f64;
         let diff = (1.0 - actual_quote_amount / expected_quote_amount).abs();
-        ensure!(diff < 0.0001, "actual_quote_amount: {actual_quote_amount}, expected_quote_amount: {expected_quote_amount}");
+        ensure!(
+            diff < 0.0001,
+            "actual_quote_amount: {actual_quote_amount}, expected_quote_amount: {expected_quote_amount}"
+        );
 
         total_base_amount += swap.base_amount;
         total_quote_amount += swap.quote_amount;

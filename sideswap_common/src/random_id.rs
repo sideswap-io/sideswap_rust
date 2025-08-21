@@ -26,11 +26,11 @@ pub fn numeric_string(len: usize) -> String {
 }
 
 pub fn random_hash32() -> sideswap_api::Hash32 {
-    rand::thread_rng().gen()
+    rand::thread_rng().r#gen()
 }
 
 pub fn random_hash16() -> sideswap_api::Hash16 {
-    rand::thread_rng().gen()
+    rand::thread_rng().r#gen()
 }
 
 #[cfg(test)]

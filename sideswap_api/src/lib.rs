@@ -7,12 +7,12 @@ pub mod pegx;
 
 use elements::hashes::Hash;
 pub use elements::{
-    confidential::{AssetBlindingFactor, ValueBlindingFactor},
     Address, Txid,
+    confidential::{AssetBlindingFactor, ValueBlindingFactor},
 };
 use serde::{Deserialize, Serialize};
 use sideswap_types::{
-    asset_precision::AssetPrecision, fee_rate::FeeRateSats, utxo_ext::UtxoExt, TransactionHex,
+    TransactionHex, asset_precision::AssetPrecision, fee_rate::FeeRateSats, utxo_ext::UtxoExt,
 };
 use std::{collections::BTreeMap, vec::Vec};
 
@@ -101,7 +101,7 @@ impl<const LEN: usize> rand::distributions::Distribution<HashN<LEN>>
     for rand::distributions::Standard
 {
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> HashN<LEN> {
-        HashN(rng.gen())
+        HashN(rng.r#gen())
     }
 }
 

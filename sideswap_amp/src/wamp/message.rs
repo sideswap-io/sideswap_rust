@@ -90,13 +90,13 @@ impl Msg {
     #[allow(dead_code)]
     pub fn request_id(&self) -> Option<WampId> {
         Some(*match self {
-            Msg::Error { ref request, .. } => request,
-            Msg::Subscribe { ref request, .. } => request,
-            Msg::Subscribed { ref request, .. } => request,
-            Msg::Unsubscribe { ref request, .. } => request,
-            Msg::Unsubscribed { ref request } => request,
-            Msg::Call { ref request, .. } => request,
-            Msg::Result { ref request, .. } => request,
+            Msg::Error { request, .. } => request,
+            Msg::Subscribe { request, .. } => request,
+            Msg::Subscribed { request, .. } => request,
+            Msg::Unsubscribe { request, .. } => request,
+            Msg::Unsubscribed { request } => request,
+            Msg::Call { request, .. } => request,
+            Msg::Result { request, .. } => request,
             Msg::Hello { .. }
             | Msg::Welcome { .. }
             | Msg::Abort { .. }
@@ -114,29 +114,19 @@ impl Serialize for Msg {
     {
         // Converts the enum struct to a tuple representation
         match self {
-            Msg::Hello {
-                ref realm,
-                ref details,
-            } => (HELLO_ID, realm, details).serialize(serializer),
-            Msg::Welcome {
-                ref session,
-                ref details,
-            } => (WELCOME_ID, session, details).serialize(serializer),
-            Msg::Abort {
-                ref details,
-                ref reason,
-            } => (ABORT_ID, details, reason).serialize(serializer),
-            Msg::Goodbye {
-                ref details,
-                ref reason,
-            } => (GOODBYE_ID, details, reason).serialize(serializer),
+            Msg::Hello { realm, details } => (HELLO_ID, realm, details).serialize(serializer),
+            Msg::Welcome { session, details } => {
+                (WELCOME_ID, session, details).serialize(serializer)
+            }
+            Msg::Abort { details, reason } => (ABORT_ID, details, reason).serialize(serializer),
+            Msg::Goodbye { details, reason } => (GOODBYE_ID, details, reason).serialize(serializer),
             Msg::Error {
-                ref typ,
-                ref request,
-                ref details,
-                ref error,
-                ref arguments,
-                ref arguments_kw,
+                typ,
+                request,
+                details,
+                error,
+                arguments,
+                arguments_kw,
             } => {
                 if let Some(arguments_kw) = arguments_kw {
                     (
@@ -156,25 +146,25 @@ impl Serialize for Msg {
                 }
             }
             Msg::Subscribe {
-                ref request,
-                ref options,
-                ref topic,
+                request,
+                options,
+                topic,
             } => (SUBSCRIBE_ID, request, options, topic).serialize(serializer),
             Msg::Subscribed {
-                ref request,
-                ref subscription,
+                request,
+                subscription,
             } => (SUBSCRIBED_ID, request, subscription).serialize(serializer),
             Msg::Unsubscribe {
-                ref request,
-                ref subscription,
+                request,
+                subscription,
             } => (UNSUBSCRIBE_ID, request, subscription).serialize(serializer),
-            Msg::Unsubscribed { ref request } => (UNSUBSCRIBED_ID, request).serialize(serializer),
+            Msg::Unsubscribed { request } => (UNSUBSCRIBED_ID, request).serialize(serializer),
             Msg::Event {
-                ref subscription,
-                ref publication,
-                ref details,
-                ref arguments,
-                ref arguments_kw,
+                subscription,
+                publication,
+                details,
+                arguments,
+                arguments_kw,
             } => {
                 if let Some(arguments_kw) = arguments_kw {
                     (
@@ -193,11 +183,11 @@ impl Serialize for Msg {
                 }
             }
             Msg::Call {
-                ref request,
-                ref options,
-                ref procedure,
-                ref arguments,
-                ref arguments_kw,
+                request,
+                options,
+                procedure,
+                arguments,
+                arguments_kw,
             } => {
                 if let Some(arguments_kw) = arguments_kw {
                     (
@@ -216,10 +206,10 @@ impl Serialize for Msg {
                 }
             }
             Msg::Result {
-                ref request,
-                ref details,
-                ref arguments,
-                ref arguments_kw,
+                request,
+                details,
+                arguments,
+                arguments_kw,
             } => {
                 if let Some(arguments_kw) = arguments_kw {
                     (

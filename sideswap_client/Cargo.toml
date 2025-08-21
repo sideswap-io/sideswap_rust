@@ -1,7 +1,7 @@
 [package]
 name = "sideswap_client"
 version = "0.1.2"
-edition = "2021"
+edition = "2024"
 build = "build.rs"
 
 [lib]

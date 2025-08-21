@@ -1,5 +1,5 @@
 use std::net::SocketAddr;
-use std::sync::{mpsc, Arc};
+use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant, SystemTime};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -7,17 +7,17 @@ use std::{
 };
 
 use crate::ffi::proto::Account;
-use crate::ffi::{self, proto, GIT_COMMIT_HASH};
+use crate::ffi::{self, GIT_COMMIT_HASH, proto};
 use crate::gdk_ses::{
     self, ElectrumServer, GdkSes, JadeData, NotifCallback, TransactionList, WalletInfo, WalletNotif,
 };
-use crate::gdk_ses_amp::{derive_amp_wo_login, GdkSesAmp};
+use crate::gdk_ses_amp::{GdkSesAmp, derive_amp_wo_login};
 use crate::gdk_ses_rust::{self, GdkSesRust};
 use crate::models::AddressType;
 use crate::settings::WatchOnly;
 use crate::utils::{
-    self, convert_tx, derive_amp_address, derive_native_address, derive_nested_address,
-    get_jade_network, get_peg_item, get_tx_size, redact_from_msg, redact_to_msg, TxSize,
+    self, TxSize, convert_tx, derive_amp_address, derive_native_address, derive_nested_address,
+    get_jade_network, get_peg_item, get_tx_size, redact_from_msg, redact_to_msg,
 };
 use crate::{gdk_ses_amp, models, settings};
 
@@ -30,7 +30,7 @@ use elements::{AssetId, TxOutSecrets};
 use elements_miniscript::slip77::MasterBlindingKey;
 use log::{debug, error, info, warn};
 use lwk_wollet::Chain;
-use market_worker::{get_wallet_account, REGISTER_PATH};
+use market_worker::{REGISTER_PATH, get_wallet_account};
 use serde::{Deserialize, Serialize};
 use sideswap_amp::sw_signer::SwSigner;
 use sideswap_api::mkt::AssetPair;
@@ -41,10 +41,10 @@ use sideswap_common::network::Network;
 use sideswap_common::pset_blind::get_blinding_nonces;
 use sideswap_common::recipient::Recipient;
 use sideswap_common::send_tx::pset::{
-    construct_pset, ConstructPsetArgs, ConstructedPset, PsetInput, PsetOutput,
+    ConstructPsetArgs, ConstructedPset, PsetInput, PsetOutput, construct_pset,
 };
 use sideswap_common::target_os::TargetOs;
-use sideswap_common::types::{self, peg_out_amount, Amount};
+use sideswap_common::types::{self, Amount, peg_out_amount};
 use sideswap_common::utxo_select::{self, WalletType};
 use sideswap_common::ws::next_request_id;
 use sideswap_common::{abort, b64, pin, verify};
@@ -54,7 +54,7 @@ use sideswap_types::fee_rate::FeeRateSats;
 use sideswap_types::proxy_address::ProxyAddress;
 use tokio::sync::mpsc::UnboundedSender;
 
-use sideswap_api::{self as api, fcm_models, MarketType, OrderId};
+use sideswap_api::{self as api, MarketType, OrderId, fcm_models};
 use sideswap_common::ws::manual as ws;
 
 pub struct StartParams {
@@ -322,7 +322,7 @@ impl Data {
 
     fn master_xpub(&mut self) -> bip32::Xpub {
         if self.settings.master_pub_key.is_none() {
-            let seed = rand::Rng::gen::<[u8; 32]>(&mut rand::thread_rng());
+            let seed = rand::Rng::r#gen::<[u8; 32]>(&mut rand::thread_rng());
             let master_priv_key =
                 bip32::Xpriv::new_master(bitcoin::Network::Bitcoin, &seed).unwrap();
             let master_pub_key = bitcoin::bip32::Xpub::from_priv(SECP256K1, &master_priv_key);
@@ -1953,7 +1953,9 @@ impl Data {
         match self.settings.login_id.as_ref() {
             Some(old_login_id) => {
                 if *old_login_id != login_id {
-                    log::warn!("new login_id detected: {login_id}, old_login_id: {old_login_id}, reset settings...");
+                    log::warn!(
+                        "new login_id detected: {login_id}, old_login_id: {old_login_id}, reset settings..."
+                    );
                     self.settings = settings::Settings::default();
                     self.settings.login_id = Some(login_id);
                     self.save_settings();

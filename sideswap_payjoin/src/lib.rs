@@ -2,12 +2,12 @@ use std::{collections::BTreeMap, time::Duration};
 
 use anyhow::{bail, ensure};
 use base64::Engine;
-use elements::{pset::PartiallySignedTransaction, secp256k1_zkp::SECP256K1, AssetId, TxOutSecrets};
+use elements::{AssetId, TxOutSecrets, pset::PartiallySignedTransaction, secp256k1_zkp::SECP256K1};
 use sideswap_common::{
     network::Network,
     pset_blind::get_blinding_nonces,
     recipient::Recipient,
-    send_tx::pset::{construct_pset, ConstructPsetArgs, ConstructedPset, PsetInput, PsetOutput},
+    send_tx::pset::{ConstructPsetArgs, ConstructedPset, PsetInput, PsetOutput, construct_pset},
     utxo_select::{self, WalletType},
 };
 
@@ -298,17 +298,17 @@ fn take_utxos<'a>(
                 elements::confidential::Value::Explicit(utxo.value),
             )
         } else {
-            let gen = elements::secp256k1_zkp::Generator::new_blinded(
+            let r#gen = elements::secp256k1_zkp::Generator::new_blinded(
                 SECP256K1,
                 utxo.asset_id.into_tag(),
                 utxo.asset_bf.into_inner(),
             );
             (
-                elements::confidential::Asset::Confidential(gen),
+                elements::confidential::Asset::Confidential(r#gen),
                 elements::confidential::Value::new_confidential(
                     SECP256K1,
                     utxo.value,
-                    gen,
+                    r#gen,
                     utxo.value_bf,
                 ),
             )

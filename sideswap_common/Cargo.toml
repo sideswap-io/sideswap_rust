@@ -1,7 +1,7 @@
 [package]
 name = "sideswap_common"
 version = "0.1.2"
-edition = "2021"
+edition = "2024"
 
 [dependencies]
 gdk-pin-client = { path = "../gdk_rust/gdk_pin_client" }

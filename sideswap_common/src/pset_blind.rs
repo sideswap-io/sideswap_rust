@@ -1,11 +1,11 @@
 use bitcoin::secp256k1::SecretKey;
 use elements::{
+    AssetId, TxOutSecrets,
     confidential::{AssetBlindingFactor, ValueBlindingFactor},
     pset::{
-        raw::{ProprietaryKey, ProprietaryType},
         PartiallySignedTransaction,
+        raw::{ProprietaryKey, ProprietaryType},
     },
-    AssetId, TxOutSecrets,
 };
 
 use crate::verify;
@@ -202,8 +202,8 @@ pub fn blind_pset(
         .map(|secret| {
             let tag = secret.asset.into_tag();
             let tweak = secret.asset_bf.into_inner();
-            let gen = elements::secp256k1_zkp::Generator::new_blinded(secp, tag, tweak);
-            (gen, tag, tweak)
+            let r#gen = elements::secp256k1_zkp::Generator::new_blinded(secp, tag, tweak);
+            (r#gen, tag, tweak)
         })
         .collect::<Vec<_>>();
 
@@ -302,7 +302,8 @@ pub fn blind_pset(
                 compressed: true,
             });
 
-            let gen = elements::secp256k1_zkp::Generator::new_unblinded(secp, asset_id.into_tag());
+            let r#gen =
+                elements::secp256k1_zkp::Generator::new_unblinded(secp, asset_id.into_tag());
             output.blind_asset_proof =
                 Some(Box::new(elements::secp256k1_zkp::SurjectionProof::new(
                     secp,
@@ -310,7 +311,7 @@ pub fn blind_pset(
                     asset_id.into_tag(),
                     out_abf.into_inner(),
                     &[(
-                        gen,
+                        r#gen,
                         asset_id.into_tag(),
                         elements::secp256k1_zkp::ZERO_TWEAK,
                     )],

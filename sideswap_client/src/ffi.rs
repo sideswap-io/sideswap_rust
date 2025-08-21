@@ -2,7 +2,7 @@ use std::{
     ffi::{CStr, CString},
     os::raw::c_char,
     str::FromStr,
-    sync::{mpsc, Arc, Once},
+    sync::{Arc, Once, mpsc},
     time::Duration,
 };
 
@@ -64,7 +64,7 @@ pub fn get_ffi_from_env(env: i32) -> Option<Env> {
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn sideswap_client_start(
     env: i32,
     work_dir: *const c_char,
@@ -144,7 +144,7 @@ pub fn sideswap_client_start_impl(
     client
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn sideswap_send_request(client: IntPtr, data: *const u8, len: u64) {
     assert!(client != 0);
     assert!(!data.is_null());
@@ -158,7 +158,7 @@ pub extern "C" fn sideswap_send_request(client: IntPtr, data: *const u8, len: u6
         .expect("sending to message failed");
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn sideswap_process_background(data: *const c_char) {
     let data = unsafe { CStr::from_ptr(data) }
         .to_str()
@@ -200,7 +200,7 @@ pub const SIDESWAP_ENV_TESTNET: i32 = 5;
 pub const SIDESWAP_ENV_LOCAL_LIQUID: i32 = 4;
 pub const SIDESWAP_ENV_LOCAL_TESTNET: i32 = 6;
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn sideswap_check_addr(client: IntPtr, addr: *const c_char, addr_type: i32) -> bool {
     assert!(client != 0);
     assert!(!addr.is_null());
@@ -215,21 +215,21 @@ pub extern "C" fn sideswap_check_addr(client: IntPtr, addr: *const c_char, addr_
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn sideswap_msg_ptr(msg: IntPtr) -> *const u8 {
     assert!(msg != 0);
     let msg = unsafe { &*(msg as *const RecvMessage) };
     msg.0.as_ptr()
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn sideswap_msg_len(msg: IntPtr) -> u64 {
     assert!(msg != 0);
     let msg = unsafe { &*(msg as *const RecvMessage) };
     msg.0.len() as u64
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn sideswap_msg_free(msg: IntPtr) {
     assert!(msg != 0);
     let msg = unsafe { Box::from_raw(msg as *mut RecvMessage) };
@@ -246,7 +246,7 @@ fn generate_mnemonic12_from_rng<R: rand::RngCore + rand::CryptoRng>(rng: &mut R)
     mnemonic.to_string()
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn sideswap_generate_mnemonic12() -> *mut c_char {
     log::debug!("generate new mnemonic...");
     let mut rng = rand::rngs::OsRng;
@@ -255,7 +255,7 @@ pub extern "C" fn sideswap_generate_mnemonic12() -> *mut c_char {
     value.into_raw()
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn sideswap_verify_mnemonic(mnemonic: *const c_char) -> bool {
     let mnemonic = unsafe { CStr::from_ptr(mnemonic) };
     bip39::Mnemonic::parse(mnemonic.to_str().unwrap())
@@ -264,7 +264,7 @@ pub extern "C" fn sideswap_verify_mnemonic(mnemonic: *const c_char) -> bool {
         .unwrap_or(false)
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn sideswap_string_free(str: *mut c_char) {
     unsafe {
         drop(CString::from_raw(str));

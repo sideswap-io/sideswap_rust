@@ -1,14 +1,14 @@
 use rand::Rng;
 
-use super::{aes::AesCipher, Cipher};
+use super::{Cipher, aes::AesCipher};
 
 fn generate_random_vector(n: usize) -> Vec<u8> {
     let mut rng = rand::thread_rng();
-    (0..n).map(|_| rng.gen::<u8>()).collect()
+    (0..n).map(|_| rng.r#gen::<u8>()).collect()
 }
 
 fn generate_random_key() -> [u8; 32] {
-    rand::thread_rng().gen()
+    rand::thread_rng().r#gen()
 }
 
 fn test_cipher(mut cipher: impl Cipher) {

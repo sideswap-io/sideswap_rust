@@ -4,14 +4,14 @@ use std::{
 };
 
 use anyhow::ensure;
-use rand::{seq::SliceRandom, thread_rng, Rng};
+use rand::{Rng, seq::SliceRandom, thread_rng};
 
 use crate::network::Network;
 
 use super::*;
 
 fn random_value(max: u64, power: f64, rng: &mut rand::prelude::ThreadRng) -> u64 {
-    let x = rng.gen::<f64>(); // uniform in [0, 1)
+    let x = rng.r#gen::<f64>(); // uniform in [0, 1)
     let value = (x.powf(power) * max as f64).round() as u64;
     let value = u64::max(1, value);
     value
