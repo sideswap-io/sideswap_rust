@@ -19,6 +19,7 @@ members = [
     "sideswap_sdk_rust",
     "sideswap_types",
     "stableapp_api",
+    "swaption_api",
 ]
 
 [workspace.dependencies]
