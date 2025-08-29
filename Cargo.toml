@@ -19,7 +19,6 @@ members = [
     "sideswap_sdk_rust",
     "sideswap_types",
     "stableapp_api",
-    "swaption_api",
 ]
 
 [workspace.dependencies]
@@ -29,6 +28,7 @@ anyhow = "1.0"
 arc-swap = "1.7"
 axum = { version = "0.7", default-features = false, features = ["form", "http1", "json", "matched-path", "query", "tokio"] }
 base64 = "0.21"
+bincode = { version = "2", features = [ "serde" ] }
 bip39 = { version = "2.1", features = ["rand"] }
 bitcoin = { version = "0.32", features = [ "serde" ] }
 bitcoin_hashes = "0.14"

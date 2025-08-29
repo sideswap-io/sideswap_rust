@@ -5,7 +5,7 @@ use elements::{
 use serde::{Deserialize, Serialize};
 use serde_bytes::ByteBuf;
 
-use crate::byte_array::{ByteArray, ByteArray32, ByteArray33};
+use sideswap_types::byte_array::{ByteArray, ByteArray32, ByteArray33};
 
 #[derive(serde::Serialize)]
 pub enum Never {}

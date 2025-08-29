@@ -2,6 +2,7 @@ use hex_encoded::HexEncoded;
 
 pub mod asset_precision;
 pub mod bitcoin_amount;
+pub mod byte_array;
 pub mod chain;
 pub mod duration_ms;
 pub mod enum_utils;

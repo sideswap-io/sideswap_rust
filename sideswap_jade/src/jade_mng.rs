@@ -5,7 +5,10 @@ use std::{
 
 use base64::Engine;
 use serde::{Deserialize, Serialize};
-use sideswap_types::proxy_address::ProxyAddress;
+use sideswap_types::{
+    byte_array::{ByteArray, ByteArray32},
+    proxy_address::ProxyAddress,
+};
 
 #[derive(Copy, Clone)]
 pub enum TxType {
@@ -69,11 +72,10 @@ impl Drop for JadeStatusFlag {
 }
 
 use crate::{
-    byte_array::{ByteArray, ByteArray32},
+    JadeId,
     http_request::handle_http_request,
     models,
     transports::{self, Connection, Transport},
-    JadeId,
 };
 
 #[derive(Serialize)]

@@ -1,9 +1,9 @@
 use std::{
     collections::HashMap,
     sync::{
+        Arc, RwLock, Weak,
         atomic::AtomicUsize,
         mpsc::{self, Receiver, RecvTimeoutError, Sender, TryRecvError},
-        Arc, RwLock, Weak,
     },
     time::{Duration, Instant},
 };
@@ -15,11 +15,11 @@ use elements_miniscript::descriptor::checksum::desc_checksum;
 use gdk_common::{be::BEScriptConvert, electrum_client::Socks5Config};
 use lwk_common::Singlesig;
 use lwk_wollet::{
-    blocking::BlockchainBackend, Chain, ElectrumClient, ElectrumOptions, ElementsNetwork,
-    WolletDescriptor,
+    Chain, ElectrumClient, ElectrumOptions, ElementsNetwork, WolletDescriptor,
+    blocking::BlockchainBackend,
 };
 use secp256k1::SECP256K1;
-use sideswap_amp::{sw_signer::SwSigner, Signer};
+use sideswap_amp::{Signer, sw_signer::SwSigner};
 use sideswap_api::{AssetBlindingFactor, ValueBlindingFactor};
 use sideswap_common::{
     cipher::derive_key, env::Env, network::Network, path_helpers::path_from_u32,

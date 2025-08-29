@@ -1,5 +1,5 @@
 // Serialized as hex in JSON and byte strings in CBOR
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ByteArray<const T: usize>(pub [u8; T]);
 
 impl<const T: usize> std::fmt::LowerHex for ByteArray<T> {
