@@ -1329,10 +1329,17 @@ impl Data {
             .addressees
             .iter()
             .map(|addr| -> Result<Recipient, anyhow::Error> {
+                let asset_id = AssetId::from_str(&addr.asset_id)?;
+                let amount = addr.amount.try_into()?;
+                let address = elements::Address::from_str(&addr.address)?;
+                ensure!(
+                    self.env.nd().elements_params == address.params,
+                    "The address {address} is from a different network"
+                );
                 Ok(Recipient {
-                    asset_id: AssetId::from_str(&addr.asset_id)?,
-                    amount: addr.amount.try_into()?,
-                    address: elements::Address::from_str(&addr.address)?,
+                    asset_id,
+                    amount,
+                    address,
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;
