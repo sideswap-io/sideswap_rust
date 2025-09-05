@@ -42,11 +42,8 @@ pub struct NetworkData {
     pub bitcoin_network: bitcoin::Network,
     pub account_path_sh_wpkh: [u32; 3],
     pub account_path_wpkh: [u32; 3],
-    pub electrum_url: &'static str,
-    pub electrum_tls: bool,
     pub asset_registry_url: &'static str,
     pub tx_explorer_url: &'static str,
-    pub address_explorer_url: &'static str,
     pub policy_asset: elements::AssetId,
 
     // Green multi-sig backend
@@ -62,11 +59,8 @@ pub const NETWORK_LIQUID: NetworkData = NetworkData {
     bitcoin_network: bitcoin::Network::Bitcoin,
     account_path_sh_wpkh: [0x80000031, 0x800006F0, 0x80000000],
     account_path_wpkh: [0x80000054, 0x800006F0, 0x80000000],
-    electrum_url: "blockstream.info:995",
-    electrum_tls: true,
     asset_registry_url: "https://assets.blockstream.info",
     tx_explorer_url: "https://blockstream.info/liquid/tx/",
-    address_explorer_url: "https://blockstream.info/address/",
     policy_asset: const_asset_id(
         "6f0279e9ed041c3d710a9f57d0c02928416460c4b722ae3457a11eec381c526d",
     ),
@@ -89,11 +83,8 @@ pub const NETWORK_LIQUID_TESTNET: NetworkData = NetworkData {
     bitcoin_network: bitcoin::Network::Testnet,
     account_path_sh_wpkh: [0x80000031, 0x80000001, 0x80000000],
     account_path_wpkh: [0x80000054, 0x80000001, 0x80000000],
-    electrum_url: "blockstream.info:465",
-    electrum_tls: true,
     asset_registry_url: "https://assets-testnet.blockstream.info",
     tx_explorer_url: "https://blockstream.info/liquidtestnet/tx/",
-    address_explorer_url: "https://blockstream.info/liquidtestnet/address/",
     policy_asset: const_asset_id(
         "144c654344aa716d6f3abcc1ca90e5641e4e2a7f633bc09fe3baf64585819a49",
     ),
@@ -117,11 +108,8 @@ pub const NETWORK_LIQUID_REGTEST: NetworkData = NetworkData {
     bitcoin_network: bitcoin::Network::Regtest,
     account_path_sh_wpkh: [0x80000031, 0x80000001, 0x80000000],
     account_path_wpkh: [0x80000054, 0x80000001, 0x80000000],
-    electrum_url: "127.0.0.1:56705",
-    electrum_tls: true,
     asset_registry_url: "",
     tx_explorer_url: "",
-    address_explorer_url: "",
     policy_asset: const_asset_id(
         "2184a905372defaf7b0f506c01a54f734f7c0d0d60bbd1c2d90896a9438c1b76",
     ),
