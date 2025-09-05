@@ -1,4 +1,4 @@
-use anyhow::ensure;
+use anyhow::{bail, ensure};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sideswap_types::bitcoin_amount::BtcAmount;
@@ -253,7 +253,7 @@ struct TestMempoolAcceptedCall {
 #[derive(Deserialize, Debug)]
 struct TestMempoolAcceptValue {
     pub txid: String,
-    pub allowed: bool,
+    pub allowed: Option<bool>,
     #[serde(rename = "reject-reason")]
     pub reject_reason: Option<String>,
 }
@@ -276,20 +276,27 @@ pub async fn test_mempool_accepted_list(
     let count = txs.len();
     let check_acceptence =
         make_rpc_call(rpc_server, TestMempoolAcceptedCall { rawtxs: txs }).await?;
+
     ensure!(
         check_acceptence.len() == count,
         "invalid mempool test result"
     );
+
+    for resp in check_acceptence.iter() {
+        if let Some(reject_reason) = &resp.reject_reason {
+            bail!(
+                "mempool test failed: '{reject_reason}', txid: {}",
+                resp.txid
+            );
+        }
+    }
+
     let mut txids = Vec::new();
-    for resp in check_acceptence {
-        ensure!(
-            resp.allowed,
-            "mempool test failed: '{}', txid: {}",
-            resp.reject_reason.clone().unwrap_or_default(),
-            resp.txid,
-        );
+    for resp in check_acceptence.into_iter() {
+        ensure!(resp.allowed.unwrap_or_default());
         txids.push(resp.txid);
     }
+
     Ok(txids)
 }
 
