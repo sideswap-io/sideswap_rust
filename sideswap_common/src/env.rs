@@ -56,7 +56,7 @@ const ENV_LOCAL_TESTNET: EnvData = EnvData {
 
 const ENV_LOCAL_REGTEST: EnvData = EnvData {
     host: "127.0.0.1",
-    port: 56705,
+    port: 22615,
     use_tls: false,
     name: "local_regtest",
     mainnet: false,
