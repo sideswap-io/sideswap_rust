@@ -4,12 +4,12 @@ use anyhow::{bail, ensure};
 use base64::Engine;
 use elements::{AssetId, TxOutSecrets, pset::PartiallySignedTransaction, secp256k1_zkp::SECP256K1};
 use sideswap_common::{
-    network::Network,
     pset_blind::get_blinding_nonces,
     recipient::Recipient,
     send_tx::pset::{ConstructPsetArgs, ConstructedPset, PsetInput, PsetOutput, construct_pset},
     utxo_select::{self, WalletType},
 };
+use sideswap_types::network::Network;
 
 use crate::server_api::{SignResponse, StartResponse};
 

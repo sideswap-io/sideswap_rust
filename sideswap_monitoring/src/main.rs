@@ -11,12 +11,13 @@ use sideswap_common::{
         auto::{WrappedRequest, WrappedResponse},
     },
 };
+use sideswap_types::env::Env;
 use tokio::sync::mpsc::UnboundedSender;
 
 #[derive(Debug, Deserialize)]
 pub struct Settings {
     log_settings: String,
-    env: sideswap_common::env::Env,
+    env: Env,
 }
 
 #[derive(Debug)]

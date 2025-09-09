@@ -1,3 +1,5 @@
+use elements::bitcoin;
+
 use crate::const_asset_id::const_asset_id;
 
 #[derive(Debug, Eq, PartialEq, Copy, Clone, serde::Serialize, serde::Deserialize)]

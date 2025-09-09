@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 sideswap_api = { path = "../sideswap_api" }
 sideswap_common = { path = "../sideswap_common" }
+sideswap_types = { path = "../sideswap_types" }
 
 anyhow.workspace = true
 config.workspace = true

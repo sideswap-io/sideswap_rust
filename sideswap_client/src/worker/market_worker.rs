@@ -40,12 +40,11 @@ use sideswap_common::{
     target_os::TargetOs,
     types::{asset_float_amount_, asset_int_amount_, asset_scale},
     utxo_select::{self, WalletType},
-    verify,
 };
 use sideswap_jade::jade_mng::{self, AE_STUB_DATA};
 use sideswap_types::{
     duration_ms::DurationMs, hex_encoded::HexEncoded, normal_float::NormalFloat,
-    timestamp_ms::TimestampMs,
+    timestamp_ms::TimestampMs, verify,
 };
 
 use crate::{

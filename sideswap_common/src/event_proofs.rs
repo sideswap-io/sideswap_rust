@@ -10,10 +10,8 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sideswap_api::mkt::{self, AssetPair, ClientEvent, OrdId, ServerEvent, TradeDir};
 use sideswap_types::{
-    duration_ms::DurationMs, normal_float::NormalFloat, timestamp_ms::TimestampMs,
+    duration_ms::DurationMs, env::Env, normal_float::NormalFloat, timestamp_ms::TimestampMs,
 };
-
-use crate::env::Env;
 
 #[derive(Debug, Serialize)]
 enum EventHash<'a> {

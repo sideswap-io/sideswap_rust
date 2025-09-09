@@ -1,17 +1,16 @@
 use std::{collections::BTreeMap, sync::Arc};
 
 use sideswap_api::{
-    mkt::{AssetPair, TradeDir},
     PricePair,
+    mkt::{AssetPair, TradeDir},
 };
 use sideswap_common::{
     dealer_ticker::{DealerTicker, TickerLoader},
-    env::Env,
     exchange_pair::ExchangePair,
     price_stream,
 };
-use sideswap_types::normal_float::NormalFloat;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
+use sideswap_types::{env::Env, normal_float::NormalFloat};
+use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 
 use crate::{dealer_rpc, market};
 

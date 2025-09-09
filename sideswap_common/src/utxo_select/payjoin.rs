@@ -1,14 +1,14 @@
 use elements::AssetId;
+use sideswap_types::verify;
 
 use crate::utxo_select::RecipientAddress;
-use crate::verify;
 
 use super::{
-    change_wallets, select_asset_inputs, tx_weight, updated_recipients, weight_to_fee,
-    DEFAULT_FEE_RATE,
+    DEFAULT_FEE_RATE, change_wallets, select_asset_inputs, tx_weight, updated_recipients,
+    weight_to_fee,
 };
 
-use super::{recipient_totals, Change, ChangeWallets, Error, Recipient, Utxo};
+use super::{Change, ChangeWallets, Error, Recipient, Utxo, recipient_totals};
 
 #[derive(Debug)]
 pub struct Args {

@@ -7,8 +7,7 @@ use elements::{
         raw::{ProprietaryKey, ProprietaryType},
     },
 };
-
-use crate::verify;
+use sideswap_types::verify;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {

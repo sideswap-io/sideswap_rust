@@ -1,43 +1,42 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
-    sync::{mpsc, Arc},
+    sync::{Arc, mpsc},
     time::Duration,
 };
 
-use elements::{pset::PartiallySignedTransaction, AssetId};
+use elements::{AssetId, pset::PartiallySignedTransaction};
 use sideswap_api::{
-    mkt::{self, AssetType, QuoteId, TradeDir},
     OrderId, ResponseMessage,
+    mkt::{self, AssetType, QuoteId, TradeDir},
 };
 use sideswap_common::{
-    abort, b64,
     channel_helpers::{UncheckedOneshotSender, UncheckedUnboundedSender},
     dealer_ticker::{DealerTicker, TickerLoader},
     make_market_request, make_request,
-    pset::swap_amount::{get_swap_amount, SwapAmount},
+    pset::swap_amount::{SwapAmount, get_swap_amount},
     types::{asset_float_amount, asset_float_amount_, asset_int_amount_},
-    verify,
     ws::{
         auto::{WrappedRequest, WrappedResponse},
         ws_req_sender::{self, WsReqSender},
     },
 };
 use sideswap_dealer::utxo_data::UtxoData;
-use sideswap_types::{asset_precision::AssetPrecision, timestamp_ms::TimestampMs};
+use sideswap_types::{
+    abort, asset_precision::AssetPrecision, b64, timestamp_ms::TimestampMs, verify,
+};
 use sideswap_types::{chain::Chain, utxo_ext::UtxoExt};
 use sqlx::types::Text;
 use tokio::{
-    sync::mpsc::{unbounded_channel, UnboundedReceiver},
+    sync::mpsc::{UnboundedReceiver, unbounded_channel},
     time::Instant,
 };
 
 use crate::{
-    api,
+    Settings, api,
     db::Db,
     error::Error,
     models::{self, MonitoredTx, Peg},
     ws_server::ClientId,
-    Settings,
 };
 
 const GAP_LIMIT: u32 = 20;
@@ -1156,7 +1155,6 @@ pub async fn check_wallet_id(wallet: &sideswap_lwk::Wallet, db: &Db) {
                 "The working directory has already been used with a different mnemonic. Please revert to the old mnemonic and script variant or use a new working directory. Old wallet id: {}, new wallet id: {}",
                 stored_wallet_id,
                 expected_wallet_id,
-
             );
             log::debug!("valid wallet_id stored in the DB");
         }

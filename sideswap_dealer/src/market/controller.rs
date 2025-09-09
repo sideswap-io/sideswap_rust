@@ -2,25 +2,25 @@ use std::{str::FromStr, sync::Arc};
 
 use elements::{Address, AssetId};
 use sideswap_api::{
-    mkt::{AssetPair, AssetType, OrdId, QuoteId, TradeDir},
     Asset,
+    mkt::{AssetPair, AssetType, OrdId, QuoteId, TradeDir},
 };
 use sideswap_common::{
     channel_helpers::UncheckedUnboundedSender,
     dealer_ticker::{DealerTicker, TickerLoader},
     exchange_pair::ExchangePair,
-    network::Network,
     types::asset_int_amount_,
-    verify,
 };
-use sideswap_types::{chain::Chain, normal_float::NormalFloat, timestamp_ms::TimestampMs};
+use sideswap_types::{
+    chain::Chain, network::Network, normal_float::NormalFloat, timestamp_ms::TimestampMs, verify,
+};
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
 
 use crate::market::Mode;
 
 use super::{
-    try_convert_asset_amount, Balances, ClientCommand, ClientEvent, ClientId, Error, HistoryOrders,
-    Metadata, OrderBook, OwnOrder, OwnOrders, StartQuotesResp,
+    Balances, ClientCommand, ClientEvent, ClientId, Error, HistoryOrders, Metadata, OrderBook,
+    OwnOrder, OwnOrders, StartQuotesResp, try_convert_asset_amount,
 };
 
 #[derive(Clone)]

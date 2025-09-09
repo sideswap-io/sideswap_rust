@@ -2,10 +2,11 @@ use bitcoin::bip32::{ChildNumber, Xpriv, Xpub};
 use bitcoin_hashes::Hash;
 use elements::pset::PartiallySignedTransaction;
 use elements_miniscript::slip77::MasterBlindingKey;
-use secp256k1::{ecdsa::Signature, SECP256K1};
-use sideswap_common::{green_backend::GREEN_DUMMY_SIG, network::Network};
+use secp256k1::{SECP256K1, ecdsa::Signature};
+use sideswap_common::green_backend::GREEN_DUMMY_SIG;
+use sideswap_types::network::Network;
 
-use crate::{address_user_path, Error, Signer, Utxo};
+use crate::{Error, Signer, Utxo, address_user_path};
 
 pub struct SwSigner {
     network: Network,

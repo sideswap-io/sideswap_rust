@@ -9,26 +9,24 @@ use std::{
 
 use controller::Controller;
 use elements::{
+    Address, AssetId, OutPoint, Txid,
     confidential::{AssetBlindingFactor, ValueBlindingFactor},
     pset::PartiallySignedTransaction,
-    Address, AssetId, OutPoint, Txid,
 };
 use sideswap_api::{
+    Asset, AssetsRequestParam, MarketType, RequestId, ResponseMessage, Utxo,
     mkt::{
         self, AssetPair, AssetType, HistId, MarketInfo, Notification, OrdId, QuoteId, QuoteSubId,
         Request, TradeDir,
     },
-    Asset, AssetsRequestParam, MarketType, RequestId, ResponseMessage, Utxo,
 };
 use sideswap_common::{
-    b64,
     channel_helpers::{UncheckedOneshotSender, UncheckedUnboundedSender},
     dealer_ticker::{DealerTicker, InvalidTickerError, TickerLoader},
     exchange_pair::ExchangePair,
     make_market_request, make_request,
-    pset::swap_amount::{self, get_swap_amount, SwapAmount},
+    pset::swap_amount::{self, SwapAmount, get_swap_amount},
     types::{asset_float_amount_, asset_int_amount_},
-    verify,
     ws::{
         auto::{WrappedRequest, WrappedResponse},
         ws_req_sender::{self, WsReqSender},
@@ -36,13 +34,16 @@ use sideswap_common::{
 };
 use sideswap_types::{
     asset_precision::AssetPrecision,
+    b64,
     chain::Chain,
+    env::Env,
     normal_float::{NormalFloat, NotNormalError},
     timestamp_ms::TimestampMs,
     utxo_ext::UtxoExt,
+    verify,
 };
 use tokio::sync::{
-    mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
+    mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel},
     oneshot,
 };
 
@@ -58,7 +59,7 @@ pub use ws_server::Config as WsServerConfig;
 
 #[derive(Clone)]
 pub struct Params {
-    pub env: sideswap_common::env::Env,
+    pub env: Env,
     pub disable_new_swaps: bool,
     pub server_url: String,
     pub work_dir: PathBuf,

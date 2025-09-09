@@ -5,8 +5,7 @@ use std::{
 
 use anyhow::ensure;
 use rand::{Rng, seq::SliceRandom, thread_rng};
-
-use crate::network::Network;
+use sideswap_types::network::Network;
 
 use super::*;
 

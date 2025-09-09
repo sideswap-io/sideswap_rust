@@ -3,20 +3,19 @@ use std::{sync::Arc, time::Duration};
 use bitcoin::bip32::{ChildNumber, Xpub};
 use elements::{pset::PartiallySignedTransaction, secp256k1_zkp::global::SECP256K1};
 use elements_miniscript::slip77::MasterBlindingKey;
-use sideswap_amp::{sw_signer::SwSigner, tx_cache::TxCache, Credentials, Signer};
+use sideswap_amp::{Credentials, Signer, sw_signer::SwSigner, tx_cache::TxCache};
 use sideswap_api::{AssetBlindingFactor, ValueBlindingFactor};
 use sideswap_common::{
     channel_helpers::UncheckedOneshotSender,
     cipher::{aes::AesCipher, derive_key},
     file_cache::FileCache,
-    network::Network,
-    retry_delay::RetryDelay,
     utxo_select::WalletType,
 };
 use sideswap_jade::{jade_mng::AE_STUB_DATA, models::SignMessageReq};
+use sideswap_types::{network::Network, retry_delay::RetryDelay};
 use tokio::{
     sync::{
-        mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
+        mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel},
         oneshot,
     },
     task::JoinHandle,

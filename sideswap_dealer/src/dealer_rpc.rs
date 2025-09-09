@@ -3,23 +3,23 @@
 use crate::utxo_data::{self, UtxoData, UtxoWithKey};
 
 use anyhow::{anyhow, ensure};
-use elements::pset::PartiallySignedTransaction;
 use elements::OutPoint;
+use elements::pset::PartiallySignedTransaction;
 use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use sideswap_api::{Asset, *};
 use sideswap_common::{
-    b64,
     dealer_ticker::{DealerTicker, TickerLoader},
     make_request,
     rpc::{self, ListUnspent},
     types::{self, Amount},
     ws::{self, auto::WrappedResponse, ws_req_sender::WsReqSender},
 };
+use sideswap_types::{b64, env::Env};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
 // Keep some extra amount in the wallet for the various fees (server, network, external exchange)
 const INSTANT_SWAP_WORK_AMOUNT: f64 = 0.995;
@@ -35,7 +35,7 @@ const PRICE_EDIT_MIN_DELAY: std::time::Duration = std::time::Duration::from_secs
 
 #[derive(Clone)]
 pub struct Params {
-    pub env: sideswap_common::env::Env,
+    pub env: Env,
 
     pub server_url: String,
 
@@ -142,11 +142,7 @@ pub fn apply_interest(price: &PricePair, interest: f64) -> PricePair {
 }
 
 pub fn pick_price(price: &PricePair, send_bitcoins: bool) -> f64 {
-    if send_bitcoins {
-        price.ask
-    } else {
-        price.bid
-    }
+    if send_bitcoins { price.ask } else { price.bid }
 }
 
 fn take_order(

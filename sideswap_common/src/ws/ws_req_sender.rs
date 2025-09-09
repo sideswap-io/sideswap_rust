@@ -4,9 +4,8 @@ use std::{
 };
 
 use sideswap_api::ErrorCode;
+use sideswap_types::verify;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
-
-use crate::verify;
 
 use super::{
     auto::{WrappedRequest, WrappedResponse},

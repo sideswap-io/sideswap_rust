@@ -1,12 +1,10 @@
-use crate::retry_delay::RetryDelay;
-
 use super::*;
 
 use anyhow::anyhow;
 use futures::prelude::*;
 use log::{debug, error, info, warn};
 use sideswap_api::*;
-use sideswap_types::proxy_address::ProxyAddress;
+use sideswap_types::{proxy_address::ProxyAddress, retry_delay::RetryDelay};
 use std::time::Instant;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tungstenite::Message;

@@ -1,6 +1,8 @@
 use std::{collections::BTreeMap, str::FromStr};
 
-use crate::{network::Network, utxo_select::WalletType};
+use sideswap_types::network::Network;
+
+use crate::utxo_select::WalletType;
 
 use super::*;
 

@@ -7,7 +7,7 @@ use std::{
 };
 
 use prost::Message;
-use sideswap_common::env::Env;
+use sideswap_types::env::Env;
 
 use crate::worker;
 
@@ -284,7 +284,7 @@ fn check_bitcoin_address(env: Env, addr: &str) -> bool {
     }
 }
 
-fn elements_params(env: sideswap_common::env::Env) -> &'static elements::AddressParams {
+fn elements_params(env: Env) -> &'static elements::AddressParams {
     match env {
         Env::Prod | Env::LocalLiquid => &elements::address::AddressParams::LIQUID,
         Env::Testnet | Env::LocalTestnet => &elements::address::AddressParams::LIQUID_TESTNET,

@@ -11,27 +11,26 @@ use bitcoin::{
     hashes::Hash,
 };
 use elements::{
+    Address, AssetId, TxOutSecrets, Txid,
     confidential::{AssetBlindingFactor, ValueBlindingFactor},
     pset::PartiallySignedTransaction,
     secp256k1_zkp::global::SECP256K1,
-    Address, AssetId, TxOutSecrets, Txid,
 };
 use elements_miniscript::slip77::MasterBlindingKey;
 use futures::{SinkExt, StreamExt};
 use secp256k1::ecdsa::Signature;
 use serde::Serialize;
 use sideswap_common::{
-    abort,
     channel_helpers::UncheckedOneshotSender,
-    network::Network,
     pset_blind::get_blinding_nonces,
     recipient::Recipient,
-    retry_delay::RetryDelay,
-    send_tx::pset::{construct_pset, ConstructPsetArgs, ConstructedPset, PsetInput, PsetOutput},
+    send_tx::pset::{ConstructPsetArgs, ConstructedPset, PsetInput, PsetOutput, construct_pset},
     utxo_select::{self, ChangeWallets, WalletType},
-    verify,
 };
-use sideswap_types::{proxy_address::ProxyAddress, timestamp_us::TimestampUs, utxo_ext::UtxoExt};
+use sideswap_types::{
+    abort, network::Network, proxy_address::ProxyAddress, retry_delay::RetryDelay,
+    timestamp_us::TimestampUs, utxo_ext::UtxoExt, verify,
+};
 use sw_signer::SwSigner;
 use tokio::sync::{
     mpsc::{UnboundedReceiver, UnboundedSender},
@@ -105,9 +104,7 @@ pub enum Error {
     ZeroSendAmount,
     #[error("amount overflow")]
     AmountOverflow,
-    #[error(
-        "not enough amount for asset {asset_id}, required: {required}, available: {available}"
-    )]
+    #[error("not enough amount for asset {asset_id}, required: {required}, available: {available}")]
     NotEnoughAmount {
         asset_id: AssetId,
         required: u64,
@@ -2246,7 +2243,7 @@ async fn connect(
             let signer = match login_details {
                 LoginType::Full(signer) => signer,
                 LoginType::WatchOnly { .. } => {
-                    return Err(Error::ProtocolError("no wo account found"))
+                    return Err(Error::ProtocolError("no wo account found"));
                 }
             };
 
@@ -2272,7 +2269,7 @@ async fn connect(
             let signer = match login_details {
                 LoginType::Full(signer) => signer,
                 LoginType::WatchOnly { .. } => {
-                    return Err(Error::ProtocolError("no wo subaccount found"))
+                    return Err(Error::ProtocolError("no wo subaccount found"));
                 }
             };
 

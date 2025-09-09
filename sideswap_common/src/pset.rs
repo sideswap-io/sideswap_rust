@@ -1,5 +1,6 @@
 use anyhow::{anyhow, ensure};
 use bitcoin::hashes::Hash;
+use sideswap_types::env::Env;
 
 pub mod swap_amount;
 
@@ -61,7 +62,7 @@ pub fn get_server_fee(bitcoin_amount: i64) -> Option<i64> {
 }
 
 pub fn get_output(
-    env: crate::env::Env,
+    env: Env,
     addr: &str,
     asset: &sideswap_api::AssetId,
     amount: i64,

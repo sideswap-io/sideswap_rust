@@ -2,11 +2,9 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use elements::{Address, AssetId, Txid};
 use serde::Serialize;
+use sideswap_types::verify;
 
-use crate::{
-    coin_select::{in_range, no_change_or_naive},
-    verify,
-};
+use crate::coin_select::{in_range, no_change_or_naive};
 
 pub mod payjoin;
 

@@ -6,13 +6,13 @@ use std::{
 use anyhow::ensure;
 use serde::Deserialize;
 use sideswap_api::PricePair;
+use sideswap_types::env::Env;
 
 use crate::{
     dealer_ticker::{DealerTicker, TickerLoader},
-    env::Env,
     exchange_pair::ExchangePair,
     http_client::HttpClient,
-    types::{asset_int_amount_, MAX_BTC_AMOUNT},
+    types::{MAX_BTC_AMOUNT, asset_int_amount_},
 };
 
 mod binance;

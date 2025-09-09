@@ -2,34 +2,32 @@ use std::{
     collections::BTreeSet,
     path::PathBuf,
     str::FromStr,
-    sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender},
+    sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel},
     time::{Duration, Instant},
 };
 
 use elements::{
+    Txid,
     bitcoin::bip32,
     confidential::{AssetBlindingFactor, ValueBlindingFactor},
-    Txid,
 };
-use lwk_common::{singlesig_desc, Signer};
+use lwk_common::{Signer, singlesig_desc};
 use lwk_wollet::{
+    ElementsNetwork, WolletDescriptor,
     blocking::BlockchainBackend,
     elements_miniscript::{self, slip77::MasterBlindingKey},
     secp256k1::SECP256K1,
-    ElementsNetwork, WolletDescriptor,
 };
 use sideswap_common::{
     channel_helpers::{UncheckedOneshotSender, UncheckedUnboundedSender},
-    network::Network,
     recipient::Recipient,
-    retry_delay::RetryDelay,
 };
 use sideswap_dealer::{
     market::{SendAssetReq, SendAssetResp},
     utxo_data::{self, UtxoData, UtxoWithKey},
 };
-use sideswap_types::chain::Chain;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
+use sideswap_types::{chain::Chain, network::Network, retry_delay::RetryDelay};
+use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 
 pub use lwk_wollet::{WalletTx, WalletTxOut};
 

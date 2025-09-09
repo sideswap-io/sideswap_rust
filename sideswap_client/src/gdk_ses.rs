@@ -5,9 +5,8 @@ use std::sync::Arc;
 use crate::{ffi::proto, models, settings::WatchOnly};
 use bitcoin::bip32;
 use elements_miniscript::slip77::MasterBlindingKey;
-use sideswap_common::env::Env;
 use sideswap_jade::{jade_mng, models::JadeNetwork};
-use sideswap_types::proxy_address::ProxyAddress;
+use sideswap_types::{env::Env, proxy_address::ProxyAddress};
 
 #[derive(Clone)]
 pub struct JadeData {

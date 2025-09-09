@@ -1,13 +1,12 @@
 use std::collections::BTreeMap;
 
-use bitcoin::secp256k1::{SecretKey, SECP256K1};
+use bitcoin::secp256k1::{SECP256K1, SecretKey};
 use elements::{
-    secp256k1_zkp::{Generator, PedersenCommitment},
     AssetId,
+    secp256k1_zkp::{Generator, PedersenCommitment},
 };
 use sideswap_api::{AssetBlindingFactor, ValueBlindingFactor};
-
-use crate::verify;
+use sideswap_types::verify;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SwapAmount {
@@ -136,7 +135,9 @@ pub fn get_swap_amount(
             Error::Protocol("unexpected value commitment")
         );
 
-        log::debug!("unblinded output, txid: {txid}, vout: {vout}, asset: {asset}, asset_bf: {asset_bf}, value: {value}, value_bf: {value_bf}");
+        log::debug!(
+            "unblinded output, txid: {txid}, vout: {vout}, asset: {asset}, asset_bf: {asset_bf}, value: {value}, value_bf: {value_bf}"
+        );
         let total = output_amounts.entry(asset).or_default();
         *total = total
             .checked_add(value)

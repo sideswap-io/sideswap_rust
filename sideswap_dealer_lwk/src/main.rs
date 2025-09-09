@@ -1,6 +1,6 @@
 use std::path::PathBuf;
-use std::sync::mpsc::Sender;
 use std::sync::Arc;
+use std::sync::mpsc::Sender;
 use std::time::Duration;
 
 use sideswap_api::mkt::AssetPair;
@@ -9,11 +9,12 @@ use sideswap_common::dealer_ticker::{TickerLoader, WhitelistedAssets};
 use sideswap_dealer::utxo_data::UtxoData;
 use sideswap_dealer::{market, price_stream, utxo_data};
 use sideswap_types::chain::Chain;
+use sideswap_types::env::Env;
 use tokio::sync::oneshot;
 
 #[derive(Debug, serde::Deserialize)]
 struct Settings {
-    env: sideswap_common::env::Env,
+    env: Env,
     #[serde(default)]
     disable_new_swaps: bool,
     work_dir: PathBuf,
@@ -97,7 +98,9 @@ fn process_market_event(data: &mut Data, event: market::Event) {
             price,
             txid,
         } => {
-            log::info!("market swap, base: {base}, quote: {quote}, base amount: {base_amount}, quote amount: {quote_amount}, price: {price}, txid: {txid}, trade_dir: {trade_dir:?}");
+            log::info!(
+                "market swap, base: {base}, quote: {quote}, base amount: {base_amount}, quote amount: {quote_amount}, price: {price}, txid: {txid}, trade_dir: {trade_dir:?}"
+            );
         }
 
         market::Event::BroadcastTx { tx } => {

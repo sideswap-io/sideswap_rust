@@ -1,10 +1,11 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
-    sync::{mpsc, Arc},
+    sync::{Arc, mpsc},
     time::Duration,
 };
 
-use sideswap_common::{env::Env, panic_handler::install_panic_handler};
+use sideswap_common::panic_handler::install_panic_handler;
+use sideswap_types::env::Env;
 
 use crate::{
     ffi::proto::{self, Account},

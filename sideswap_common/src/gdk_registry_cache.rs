@@ -10,9 +10,7 @@ use arc_swap::ArcSwap;
 use base64::Engine;
 use elements::{AssetId, ContractHash};
 use serde::{Deserialize, Serialize};
-use sideswap_types::asset_precision::AssetPrecision;
-
-use crate::network::Network;
+use sideswap_types::{asset_precision::AssetPrecision, network::Network};
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
 pub struct GdkAssetEntity {
@@ -318,10 +316,11 @@ impl<R: Registry + 'static> Updater<R> {
                 loop {
                     let res = load_from_network::<R>(network, &None, &file_path).await;
                     match res {
-                        Ok(Some(output)) =>
-                            break output,
+                        Ok(Some(output)) => break output,
 
-                        Ok(None) => unreachable!("load_from_network should not return empty result when last_modified is None"),
+                        Ok(None) => unreachable!(
+                            "load_from_network should not return empty result when last_modified is None"
+                        ),
                         Err(err) => {
                             log::error!("loading failed: {err}");
                             tokio::time::sleep(Duration::from_secs(60)).await;

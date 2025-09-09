@@ -1,3 +1,5 @@
+use elements::bitcoin;
+
 /// Use for const initialization only.
 /// Panics if invalid string is supplied.
 pub const fn const_asset_id(s: &str) -> elements::AssetId {

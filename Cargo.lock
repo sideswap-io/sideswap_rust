@@ -4459,6 +4459,7 @@ dependencies = [
  "serde_json",
  "sideswap_api",
  "sideswap_common",
+ "sideswap_types",
  "tokio",
 ]
 
@@ -4472,6 +4473,7 @@ dependencies = [
  "rand 0.8.5",
  "serde 1.0.219",
  "sideswap_common",
+ "sideswap_types",
  "ureq",
 ]
 
@@ -4488,6 +4490,7 @@ dependencies = [
  "serde 1.0.219",
  "sideswap_api",
  "sideswap_common",
+ "sideswap_types",
  "thiserror 1.0.69",
  "tokio",
  "tokio-tungstenite",
@@ -4497,8 +4500,11 @@ dependencies = [
 name = "sideswap_types"
 version = "0.1.2"
 dependencies = [
+ "base64 0.21.7",
  "elements",
  "hex",
+ "hex-literal",
+ "rand 0.8.5",
  "serde 1.0.219",
  "serde_bytes",
  "serde_json",

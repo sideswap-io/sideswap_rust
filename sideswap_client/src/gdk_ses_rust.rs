@@ -21,11 +21,11 @@ use lwk_wollet::{
 use secp256k1::SECP256K1;
 use sideswap_amp::{Signer, sw_signer::SwSigner};
 use sideswap_api::{AssetBlindingFactor, ValueBlindingFactor};
-use sideswap_common::{
-    cipher::derive_key, env::Env, network::Network, path_helpers::path_from_u32,
-    retry_delay::RetryDelay, utxo_select::WalletType,
+use sideswap_common::{cipher::derive_key, path_helpers::path_from_u32, utxo_select::WalletType};
+use sideswap_types::{
+    env::Env, network::Network, proxy_address::ProxyAddress, retry_delay::RetryDelay,
+    timestamp_ms::TimestampMs,
 };
-use sideswap_types::{proxy_address::ProxyAddress, timestamp_ms::TimestampMs};
 
 use crate::{
     ffi::proto::Account,

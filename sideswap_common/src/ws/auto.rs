@@ -1,10 +1,11 @@
-use crate::{channel_helpers, retry_delay::RetryDelay};
+use crate::channel_helpers;
 
 use super::*;
 
 use futures::prelude::*;
 use log::{debug, error, info};
 use sideswap_api::*;
+use sideswap_types::retry_delay::RetryDelay;
 use std::time::Instant;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tungstenite::Message;

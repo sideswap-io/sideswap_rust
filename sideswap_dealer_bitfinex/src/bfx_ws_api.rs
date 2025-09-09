@@ -3,11 +3,12 @@ use std::time::{Duration, Instant};
 use anyhow::{anyhow, bail, ensure};
 use futures::prelude::*;
 use serde::{Deserialize, Serialize};
-use sideswap_common::{channel_helpers::UncheckedUnboundedSender, retry_delay::RetryDelay};
+use sideswap_common::channel_helpers::UncheckedUnboundedSender;
+use sideswap_types::retry_delay::RetryDelay;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio_tungstenite::connect_async;
 
-use crate::{bitfinex_api::new_nonce, BfSettings, ExchangePair};
+use crate::{BfSettings, ExchangePair, bitfinex_api::new_nonce};
 
 #[derive(Debug, PartialEq, Deserialize)]
 pub enum WalletType {

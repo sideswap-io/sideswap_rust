@@ -6,7 +6,7 @@ use sideswap_common::{
     channel_helpers::UncheckedUnboundedSender,
     dealer_ticker::{DealerTicker, TickerLoader, WhitelistedAssets},
     rpc::{self, RpcServer},
-    types::{sat_to_btc, Amount},
+    types::{Amount, sat_to_btc},
 };
 use sideswap_dealer::{
     dealer_rpc,
@@ -14,10 +14,11 @@ use sideswap_dealer::{
     price_stream,
     utxo_data::{self, UtxoData},
 };
+use sideswap_types::env::Env;
 
 #[derive(Debug, Deserialize)]
 struct Settings {
-    env: sideswap_common::env::Env,
+    env: Env,
     #[serde(default)]
     disable_new_swaps: bool,
     work_dir: PathBuf,
@@ -93,7 +94,9 @@ fn process_market_event(data: &mut Data, event: market::Event) {
             price,
             txid,
         } => {
-            log::info!("market swap, base: {base}, quote: {quote}, base amount: {base_amount}, quote amount: {quote_amount}, price: {price}, txid: {txid}, trade_dir: {trade_dir:?}");
+            log::info!(
+                "market swap, base: {base}, quote: {quote}, base amount: {base_amount}, quote amount: {quote_amount}, price: {price}, txid: {txid}, trade_dir: {trade_dir:?}"
+            );
         }
 
         market::Event::BroadcastTx { tx } => {

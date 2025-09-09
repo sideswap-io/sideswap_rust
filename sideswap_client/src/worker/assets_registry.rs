@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 
 use sideswap_api::{Asset, AssetId, IssuancePrevout, Ticker};
-use sideswap_common::env::Env;
-use sideswap_types::{asset_precision::AssetPrecision, proxy_address::ProxyAddress};
+use sideswap_types::{
+    asset_precision::AssetPrecision, env::Env, network::Network, proxy_address::ProxyAddress,
+};
 
 pub fn init(registry_path: &std::path::Path) {
     if let Err(error) = gdk_registry::init(registry_path) {
@@ -78,13 +79,9 @@ pub fn get_assets(
 
 fn get_registry_config(env: Env, proxy: &Option<ProxyAddress>) -> gdk_registry::Config {
     let network = match env.d().network {
-        sideswap_common::network::Network::Liquid => gdk_registry::ElementsNetwork::Liquid,
-        sideswap_common::network::Network::LiquidTestnet => {
-            gdk_registry::ElementsNetwork::LiquidTestnet
-        }
-        sideswap_common::network::Network::Regtest => {
-            gdk_registry::ElementsNetwork::ElementsRegtest
-        }
+        Network::Liquid => gdk_registry::ElementsNetwork::Liquid,
+        Network::LiquidTestnet => gdk_registry::ElementsNetwork::LiquidTestnet,
+        Network::Regtest => gdk_registry::ElementsNetwork::ElementsRegtest,
     };
     gdk_registry::Config {
         // Must be in this format - socks5://{ip}:{port}

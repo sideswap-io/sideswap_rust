@@ -1,11 +1,10 @@
 use elements::AssetId;
 use sideswap_common::{
-    b64,
     dealer_ticker::{DealerTicker, InvalidTickerError},
     pset::swap_amount::SwapAmount,
     ws::ws_req_sender,
 };
-use sideswap_types::asset_precision::AssetPrecision;
+use sideswap_types::{asset_precision::AssetPrecision, b64};
 
 use crate::api;
 
@@ -25,9 +24,7 @@ pub enum Error {
     InvalidAssetAmount(f64, AssetPrecision),
     #[error("can't find market")]
     NoMarket,
-    #[error(
-        "not enough amount for asset {asset_id}, required: {required}, available: {available}"
-    )]
+    #[error("not enough amount for asset {asset_id}, required: {required}, available: {available}")]
     NotEnoughAmount {
         asset_id: AssetId,
         required: u64,

@@ -2,9 +2,9 @@ use std::{collections::BTreeMap, path::Path, str::FromStr};
 
 use anyhow::anyhow;
 use elements::AssetId;
-use sideswap_types::asset_precision::AssetPrecision;
+use sideswap_types::{asset_precision::AssetPrecision, network::Network};
 
-use crate::{gdk_registry_cache::GdkRegistryCache, network::Network};
+use crate::gdk_registry_cache::GdkRegistryCache;
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct DealerTicker([u8; 8]);

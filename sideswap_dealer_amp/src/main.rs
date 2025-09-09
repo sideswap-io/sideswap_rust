@@ -11,11 +11,12 @@ use sideswap_common::dealer_ticker::{TickerLoader, WhitelistedAssets};
 use sideswap_common::recipient::Recipient;
 use sideswap_dealer::market::{SendAssetReq, SendAssetResp};
 use sideswap_dealer::{market, price_stream};
+use sideswap_types::env::Env;
 use tokio::sync::mpsc::unbounded_channel;
 
 #[derive(Debug, serde::Deserialize)]
 struct Settings {
-    env: sideswap_common::env::Env,
+    env: Env,
     #[serde(default)]
     disable_new_swaps: bool,
     work_dir: PathBuf,
@@ -149,7 +150,9 @@ async fn process_market_event(data: &mut Data, event: market::Event) {
             price,
             txid,
         } => {
-            log::info!("market swap, base: {base}, quote: {quote}, base amount: {base_amount}, quote amount: {quote_amount}, price: {price}, txid: {txid}, trade_dir: {trade_dir:?}");
+            log::info!(
+                "market swap, base: {base}, quote: {quote}, base amount: {base_amount}, quote amount: {quote_amount}, price: {price}, txid: {txid}, trade_dir: {trade_dir:?}"
+            );
         }
 
         market::Event::BroadcastTx { tx } => {

@@ -3,17 +3,20 @@ use crate::models;
 use crate::worker::TX_CONF_COUNT_LIQUID;
 use anyhow::{bail, ensure};
 use bitcoin::bip32::{ChildNumber, Xpub};
-use elements::{hashes::Hash, pset::PartiallySignedTransaction, secp256k1_zkp::global::SECP256K1};
 use elements::{AssetId, EcdsaSighashType};
+use elements::{hashes::Hash, pset::PartiallySignedTransaction, secp256k1_zkp::global::SECP256K1};
 use elements_miniscript::slip77::MasterBlindingKey;
 use secp256k1::SecretKey;
 use sideswap_api::{Asset, Hash32};
+use sideswap_common::green_backend::GREEN_DUMMY_SIG;
 use sideswap_common::utxo_select::WalletType;
-use sideswap_common::{b64, env::Env, green_backend::GREEN_DUMMY_SIG, network::Network};
 use sideswap_jade::{
     jade_mng::{self, JadeStatus},
     models::JadeNetwork,
 };
+use sideswap_types::b64;
+use sideswap_types::env::Env;
+use sideswap_types::network::Network;
 use std::collections::{BTreeMap, BTreeSet};
 
 pub fn encode_pset(pset: &PartiallySignedTransaction) -> String {

@@ -13,19 +13,18 @@ use bitfinex_api::movements::Movements;
 use elements::AssetId;
 use log::{debug, error, info, warn};
 use serde::Deserialize;
+use sideswap_api::PricePair;
 use sideswap_api::mkt::AssetPair;
 use sideswap_api::mkt::TradeDir;
-use sideswap_api::PricePair;
 use sideswap_common::channel_helpers::UncheckedUnboundedSender;
 use sideswap_common::dealer_ticker::DealerTicker;
 use sideswap_common::dealer_ticker::TickerLoader;
-use sideswap_common::network::Network;
 use sideswap_common::rpc;
+use sideswap_common::types::Amount;
+use sideswap_common::types::MAX_BTC_AMOUNT;
 use sideswap_common::types::btc_to_sat;
 use sideswap_common::types::sat_to_btc;
 use sideswap_common::types::timestamp_now;
-use sideswap_common::types::Amount;
-use sideswap_common::types::MAX_BTC_AMOUNT;
 use sideswap_common::web_notif::send_many;
 use sideswap_dealer::dealer_rpc;
 use sideswap_dealer::dealer_rpc::*;
@@ -33,6 +32,8 @@ use sideswap_dealer::logs::GIT_COMMIT_HASH;
 use sideswap_dealer::market;
 use sideswap_dealer::utxo_data;
 use sideswap_dealer::utxo_data::UtxoData;
+use sideswap_types::env::Env;
+use sideswap_types::network::Network;
 use sideswap_types::normal_float::NormalFloat;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -42,8 +43,8 @@ use std::time::Duration;
 use std::time::Instant;
 use storage::Transfer;
 use storage::TransferState;
-use tokio::sync::mpsc::unbounded_channel;
 use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::mpsc::unbounded_channel;
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ExchangeTicker {
@@ -146,7 +147,7 @@ type PendingOrders = BTreeMap<i64, Instant>;
 
 #[derive(Debug, Deserialize)]
 pub struct Settings {
-    env: sideswap_common::env::Env,
+    env: Env,
 
     bitcoin_amount_submit: f64,
     bitcoin_amount_min: f64,
@@ -266,7 +267,7 @@ type HealthStatus = Arc<std::sync::Mutex<Option<String>>>;
 
 struct Data {
     settings: Settings,
-    network: sideswap_common::network::Network,
+    network: Network,
     policy_asset: AssetId,
     ticker_loader: Arc<TickerLoader>,
     server_connected: bool,

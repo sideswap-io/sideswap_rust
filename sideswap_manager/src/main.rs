@@ -2,6 +2,7 @@ use std::{path::PathBuf, sync::Arc};
 
 use serde::Deserialize;
 use sideswap_common::dealer_ticker::{TickerLoader, WhitelistedAssets};
+use sideswap_types::env::Env;
 
 mod api;
 mod db;
@@ -12,7 +13,7 @@ mod ws_server;
 
 #[derive(Debug, Deserialize)]
 struct Settings {
-    env: sideswap_common::env::Env,
+    env: Env,
     work_dir: PathBuf,
 
     mnemonic: bip39::Mnemonic,

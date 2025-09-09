@@ -35,9 +35,8 @@ use serde::{Deserialize, Serialize};
 use sideswap_amp::sw_signer::SwSigner;
 use sideswap_api::mkt::AssetPair;
 use sideswap_common::cipher::derive_key;
-use sideswap_common::env::Env;
 use sideswap_common::event_proofs::EventProofs;
-use sideswap_common::network::Network;
+use sideswap_common::pin;
 use sideswap_common::pset_blind::get_blinding_nonces;
 use sideswap_common::recipient::Recipient;
 use sideswap_common::send_tx::pset::{
@@ -47,11 +46,13 @@ use sideswap_common::target_os::TargetOs;
 use sideswap_common::types::{self, Amount, peg_out_amount};
 use sideswap_common::utxo_select::{self, WalletType};
 use sideswap_common::ws::next_request_id;
-use sideswap_common::{abort, b64, pin, verify};
 use sideswap_jade::jade_mng::{self, JadeStatus, JadeStatusCallback, ManagedJade};
 use sideswap_types::asset_precision::AssetPrecision;
+use sideswap_types::env::Env;
 use sideswap_types::fee_rate::FeeRateSats;
+use sideswap_types::network::Network;
 use sideswap_types::proxy_address::ProxyAddress;
+use sideswap_types::{abort, b64, verify};
 use tokio::sync::mpsc::UnboundedSender;
 
 use sideswap_api::{self as api, MarketType, OrderId, fcm_models};

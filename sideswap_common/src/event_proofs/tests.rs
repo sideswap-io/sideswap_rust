@@ -1,6 +1,5 @@
 use elements::Script;
-
-use crate::network::Network;
+use sideswap_types::network::Network;
 
 use super::*;
 

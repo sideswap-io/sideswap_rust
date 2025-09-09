@@ -1,7 +1,8 @@
 use anyhow::anyhow;
-use sideswap_api::{mkt::AssetPair, PricePair};
+use sideswap_api::{PricePair, mkt::AssetPair};
+use sideswap_types::env::Env;
 
-use crate::{dealer_ticker::TickerLoader, env::Env, http_client::HttpClient};
+use crate::{dealer_ticker::TickerLoader, http_client::HttpClient};
 
 use super::Market;
 

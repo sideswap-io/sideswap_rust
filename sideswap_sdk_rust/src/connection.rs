@@ -3,15 +3,15 @@ use std::sync::Mutex;
 use sideswap_api::mkt;
 use sideswap_common::{
     channel_helpers::UncheckedOneshotSender,
-    env::Env,
     ws::{
         auto::{WrappedRequest, WrappedResponse},
         ws_req_sender::WsReqSender,
     },
 };
+use sideswap_types::env::Env;
 use tokio::{
     sync::{
-        mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
+        mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel},
         oneshot,
     },
     task::JoinHandle,
