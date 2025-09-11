@@ -4187,6 +4187,7 @@ version = "0.1.2"
 dependencies = [
  "allo-isolate",
  "anyhow",
+ "axum",
  "bip39",
  "bitcoin",
  "block-modes",

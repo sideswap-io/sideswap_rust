@@ -19,7 +19,7 @@ use crate::utils::{
     self, TxSize, convert_tx, derive_amp_address, derive_native_address, derive_nested_address,
     get_jade_network, get_peg_item, get_tx_size, redact_from_msg, redact_to_msg,
 };
-use crate::{gdk_ses_amp, models, settings};
+use crate::{gdk_ses_amp, models, settings, web_server};
 
 use anyhow::{anyhow, bail, ensure};
 use bitcoin::bip32;
@@ -217,6 +217,7 @@ pub struct WalletData {
     peg_out_server_amounts: Option<LastPegOutAmount>,
     last_recv_address: Option<models::AddressInfo>,
     watching_txid: Option<elements::Txid>,
+    web_server: web_server::WebServer,
 }
 
 #[derive(Clone)]
@@ -2149,6 +2150,7 @@ impl Data {
             peg_out_server_amounts: None,
             last_recv_address: None,
             watching_txid: None,
+            web_server: web_server::WebServer::new(self.env, self.msg_sender.clone()),
         });
 
         if self.skip_wallet_sync() {
@@ -2218,6 +2220,7 @@ impl Data {
             peg_out_server_amounts,
             last_recv_address,
             watching_txid,
+            web_server,
         } = wallet_data;
 
         let mut login_info_reg = wallet_reg.login_info().clone();
@@ -2253,6 +2256,7 @@ impl Data {
             peg_out_server_amounts,
             last_recv_address,
             watching_txid,
+            web_server,
         });
     }
 

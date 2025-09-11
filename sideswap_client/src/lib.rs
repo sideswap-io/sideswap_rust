@@ -5,6 +5,7 @@ mod gdk_ses_rust;
 mod models;
 mod settings;
 mod utils;
+mod web_server;
 pub mod worker;
 
 #[cfg(test)]

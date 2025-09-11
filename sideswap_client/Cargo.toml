@@ -21,6 +21,7 @@ sideswap_types = { path = "../sideswap_types" }
 
 allo-isolate.workspace = true
 anyhow.workspace = true
+axum.workspace = true
 bip39.workspace = true
 bitcoin.workspace = true
 block-modes.workspace = true
