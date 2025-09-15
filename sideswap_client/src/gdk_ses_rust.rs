@@ -36,11 +36,12 @@ use crate::{
     models::{self, AddressType},
 };
 
-struct AccountData {
+pub struct AccountData {
     xpub: Xpub,
     singlesig: Singlesig,
     wallet: Arc<RwLock<lwk_wollet::Wollet>>,
     command_sender: Sender<Command>,
+    descriptor: WolletDescriptor,
 }
 
 struct WorkerData {
@@ -125,6 +126,12 @@ fn public_key(account_xpub: &Xpub, ext_int: Chain, wildcard_index: u32) -> bitco
         .into()
 }
 
+impl AccountData {
+    pub fn descriptor(&self) -> &WolletDescriptor {
+        &self.descriptor
+    }
+}
+
 impl GdkSesRust {
     pub fn start_fast_sync(&self) {
         let _ = self
@@ -139,7 +146,7 @@ impl GdkSesRust {
         }
     }
 
-    fn default_account(&self) -> &AccountData {
+    pub fn default_account(&self) -> &AccountData {
         self.accounts.get(0).expect("must exist")
     }
 
@@ -722,7 +729,7 @@ pub fn start_processing(
 
     let account_count = Arc::new(AtomicUsize::new(0));
 
-    let wallets = accounts
+    let accounts = accounts
         .into_iter()
         .map(|(xpub, single_sig)| {
             let descriptor = singlesig_desc(
@@ -793,6 +800,7 @@ pub fn start_processing(
                 singlesig: single_sig,
                 wallet,
                 command_sender,
+                descriptor,
             }
         })
         .collect();
@@ -800,7 +808,7 @@ pub fn start_processing(
     let ses = GdkSesRust {
         is_mainnet,
         login_info,
-        accounts: wallets,
+        accounts,
     };
 
     Arc::new(ses)

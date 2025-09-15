@@ -16,6 +16,7 @@ pub mod network;
 pub mod normal_float;
 pub mod proxy_address;
 pub mod retry_delay;
+pub mod signer_api;
 pub mod str_encoded;
 pub mod timestamp_ms;
 pub mod timestamp_us;

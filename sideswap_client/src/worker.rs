@@ -19,7 +19,7 @@ use crate::utils::{
     self, TxSize, convert_tx, derive_amp_address, derive_native_address, derive_nested_address,
     get_jade_network, get_peg_item, get_tx_size, redact_from_msg, redact_to_msg,
 };
-use crate::{gdk_ses_amp, models, settings, web_server};
+use crate::{gdk_ses_amp, models, settings, signer_server};
 
 use anyhow::{anyhow, bail, ensure};
 use bitcoin::bip32;
@@ -34,6 +34,7 @@ use market_worker::{REGISTER_PATH, get_wallet_account};
 use serde::{Deserialize, Serialize};
 use sideswap_amp::sw_signer::SwSigner;
 use sideswap_api::mkt::AssetPair;
+use sideswap_common::channel_helpers::UncheckedOneshotSender;
 use sideswap_common::cipher::derive_key;
 use sideswap_common::event_proofs::EventProofs;
 use sideswap_common::pin;
@@ -217,7 +218,7 @@ pub struct WalletData {
     peg_out_server_amounts: Option<LastPegOutAmount>,
     last_recv_address: Option<models::AddressInfo>,
     watching_txid: Option<elements::Txid>,
-    web_server: web_server::WebServer,
+    web_server: signer_server::SignerServer,
 }
 
 #[derive(Clone)]
@@ -287,12 +288,15 @@ pub struct Data {
     last_ui_message: SystemTime,
 }
 
+pub type PsetSignSender = UncheckedOneshotSender<Result<String, signer_server::SignerError>>;
+
 pub enum Message {
     Ui(ffi::ToMsg),
     Ws(ws::WrappedResponse),
     WalletEvent(Account, wallet::Event),
     WalletNotif(Account, WalletNotif),
     BackgroundMessage(String, mpsc::Sender<()>),
+    SignPset(String, PsetSignSender),
     Quit,
 }
 
@@ -2132,6 +2136,12 @@ impl Data {
             master_blinding_key,
         };
 
+        let web_server = signer_server::SignerServer::new(signer_server::Params {
+            env: self.env,
+            msg_sender: self.msg_sender.clone(),
+            descriptor: wallet_reg.default_account().descriptor().clone(),
+        });
+
         self.wallet_data = Some(WalletData {
             xpubs,
             wallet_reg,
@@ -2150,7 +2160,7 @@ impl Data {
             peg_out_server_amounts: None,
             last_recv_address: None,
             watching_txid: None,
-            web_server: web_server::WebServer::new(self.env, self.msg_sender.clone()),
+            web_server,
         });
 
         if self.skip_wallet_sync() {
@@ -3713,6 +3723,34 @@ impl Data {
             },
         );
     }
+
+    fn try_web_sign_pset(&mut self, pset: String) -> Result<String, signer_server::SignerError> {
+        let mut pset = PartiallySignedTransaction::from_str(&pset)?;
+
+        let wallet_data = self
+            .wallet_data
+            .as_mut()
+            .ok_or(signer_server::SignerError::NoWalletData)?;
+
+        match &wallet_data.wallet_reg.login_info().wallet_info {
+            WalletInfo::Mnemonic(mnemonic) => {
+                use lwk_common::Signer;
+                let signer = lwk_signer::SwSigner::new(&mnemonic.to_string(), self.env.d().mainnet)
+                    .expect("signer creation failed");
+                signer.sign(&mut pset)?;
+                Ok(pset.to_string())
+            }
+            WalletInfo::Jade(_jade, _watch_only) => {
+                // FIXME: Implement Jade
+                abort!(signer_server::SignerError::JadeNotImplemented);
+            }
+        }
+    }
+
+    fn process_web_sign_request(&mut self, pset: String, res_sender: PsetSignSender) {
+        let res = self.try_web_sign_pset(pset);
+        res_sender.send(res);
+    }
 }
 
 fn process_timer_event(data: &mut Data, event: TimerEvent) {
@@ -3904,6 +3942,7 @@ pub fn start_processing(
             Message::WalletEvent(account_id, event) => data.process_wallet_event(account_id, event),
             Message::WalletNotif(account_id, msg) => data.process_wallet_notif(account_id, msg),
             Message::BackgroundMessage(msg, sender) => data.process_background_message(msg, sender),
+            Message::SignPset(pset, res_sender) => data.process_web_sign_request(pset, res_sender),
             Message::Quit => {
                 warn!("quit message received, exit");
                 break;
