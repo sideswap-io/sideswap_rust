@@ -14,13 +14,13 @@ use axum::{
 };
 use lwk_wollet::WolletDescriptor;
 use sideswap_types::{env::Env, retry_delay::RetryDelay, signer_api};
-use tokio::sync::Notify;
+use tokio_util::sync::CancellationToken;
 use tower_http::cors::CorsLayer;
 
 use crate::worker::Message;
 
 pub struct SignerServer {
-    shutdown_notify: Arc<Notify>,
+    cancel_token: CancellationToken,
 }
 
 pub struct Params {
@@ -31,21 +31,21 @@ pub struct Params {
 
 impl SignerServer {
     pub fn new(params: Params) -> Self {
-        let shutdown_notify = Arc::new(Notify::new());
+        let cancel_token = CancellationToken::new();
 
-        let shutdown_notify_copy = Arc::clone(&shutdown_notify);
+        let cancel_token_copy = cancel_token.clone();
 
         std::thread::spawn(move || {
-            run(params, shutdown_notify_copy);
+            run(params, cancel_token_copy);
         });
 
-        Self { shutdown_notify }
+        Self { cancel_token }
     }
 }
 
 impl Drop for SignerServer {
     fn drop(&mut self) {
-        self.shutdown_notify.notify_one();
+        self.cancel_token.cancel();
     }
 }
 
@@ -136,7 +136,24 @@ async fn allow_private_network_header(req: Request<Body>, next: Next) -> impl In
     res
 }
 
-pub async fn try_run(params: Params, shutdown_notify: Arc<Notify>) -> Result<(), anyhow::Error> {
+async fn bind_socket_with_retry(addr: std::net::SocketAddr) -> tokio::net::TcpListener {
+    let mut retry_delay = RetryDelay::default();
+
+    loop {
+        let res = tokio::net::TcpListener::bind(addr).await;
+
+        match res {
+            Ok(listener) => return listener,
+
+            Err(err) => {
+                log::debug!("signer port bind failed: {err}");
+                tokio::time::sleep(retry_delay.next_delay()).await;
+            }
+        }
+    }
+}
+
+pub async fn try_run(params: Params, cancel_token: CancellationToken) -> Result<(), anyhow::Error> {
     let env = params.env;
 
     let enabled = match env {
@@ -157,46 +174,32 @@ pub async fn try_run(params: Params, shutdown_notify: Arc<Notify>) -> Result<(),
         .layer(build_cors())
         .layer(middleware::from_fn(allow_private_network_header));
 
-    let addr: std::net::SocketAddr = ([127, 0, 0, 3], env.d().wallet_port).into();
+    let addr = std::net::SocketAddr::from(([127, 0, 0, 3], env.d().wallet_port));
 
-    let mut retry_delay = RetryDelay::default();
+    let listener = tokio::select! {
+        listener = bind_socket_with_retry(addr) => {
+            listener
+        },
 
-    let listener = loop {
-        let res = tokio::select! {
-            res = tokio::net::TcpListener::bind(addr) => {
-                res
-            },
-
-            () = shutdown_notify.notified() => {
-                return Ok(());
-            },
-        };
-
-        match res {
-            Ok(listener) => break listener,
-            Err(err) => {
-                log::error!("signer port bind failed: {err}");
-                tokio::time::sleep(retry_delay.next_delay()).await;
-            }
-        }
+        () = cancel_token.cancelled() => {
+            return Ok(());
+        },
     };
 
     axum::serve(listener, app)
-        .with_graceful_shutdown(async move {
-            shutdown_notify.notified().await;
-        })
+        .with_graceful_shutdown(cancel_token.cancelled_owned())
         .await?;
 
     Ok(())
 }
 
-pub fn run(params: Params, shutdown_notify: Arc<Notify>) {
+pub fn run(params: Params, cancel_token: CancellationToken) {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .expect("must not fail");
 
-    let res = runtime.block_on(try_run(params, shutdown_notify));
+    let res = runtime.block_on(try_run(params, cancel_token));
 
     if let Err(err) = res {
         log::error!("web server failed: {err}");
