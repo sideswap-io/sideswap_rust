@@ -147,7 +147,8 @@ impl Data {
             | proto::from::Msg::LoadHistory(_)
             | proto::from::Msg::HistoryUpdated(_)
             | proto::from::Msg::NewBlock(_)
-            | proto::from::Msg::NewTx(_) => {}
+            | proto::from::Msg::NewTx(_)
+            | proto::from::Msg::SignerRequest(_) => {}
         }
 
         msg

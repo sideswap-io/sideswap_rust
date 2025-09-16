@@ -5,7 +5,7 @@ pub struct DescriptorReq {}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct DescriptorResp {
-    pub descr: String,
+    pub descriptor: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

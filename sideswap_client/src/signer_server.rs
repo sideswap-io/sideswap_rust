@@ -12,7 +12,8 @@ use axum::{
     response::IntoResponse,
     routing::post,
 };
-use lwk_wollet::WolletDescriptor;
+use http::HeaderMap;
+use sideswap_common::channel_helpers::UncheckedOneshotSender;
 use sideswap_types::{env::Env, retry_delay::RetryDelay, signer_api};
 use tokio_util::sync::CancellationToken;
 use tower_http::cors::CorsLayer;
@@ -26,7 +27,12 @@ pub struct SignerServer {
 pub struct Params {
     pub env: Env,
     pub msg_sender: mpsc::Sender<Message>,
-    pub descriptor: WolletDescriptor,
+}
+
+pub struct WebRequest {
+    pub origin: String,
+    pub req: signer_api::Req,
+    pub res_sender: UncheckedOneshotSender<Result<signer_api::Resp, SignerError>>,
 }
 
 impl SignerServer {
@@ -34,7 +40,6 @@ impl SignerServer {
         let cancel_token = CancellationToken::new();
 
         let cancel_token_copy = cancel_token.clone();
-
         std::thread::spawn(move || {
             run(params, cancel_token_copy);
         });
@@ -51,6 +56,8 @@ impl Drop for SignerServer {
 
 #[derive(thiserror::Error, Debug)]
 pub enum SignerError {
+    #[error("user rejected")]
+    UserRejected,
     #[error("jade is not implemented")]
     JadeNotImplemented,
     #[error("channel closed")]
@@ -61,6 +68,12 @@ pub enum SignerError {
     NoWalletData,
     #[error("sign error: {0}")]
     Sign(#[from] lwk_signer::SignError),
+    #[error("no origin header set")]
+    NoOrigin,
+    #[error("invalid header: {0}")]
+    ToStrError(#[from] http::header::ToStrError),
+    #[error("lwk: {0}")]
+    Lwk(#[from] lwk_wollet::Error),
 }
 
 impl<T> From<std::sync::mpsc::SendError<T>> for SignerError {
@@ -88,24 +101,25 @@ impl IntoResponse for SignerError {
 }
 
 async fn sign(
+    headers: HeaderMap,
     State(params): State<Arc<Params>>,
     Json(req): Json<signer_api::Req>,
 ) -> Result<Json<signer_api::Resp>, SignerError> {
-    match req {
-        signer_api::Req::Descriptor(signer_api::DescriptorReq {}) => Ok(Json(
-            signer_api::Resp::Descriptor(signer_api::DescriptorResp {
-                descr: params.descriptor.to_string(),
-            }),
-        )),
-        signer_api::Req::Sign(sign_req) => {
-            let (res_sender, res_receiver) = tokio::sync::oneshot::channel();
-            params
-                .msg_sender
-                .send(Message::SignPset(sign_req.pset, res_sender.into()))?;
-            let pset = res_receiver.await??;
-            Ok(Json(signer_api::Resp::Sign(signer_api::SignResp { pset })))
-        }
-    }
+    let origin = headers
+        .get(http::header::ORIGIN)
+        .ok_or(SignerError::NoOrigin)?
+        .to_str()?
+        .to_owned();
+
+    let (res_sender, res_receiver) = tokio::sync::oneshot::channel();
+    params.msg_sender.send(Message::SignerRequest(WebRequest {
+        origin,
+        req,
+        res_sender: res_sender.into(),
+    }))?;
+    let resp = res_receiver.await??;
+
+    Ok(Json(resp))
 }
 
 fn build_cors() -> CorsLayer {

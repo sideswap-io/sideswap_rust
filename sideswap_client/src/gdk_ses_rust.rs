@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    str::FromStr,
     sync::{
         Arc, RwLock, Weak,
         atomic::AtomicUsize,
@@ -10,7 +11,7 @@ use std::{
 
 use anyhow::anyhow;
 use bitcoin::bip32::{ChildNumber, Fingerprint, Xpub};
-use elements::Txid;
+use elements::{Txid, pset::PartiallySignedTransaction};
 use elements_miniscript::descriptor::checksum::desc_checksum;
 use gdk_common::{be::BEScriptConvert, electrum_client::Socks5Config};
 use lwk_common::Singlesig;
@@ -129,6 +130,16 @@ fn public_key(account_xpub: &Xpub, ext_int: Chain, wildcard_index: u32) -> bitco
 impl AccountData {
     pub fn descriptor(&self) -> &WolletDescriptor {
         &self.descriptor
+    }
+
+    pub fn pset_details(&self, pset: &str) -> Result<lwk_common::PsetDetails, lwk_wollet::Error> {
+        let pset = PartiallySignedTransaction::from_str(pset)?;
+        let details = self
+            .wallet
+            .read()
+            .expect("must not fail")
+            .get_details(&pset)?;
+        Ok(details)
     }
 }
 

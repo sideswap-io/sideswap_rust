@@ -15,6 +15,7 @@ use crate::gdk_ses_amp::{GdkSesAmp, derive_amp_wo_login};
 use crate::gdk_ses_rust::{self, GdkSesRust};
 use crate::models::AddressType;
 use crate::settings::WatchOnly;
+use crate::signer_server::{SignerError, WebRequest};
 use crate::utils::{
     self, TxSize, convert_tx, derive_amp_address, derive_native_address, derive_nested_address,
     get_jade_network, get_peg_item, get_tx_size, redact_from_msg, redact_to_msg,
@@ -53,7 +54,7 @@ use sideswap_types::env::Env;
 use sideswap_types::fee_rate::FeeRateSats;
 use sideswap_types::network::Network;
 use sideswap_types::proxy_address::ProxyAddress;
-use sideswap_types::{abort, b64, verify};
+use sideswap_types::{abort, b64, signer_api, verify};
 use tokio::sync::mpsc::UnboundedSender;
 
 use sideswap_api::{self as api, MarketType, OrderId, fcm_models};
@@ -198,6 +199,8 @@ struct CreatedTx {
     assets: BTreeSet<AssetId>,
 }
 
+type SignerReqId = u32;
+
 pub struct WalletData {
     xpubs: XPubInfo,
     wallet_reg: Arc<GdkSesRust>,
@@ -219,6 +222,7 @@ pub struct WalletData {
     last_recv_address: Option<models::AddressInfo>,
     watching_txid: Option<elements::Txid>,
     web_server: signer_server::SignerServer,
+    signer_requests: BTreeMap<SignerReqId, WebRequest>,
 }
 
 #[derive(Clone)]
@@ -286,6 +290,7 @@ pub struct Data {
     proxy_address: Option<ProxyAddress>,
     wallet_event_callback: wallet::EventCallback,
     last_ui_message: SystemTime,
+    last_signer_req_id: SignerReqId,
 }
 
 pub type PsetSignSender = UncheckedOneshotSender<Result<String, signer_server::SignerError>>;
@@ -296,7 +301,7 @@ pub enum Message {
     WalletEvent(Account, wallet::Event),
     WalletNotif(Account, WalletNotif),
     BackgroundMessage(String, mpsc::Sender<()>),
-    SignPset(String, PsetSignSender),
+    SignerRequest(WebRequest),
     Quit,
 }
 
@@ -2139,7 +2144,6 @@ impl Data {
         let web_server = signer_server::SignerServer::new(signer_server::Params {
             env: self.env,
             msg_sender: self.msg_sender.clone(),
-            descriptor: wallet_reg.default_account().descriptor().clone(),
         });
 
         self.wallet_data = Some(WalletData {
@@ -2161,6 +2165,7 @@ impl Data {
             last_recv_address: None,
             watching_txid: None,
             web_server,
+            signer_requests: BTreeMap::new(),
         });
 
         if self.skip_wallet_sync() {
@@ -2231,6 +2236,7 @@ impl Data {
             last_recv_address,
             watching_txid,
             web_server,
+            signer_requests,
         } = wallet_data;
 
         let mut login_info_reg = wallet_reg.login_info().clone();
@@ -2267,6 +2273,7 @@ impl Data {
             last_recv_address,
             watching_txid,
             web_server,
+            signer_requests,
         });
     }
 
@@ -3057,6 +3064,7 @@ impl Data {
             proto::to::Msg::ChartsSubscribe(msg) => market_worker::charts_subscribe(self, msg),
             proto::to::Msg::ChartsUnsubscribe(msg) => market_worker::charts_unsubscribe(self, msg),
             proto::to::Msg::LoadHistory(msg) => market_worker::load_history(self, msg),
+            proto::to::Msg::SignerResponse(resp) => self.process_signer_ui_response(resp),
         }
     }
 
@@ -3724,32 +3732,149 @@ impl Data {
         );
     }
 
-    fn try_web_sign_pset(&mut self, pset: String) -> Result<String, signer_server::SignerError> {
-        let mut pset = PartiallySignedTransaction::from_str(&pset)?;
-
-        let wallet_data = self
-            .wallet_data
-            .as_mut()
-            .ok_or(signer_server::SignerError::NoWalletData)?;
-
-        match &wallet_data.wallet_reg.login_info().wallet_info {
-            WalletInfo::Mnemonic(mnemonic) => {
-                use lwk_common::Signer;
-                let signer = lwk_signer::SwSigner::new(&mnemonic.to_string(), self.env.d().mainnet)
-                    .expect("signer creation failed");
-                signer.sign(&mut pset)?;
-                Ok(pset.to_string())
+    fn process_new_signer_request(&mut self, req: WebRequest) {
+        let wallet_data = match self.wallet_data.as_mut() {
+            Some(wallet_data) => wallet_data,
+            None => {
+                log::warn!("no wallet_data, signer request dropped");
+                return;
             }
-            WalletInfo::Jade(_jade, _watch_only) => {
-                // FIXME: Implement Jade
-                abort!(signer_server::SignerError::JadeNotImplemented);
+        };
+
+        let ui_req = match &req.req {
+            signer_api::Req::Descriptor(signer_api::DescriptorReq {}) => {
+                proto::from::signer_request::Msg::Connect(proto::Empty {})
             }
-        }
+            signer_api::Req::Sign(signer_api::SignReq { pset }) => {
+                let details = match wallet_data.wallet_reg.default_account().pset_details(&pset) {
+                    Ok(details) => details,
+                    Err(err) => {
+                        req.res_sender.send(Err(SignerError::Lwk(err)));
+                        return;
+                    }
+                };
+
+                self.add_missing_assets(details.balance.balances.keys(), true);
+
+                proto::from::signer_request::Msg::Sign(proto::from::signer_request::Sign {
+                    balances: details
+                        .balance
+                        .balances
+                        .iter()
+                        .map(|(asset_id, amount)| proto::Balance {
+                            asset_id: asset_id.to_string(),
+                            amount: *amount,
+                        })
+                        .collect(),
+
+                    recipients: details
+                        .balance
+                        .recipients
+                        .iter()
+                        .filter_map(|recipient| {
+                            let address = recipient.address.as_ref()?.to_string();
+                            let amount = recipient.value? as i64;
+                            let asset_id = recipient.asset?.to_string();
+                            Some(proto::AddressAmount {
+                                address,
+                                amount,
+                                asset_id,
+                            })
+                        })
+                        .collect(),
+                    network_fee: details.balance.fee,
+                })
+            }
+        };
+
+        self.last_signer_req_id += 1;
+        let req_id = self.last_signer_req_id;
+
+        self.ui.send(proto::from::Msg::SignerRequest(
+            proto::from::SignerRequest {
+                req_id,
+                origin: req.origin.clone(),
+                msg: Some(ui_req),
+            },
+        ));
+
+        let wallet_data = self.wallet_data.as_mut().expect("must be set");
+        wallet_data.signer_requests.insert(req_id, req);
     }
 
-    fn process_web_sign_request(&mut self, pset: String, res_sender: PsetSignSender) {
-        let res = self.try_web_sign_pset(pset);
+    fn process_signer_ui_response(&mut self, resp: proto::to::SignerResponse) {
+        let wallet_data = match self.wallet_data.as_mut() {
+            Some(wallet_data) => wallet_data,
+            None => {
+                log::warn!("no wallet_data, signer UI response dropped");
+                return;
+            }
+        };
+
+        let WebRequest {
+            origin: _,
+            req,
+            res_sender,
+        } = match wallet_data.signer_requests.remove(&resp.req_id) {
+            Some(req) => req,
+            None => {
+                log::error!("unknown signer request id");
+                return;
+            }
+        };
+
+        if !resp.accept {
+            res_sender.send(Err(SignerError::UserRejected));
+            return;
+        }
+
+        let res = self.process_accepted_signer_request(req);
         res_sender.send(res);
+    }
+
+    fn process_accepted_signer_request(
+        &mut self,
+        req: signer_api::Req,
+    ) -> Result<signer_api::Resp, SignerError> {
+        let wallet_data = self.wallet_data.as_mut().ok_or(SignerError::NoWalletData)?;
+
+        match req {
+            signer_api::Req::Descriptor(signer_api::DescriptorReq {}) => {
+                let descriptor = wallet_data
+                    .wallet_reg
+                    .default_account()
+                    .descriptor()
+                    .to_string();
+
+                Ok(signer_api::Resp::Descriptor(signer_api::DescriptorResp {
+                    descriptor,
+                }))
+            }
+
+            signer_api::Req::Sign(signer_api::SignReq { pset }) => {
+                let mut pset = PartiallySignedTransaction::from_str(&pset)?;
+
+                match &wallet_data.wallet_reg.login_info().wallet_info {
+                    WalletInfo::Mnemonic(mnemonic) => {
+                        use lwk_common::Signer;
+                        let signer =
+                            lwk_signer::SwSigner::new(&mnemonic.to_string(), self.env.d().mainnet)
+                                .expect("signer creation failed");
+
+                        signer.sign(&mut pset)?;
+
+                        Ok(signer_api::Resp::Sign(signer_api::SignResp {
+                            pset: pset.to_string(),
+                        }))
+                    }
+
+                    WalletInfo::Jade(_jade, _watch_only) => {
+                        // FIXME: Implement Jade
+                        abort!(signer_server::SignerError::JadeNotImplemented);
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -3923,6 +4048,7 @@ pub fn start_processing(
         wallet_event_callback,
         wallet_data: None,
         last_ui_message: SystemTime::now(),
+        last_signer_req_id: 0,
     };
 
     debug!("proxy: {:?}", data.proxy());
@@ -3942,7 +4068,7 @@ pub fn start_processing(
             Message::WalletEvent(account_id, event) => data.process_wallet_event(account_id, event),
             Message::WalletNotif(account_id, msg) => data.process_wallet_notif(account_id, msg),
             Message::BackgroundMessage(msg, sender) => data.process_background_message(msg, sender),
-            Message::SignPset(pset, res_sender) => data.process_web_sign_request(pset, res_sender),
+            Message::SignerRequest(req) => data.process_new_signer_request(req),
             Message::Quit => {
                 warn!("quit message received, exit");
                 break;

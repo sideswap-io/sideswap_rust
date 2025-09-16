@@ -382,6 +382,11 @@ message To {
     optional uint32 count = 4;
   }
 
+  message SignerResponse {
+    required uint32 req_id = 1;
+    required bool accept = 2;
+  }
+
   oneof msg {
     Login login = 1;
     Empty logout = 2;
@@ -436,6 +441,8 @@ message To {
     Empty charts_unsubscribe = 121;
 
     LoadHistory load_history = 130;
+
+    SignerResponse signer_response = 140;
   }
 }
 
@@ -822,6 +829,22 @@ message From {
     required bool is_new = 2;
   }
 
+  message SignerRequest {
+    required uint32 req_id = 1;
+    required string origin = 2;
+
+    message Sign {
+      repeated Balance balances = 1;
+      repeated AddressAmount recipients = 2;
+      required uint64 network_fee = 3;
+    }
+
+    oneof msg {
+      Empty connect = 10;
+      Sign sign = 11;
+    }
+  }
+
   oneof msg {
     Login login = 17;
     Empty logout = 16;
@@ -906,6 +929,8 @@ message From {
 
     LoadHistory load_history = 160;
     HistoryUpdated history_updated = 161;
+
+    SignerRequest signer_request = 170;
   }
 }
 
