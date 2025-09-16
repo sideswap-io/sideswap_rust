@@ -38,13 +38,16 @@ use sideswap_common::{
     pset_blind::get_blinding_nonces,
     send_tx::pset::{ConstructPsetArgs, ConstructedPset, PsetInput, PsetOutput, construct_pset},
     target_os::TargetOs,
-    types::{asset_float_amount_, asset_int_amount_, asset_scale},
     utxo_select::{self, WalletType},
 };
 use sideswap_jade::jade_mng::{self, AE_STUB_DATA};
 use sideswap_types::{
-    duration_ms::DurationMs, hex_encoded::HexEncoded, normal_float::NormalFloat,
-    timestamp_ms::TimestampMs, verify,
+    asset_precision::{asset_float_amount_, asset_int_amount_, asset_scale},
+    duration_ms::DurationMs,
+    hex_encoded::HexEncoded,
+    normal_float::NormalFloat,
+    timestamp_ms::TimestampMs,
+    verify,
 };
 
 use crate::{

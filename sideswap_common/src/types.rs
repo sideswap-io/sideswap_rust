@@ -1,6 +1,9 @@
 use anyhow::ensure;
 use sideswap_api::ServerFee;
-use sideswap_types::{asset_precision::AssetPrecision, fee_rate::FeeRateSats};
+use sideswap_types::{
+    asset_precision::{AssetPrecision, asset_float_amount, asset_scale},
+    fee_rate::FeeRateSats,
+};
 
 #[derive(
     Eq,
@@ -151,10 +154,6 @@ pub fn get_max_bitcoin_amount(
     }
 }
 
-pub fn asset_scale(asset_precision: AssetPrecision) -> f64 {
-    10u32.pow(u32::from(asset_precision.value())) as f64
-}
-
 pub fn asset_amount(
     bitcoin_amount: i64,
     price: f64,
@@ -184,22 +183,6 @@ pub fn bitcoin_amount(
         asset_amount / price
     };
     Amount::from_bitcoin(bitcoin_amount).to_sat()
-}
-
-pub fn asset_float_amount(asset_amount: i64, asset_precision: AssetPrecision) -> f64 {
-    asset_amount as f64 / asset_scale(asset_precision)
-}
-
-pub fn asset_float_amount_(asset_amount: u64, asset_precision: AssetPrecision) -> f64 {
-    asset_amount as f64 / asset_scale(asset_precision)
-}
-
-pub fn asset_int_amount(asset_amount: f64, asset_precision: AssetPrecision) -> i64 {
-    f64::round(asset_amount * asset_scale(asset_precision)) as i64
-}
-
-pub fn asset_int_amount_(asset_amount: f64, asset_precision: AssetPrecision) -> u64 {
-    f64::round(asset_amount * asset_scale(asset_precision)) as u64
 }
 
 pub const PEGOUT_MAX_CLIENT_NETWORK_FEE: i64 = 500;

@@ -9,10 +9,10 @@ use sideswap_common::{
     channel_helpers::UncheckedUnboundedSender,
     dealer_ticker::{DealerTicker, TickerLoader},
     exchange_pair::ExchangePair,
-    types::asset_int_amount_,
 };
 use sideswap_types::{
-    chain::Chain, network::Network, normal_float::NormalFloat, timestamp_ms::TimestampMs, verify,
+    asset_precision::asset_int_amount_, chain::Chain, network::Network, normal_float::NormalFloat,
+    timestamp_ms::TimestampMs, verify,
 };
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
 

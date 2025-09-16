@@ -14,7 +14,6 @@ use sideswap_common::{
     dealer_ticker::{DealerTicker, TickerLoader},
     make_market_request, make_request,
     pset::swap_amount::{SwapAmount, get_swap_amount},
-    types::{asset_float_amount, asset_float_amount_, asset_int_amount_},
     ws::{
         auto::{WrappedRequest, WrappedResponse},
         ws_req_sender::{self, WsReqSender},
@@ -22,7 +21,11 @@ use sideswap_common::{
 };
 use sideswap_dealer::utxo_data::UtxoData;
 use sideswap_types::{
-    abort, asset_precision::AssetPrecision, b64, timestamp_ms::TimestampMs, verify,
+    abort,
+    asset_precision::{AssetPrecision, asset_float_amount, asset_float_amount_, asset_int_amount_},
+    b64,
+    timestamp_ms::TimestampMs,
+    verify,
 };
 use sideswap_types::{chain::Chain, utxo_ext::UtxoExt};
 use sqlx::types::Text;

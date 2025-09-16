@@ -26,14 +26,13 @@ use sideswap_common::{
     exchange_pair::ExchangePair,
     make_market_request, make_request,
     pset::swap_amount::{self, SwapAmount, get_swap_amount},
-    types::{asset_float_amount_, asset_int_amount_},
     ws::{
         auto::{WrappedRequest, WrappedResponse},
         ws_req_sender::{self, WsReqSender},
     },
 };
 use sideswap_types::{
-    asset_precision::AssetPrecision,
+    asset_precision::{AssetPrecision, asset_float_amount_, asset_int_amount_},
     b64,
     chain::Chain,
     env::Env,

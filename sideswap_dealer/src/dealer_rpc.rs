@@ -15,7 +15,7 @@ use sideswap_common::{
     types::{self, Amount},
     ws::{self, auto::WrappedResponse, ws_req_sender::WsReqSender},
 };
-use sideswap_types::{b64, env::Env};
+use sideswap_types::{asset_precision::asset_float_amount, b64, env::Env};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -171,7 +171,7 @@ fn take_order(
     } else {
         details.bitcoin_amount - details.server_fee
     });
-    let asset_amount = types::asset_float_amount(details.asset_amount, asset.precision);
+    let asset_amount = asset_float_amount(details.asset_amount, asset.precision);
     let actual_price = asset_amount / actual_bitcoin_amount.to_bitcoin();
     assert!(actual_price > 0.0);
     let bitcoin_amount_max = get_bitcoin_amount(
