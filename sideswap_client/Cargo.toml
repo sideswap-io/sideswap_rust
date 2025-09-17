@@ -45,6 +45,7 @@ secp256k1.workspace = true
 serde_bytes.workspace = true
 serde_json.workspace = true
 serde.workspace = true
+socket2.workspace = true
 thiserror.workspace = true
 time.workspace = true
 tokio-util.workspace = true

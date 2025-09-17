@@ -3745,6 +3745,7 @@ impl Data {
             signer_api::Req::Descriptor(signer_api::DescriptorReq {}) => {
                 proto::from::signer_request::Msg::Connect(proto::Empty {})
             }
+
             signer_api::Req::Sign(signer_api::SignReq { pset }) => {
                 let details = match wallet_data.wallet_reg.default_account().pset_details(&pset) {
                     Ok(details) => details,

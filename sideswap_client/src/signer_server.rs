@@ -15,6 +15,7 @@ use axum::{
 use http::HeaderMap;
 use sideswap_common::channel_helpers::UncheckedOneshotSender;
 use sideswap_types::{env::Env, retry_delay::RetryDelay, signer_api};
+use tokio::net::TcpSocket;
 use tokio_util::sync::CancellationToken;
 use tower_http::cors::CorsLayer;
 
@@ -150,11 +151,26 @@ async fn allow_private_network_header(req: Request<Body>, next: Next) -> impl In
     res
 }
 
+fn try_bind_socket(addr: std::net::SocketAddr) -> Result<tokio::net::TcpListener, anyhow::Error> {
+    let sock = if addr.is_ipv4() {
+        TcpSocket::new_v4()?
+    } else {
+        TcpSocket::new_v6()?
+    };
+
+    sock.set_reuseaddr(true)?;
+    sock.bind(addr)?;
+
+    let listener = sock.listen(128)?;
+
+    Ok(listener)
+}
+
 async fn bind_socket_with_retry(addr: std::net::SocketAddr) -> tokio::net::TcpListener {
     let mut retry_delay = RetryDelay::default();
 
     loop {
-        let res = tokio::net::TcpListener::bind(addr).await;
+        let res = try_bind_socket(addr);
 
         match res {
             Ok(listener) => return listener,
