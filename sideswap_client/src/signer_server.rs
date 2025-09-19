@@ -204,7 +204,7 @@ pub async fn try_run(params: Params, cancel_token: CancellationToken) -> Result<
         .layer(build_cors())
         .layer(middleware::from_fn(allow_private_network_header));
 
-    let addr = std::net::SocketAddr::from(([127, 0, 0, 3], env.d().wallet_port));
+    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], env.d().wallet_port));
 
     let listener = tokio::select! {
         listener = bind_socket_with_retry(addr) => {
