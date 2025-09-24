@@ -601,17 +601,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "829a082bd3761fde7476dc2ed85ca56c11628948460ece621e4f56fef5046567"
 
 [[package]]
-name = "bollard-stubs"
-version = "1.41.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ed2f2e73fffe9455141e170fb9c1feb0ac521ec7e7dcd47a7cab72a658490fb8"
-dependencies = [
- "chrono",
- "serde 1.0.219",
- "serde_with",
-]
-
-[[package]]
 name = "brotli-decompressor"
 version = "4.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -739,7 +728,6 @@ dependencies = [
  "iana-time-zone",
  "js-sys",
  "num-traits 0.2.19",
- "serde 1.0.219",
  "wasm-bindgen",
  "windows-link",
 ]
@@ -2573,40 +2561,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "lwk_containers"
-version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "357528be7457df199f8835865ee0e823da41ed8bcbcb1b6f04fea6ebc97eb174"
-dependencies = [
- "bitcoin",
- "rand 0.8.5",
- "tempfile",
- "testcontainers",
-]
-
-[[package]]
-name = "lwk_jade"
-version = "0.9.0"
-source = "git+https://github.com/sideswap-io/lwk.git?rev=7fc753028bbcc52e26c01eb614a2235fc2a73e20#7fc753028bbcc52e26c01eb614a2235fc2a73e20"
-dependencies = [
- "elements",
- "elements-miniscript",
- "hex",
- "log",
- "lwk_common",
- "lwk_containers",
- "rand 0.8.5",
- "reqwest",
- "serde 1.0.219",
- "serde_bytes",
- "serde_cbor",
- "serde_json",
- "tempfile",
- "thiserror 1.0.69",
- "web-time",
-]
-
-[[package]]
 name = "lwk_signer"
 version = "0.9.0"
 source = "git+https://github.com/sideswap-io/lwk.git?rev=7fc753028bbcc52e26c01eb614a2235fc2a73e20#7fc753028bbcc52e26c01eb614a2235fc2a73e20"
@@ -2615,7 +2569,6 @@ dependencies = [
  "bip39",
  "elements-miniscript",
  "lwk_common",
- "lwk_jade",
  "thiserror 1.0.69",
 ]
 
@@ -4957,23 +4910,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "06794f8f6c5c898b3275aebefa6b8a1cb24cd2c6c79397ab15774837a0bc5755"
 dependencies = [
  "winapi-util",
-]
-
-[[package]]
-name = "testcontainers"
-version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0e2b1567ca8a2b819ea7b28c92be35d9f76fb9edb214321dcc86eb96023d1f87"
-dependencies = [
- "bollard-stubs",
- "futures",
- "hex",
- "hmac",
- "log",
- "rand 0.8.5",
- "serde 1.0.219",
- "serde_json",
- "sha2",
 ]
 
 [[package]]

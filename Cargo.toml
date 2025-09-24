@@ -57,7 +57,7 @@ libc = "0.2"
 log = "0.4"
 log4rs = { version = "1.2", features = ["gzip", "toml_format"] }
 lwk_common = { version = "0.9" }
-lwk_signer = { version = "0.9" }
+lwk_signer = { version = "0.9", default-features = false }
 lwk_wollet = { version = "0.9" }
 poem = "3"
 poem-openapi = { version = "5", features = ["swagger-ui"] }
@@ -97,4 +97,3 @@ vergen = { version = "5.1", default-features = false, features = ["build", "rust
 lwk_common = { git = "https://github.com/sideswap-io/lwk.git", rev = "7fc753028bbcc52e26c01eb614a2235fc2a73e20" }
 lwk_signer = { git = "https://github.com/sideswap-io/lwk.git", rev = "7fc753028bbcc52e26c01eb614a2235fc2a73e20" }
 lwk_wollet = { git = "https://github.com/sideswap-io/lwk.git", rev = "7fc753028bbcc52e26c01eb614a2235fc2a73e20" }
-lwk_jade = { git = "https://github.com/sideswap-io/lwk.git", rev = "7fc753028bbcc52e26c01eb614a2235fc2a73e20" }
