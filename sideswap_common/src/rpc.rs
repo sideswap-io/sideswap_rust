@@ -7,6 +7,7 @@ use std::vec::Vec;
 
 pub mod balances;
 pub mod sign_raw_transaction;
+pub mod wallet_process_psbt;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct RpcServer {
