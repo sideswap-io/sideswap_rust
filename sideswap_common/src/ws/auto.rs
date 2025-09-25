@@ -38,12 +38,19 @@ pub async fn run(
 
         let mut ws_stream = loop {
             debug!("try ws connection...");
-            let connect_res = tokio_tungstenite::connect_async(&url).await;
+            let connect_res = tokio::time::timeout(
+                Duration::from_secs(30),
+                tokio_tungstenite::connect_async(&url),
+            )
+            .await;
             match connect_res {
-                Ok((ws_stream, _response)) => break ws_stream,
-                Err(err) => {
+                Ok(Ok((ws_stream, _response))) => break ws_stream,
+                Ok(Err(err)) => {
                     error!("ws connection to the server failed: {err}");
                     tokio::time::sleep(retry_delay.next_delay()).await;
+                }
+                Err(err) => {
+                    error!("ws connection to the server timed out: {err}");
                 }
             }
         };
