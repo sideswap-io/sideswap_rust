@@ -423,7 +423,7 @@ pub fn derive_amp_address(
     }
 }
 
-pub fn convert_to_swap_utxo(utxo: models::Utxo) -> sideswap_api::Utxo {
+pub fn convert_to_swap_utxo(utxo: &models::Utxo) -> sideswap_api::Utxo {
     sideswap_api::Utxo {
         txid: utxo.txhash,
         vout: utxo.vout,
@@ -431,7 +431,7 @@ pub fn convert_to_swap_utxo(utxo: models::Utxo) -> sideswap_api::Utxo {
         asset_bf: utxo.assetblinder,
         value: utxo.satoshi,
         value_bf: utxo.amountblinder,
-        redeem_script: get_redeem_script(&utxo),
+        redeem_script: get_redeem_script(utxo),
     }
 }
 

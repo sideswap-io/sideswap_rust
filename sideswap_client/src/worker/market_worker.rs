@@ -807,11 +807,7 @@ pub fn sync_utxos(worker: &mut super::Data) {
         log::debug!("send {new_utxo_count} new utxos");
         worker.make_async_request(
             api::Request::Market(mkt::Request::AddUtxos(mkt::AddUtxosRequest {
-                utxos: new_utxos
-                    .into_iter()
-                    .cloned()
-                    .map(convert_to_swap_utxo)
-                    .collect(),
+                utxos: new_utxos.into_iter().map(convert_to_swap_utxo).collect(),
             })),
             move |data, res| match res {
                 Ok(api::Response::Market(Response::AddUtxos(resp))) => {
@@ -2215,7 +2211,7 @@ fn try_offline_order_submit(
             funding_tx,
             private: msg.private,
             client_order_id: None,
-            input_utxo: convert_to_swap_utxo(utxo.clone()),
+            input_utxo: convert_to_swap_utxo(&utxo),
             input_witness,
             output_address: receive_address.address,
             output_amount: recv_amount,
@@ -2661,7 +2657,7 @@ fn try_start_quotes(
             asset_type,
             amount,
             trade_dir,
-            utxos: utxos.iter().cloned().map(convert_to_swap_utxo).collect(),
+            utxos: utxos.iter().map(convert_to_swap_utxo).collect(),
             receive_address: receive_address.address.clone(),
             change_address: change_address.address.clone(),
             order_id: order_id.map(OrdId::new),
@@ -2968,7 +2964,6 @@ fn try_accept_quote(
         &started_quote
             .utxos
             .iter()
-            .cloned()
             .map(convert_to_swap_utxo)
             .collect::<Vec<_>>(),
         &started_quote.receive_address.address,
