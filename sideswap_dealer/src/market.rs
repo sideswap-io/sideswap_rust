@@ -35,6 +35,7 @@ use sideswap_types::{
     asset_precision::{AssetPrecision, asset_float_amount_, asset_int_amount_},
     b64,
     chain::Chain,
+    duration_ms::DurationMs,
     env::Env,
     normal_float::{NormalFloat, NotNormalError},
     timestamp_ms::TimestampMs,
@@ -270,6 +271,8 @@ enum Error {
     },
     #[error("can't manage orders with automatic price streaming")]
     AutomaticPriceStreaming,
+    #[error("invalid duration: {0}")]
+    InvalidDuration(#[from] std::time::TryFromFloatSecsError),
 }
 
 impl Error {
@@ -298,7 +301,8 @@ impl Error {
             | Error::InvalidTicker(_)
             | Error::InvalidAddress(_, _)
             | Error::UnknownQuoteId
-            | Error::AutomaticPriceStreaming => api::ErrorCode::InvalidRequest,
+            | Error::AutomaticPriceStreaming
+            | Error::InvalidDuration(_) => api::ErrorCode::InvalidRequest,
         }
     }
 
@@ -323,7 +327,8 @@ impl Error {
             | Error::Pset(_)
             | Error::SwapAmount(_)
             | Error::WrongSwapAmount { .. }
-            | Error::AutomaticPriceStreaming => None,
+            | Error::AutomaticPriceStreaming
+            | Error::InvalidDuration(_) => None,
         }
     }
 }
@@ -441,6 +446,7 @@ enum ClientCommand {
         client_order_id: Option<Box<String>>,
         receive_address: Address,
         change_address: Address,
+        ttl: Option<DurationMs>,
         res_sender: UncheckedOneshotSender<Result<OwnOrder, Error>>,
     },
     EditOrder {
@@ -1655,9 +1661,10 @@ async fn process_client_command(data: &mut Data, command: ClientCommand) {
             price,
             trade_dir,
             client_order_id,
-            res_sender,
             receive_address,
             change_address,
+            ttl,
+            res_sender,
         } => {
             let base_precision = data.ticker_loader.precision(exchange_pair.base);
             let base_amount = asset_int_amount_(base_amount, base_precision);
@@ -1677,7 +1684,7 @@ async fn process_client_command(data: &mut Data, command: ClientCommand) {
                     min_price: None,
                     max_price: None,
                     trade_dir,
-                    ttl: None,
+                    ttl,
                     receive_address,
                     change_address,
                     private: false,

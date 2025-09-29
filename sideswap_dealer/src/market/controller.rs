@@ -1,4 +1,4 @@
-use std::{str::FromStr, sync::Arc};
+use std::{str::FromStr, sync::Arc, time::Duration};
 
 use elements::{Address, AssetId};
 use sideswap_api::{
@@ -11,8 +11,8 @@ use sideswap_common::{
     exchange_pair::ExchangePair,
 };
 use sideswap_types::{
-    asset_precision::asset_int_amount_, chain::Chain, network::Network, normal_float::NormalFloat,
-    timestamp_ms::TimestampMs, verify,
+    asset_precision::asset_int_amount_, chain::Chain, duration_ms::DurationMs, network::Network,
+    normal_float::NormalFloat, timestamp_ms::TimestampMs, verify,
 };
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
 
@@ -192,6 +192,7 @@ impl Controller {
         Ok(receive_address)
     }
 
+    /// ttl is in seconds
     pub async fn submit_order(
         &self,
         exchange_pair: ExchangePair,
@@ -199,6 +200,7 @@ impl Controller {
         price: NormalFloat,
         trade_dir: TradeDir,
         client_order_id: Option<Box<String>>,
+        ttl: Option<f64>,
     ) -> Result<OwnOrder, Error> {
         self.check_ws_edit_allowed()?;
 
@@ -211,6 +213,11 @@ impl Controller {
         let receive_address = self.resolve_recv_address(*recv_asset_id).await?;
         let change_address = self.new_address(Chain::Internal).await?;
 
+        let ttl = ttl
+            .map(Duration::try_from_secs_f64)
+            .transpose()?
+            .map(DurationMs::from);
+
         let (res_sender, res_receiver) = oneshot::channel();
         self.make_request(ClientCommand::SubmitOrder {
             exchange_pair,
@@ -221,6 +228,7 @@ impl Controller {
             res_sender: res_sender.into(),
             receive_address,
             change_address,
+            ttl,
         })?;
         let resp = recv_res(res_receiver).await?;
         Ok(resp)

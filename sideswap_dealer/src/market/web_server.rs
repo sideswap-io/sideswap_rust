@@ -1,10 +1,10 @@
 use std::net::SocketAddr;
 
-use poem::{listener::TcpListener, Route, Server};
+use poem::{Route, Server, listener::TcpListener};
 use poem_openapi::{
+    ApiResponse, OpenApi, OpenApiService,
     param::Query,
     payload::{Json, PlainText},
-    ApiResponse, OpenApi, OpenApiService,
 };
 use serde::Deserialize;
 use sideswap_api::mkt::OrdId;
@@ -17,7 +17,7 @@ pub struct Config {
     server_url: Option<String>,
 }
 
-use super::{api, controller::Controller, Error};
+use super::{Error, api, controller::Controller};
 
 struct Api {
     controller: Controller,
@@ -125,6 +125,9 @@ impl Api {
         /// Order price (must be positive).
         /// Quote amount = Base amount * Price.
         price: Query<f64>,
+        /// Optional order TTL in seconds.
+        /// The order expiration time will be reset after editing the order.
+        ttl: Query<Option<f64>>,
         /// Order trade direction
         trade_dir: Query<api::TradeDir>,
         /// Client order id. If set, must be unique among all active and recent history orders.
@@ -142,6 +145,7 @@ impl Api {
                 price,
                 trade_dir.0.into(),
                 client_order_id.0,
+                ttl.0,
             )
             .await?;
         Ok(Json(resp.into()))
