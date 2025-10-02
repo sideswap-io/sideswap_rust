@@ -6,7 +6,7 @@ use std::{
 use anyhow::ensure;
 use serde::Deserialize;
 use sideswap_api::PricePair;
-use sideswap_types::{asset_precision::asset_int_amount_, env::Env};
+use sideswap_types::{asset_precision::asset_int_amount_, duration_sec::DurationSec, env::Env};
 
 use crate::{
     dealer_ticker::{DealerTicker, TickerLoader},
@@ -41,6 +41,7 @@ pub struct Market {
     pub fixed: Option<fixed::Params>,
     pub bid_amount: Option<f64>,
     pub ask_amount: Option<f64>,
+    pub ttl_seconds: DurationSec,
 }
 
 impl Market {

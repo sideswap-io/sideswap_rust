@@ -37,3 +37,8 @@ password = "<YOUR_RPC_PASSWORD>"
 #quote = "USDt"
 #interest = 1.01
 #source = "Binance"
+
+# If the price hasn't changed within the last hour, cancel the order.
+# If the dealer is online, the order will be recreated.
+# This should help in situations where the dealer has been offline for a long time.
+#ttl_seconds = 3600

@@ -97,6 +97,7 @@ impl Data {
                             trade_dir: TradeDir::Buy,
                             base_amount: bid_amount,
                             price: NormalFloat::new(submit_price.bid).expect("must be valid"),
+                            ttl: market.ttl_seconds.duration().into(),
                         });
                     }
                 }
@@ -108,6 +109,7 @@ impl Data {
                         trade_dir: TradeDir::Sell,
                         base_amount: ask_amount,
                         price: NormalFloat::new(submit_price.ask).expect("must be valid"),
+                        ttl: market.ttl_seconds.duration().into(),
                     });
                 }
             }

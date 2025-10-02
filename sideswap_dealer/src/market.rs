@@ -78,6 +78,7 @@ pub struct AutomaticOrder {
     pub trade_dir: TradeDir,
     pub base_amount: u64,
     pub price: NormalFloat,
+    pub ttl: DurationMs,
 }
 
 pub enum Command {
@@ -2041,7 +2042,7 @@ async fn try_sync_market(data: &mut Data, key: &OrderGroupKey) -> Result<(), any
                 price_tracking: None,
                 min_price: None,
                 max_price: None,
-                ttl: None,
+                ttl: Some(dealer_order.ttl),
                 receive_address,
                 change_address,
                 private: false,

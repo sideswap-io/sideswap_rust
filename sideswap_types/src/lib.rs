@@ -7,6 +7,7 @@ pub mod byte_array;
 pub mod chain;
 pub mod const_asset_id;
 pub mod duration_ms;
+pub mod duration_sec;
 pub mod enum_utils;
 pub mod env;
 pub mod error_utils;

@@ -83,6 +83,11 @@ base = "L-BTC"
 quote = "USDt"
 interest = 1.01
 source = "Binance"
+
+# If the price hasn't changed within the last hour, cancel the order.
+# If the dealer is online, the order will be recreated.
+# This should help in situations where the dealer has been offline for a long time.
+ttl_seconds = 3600
 ```
 
 2. Start the dealer.
@@ -111,6 +116,7 @@ source = "Fixed"
 interest = 1.0
 fixed.bid = 0.8
 fixed.ask = 0.9
+ttl_seconds = 604800
 
 [[price_stream]]
 base = "SSWP"
@@ -119,6 +125,7 @@ source = "Fixed"
 interest = 1.0
 fixed.bid = 0.8
 fixed.ask = 0.9
+ttl_seconds = 604800
 ```
 
 2. Start the dealer.
