@@ -104,13 +104,15 @@ impl Data {
 
                 {
                     let ask_amount = market.ask_amount_sats(ticker_loader);
-                    orders.push(market::AutomaticOrder {
-                        asset_pair,
-                        trade_dir: TradeDir::Sell,
-                        base_amount: ask_amount,
-                        price: NormalFloat::new(submit_price.ask).expect("must be valid"),
-                        ttl: market.ttl_seconds.duration().into(),
-                    });
+                    if ask_amount > 0 {
+                        orders.push(market::AutomaticOrder {
+                            asset_pair,
+                            trade_dir: TradeDir::Sell,
+                            base_amount: ask_amount,
+                            price: NormalFloat::new(submit_price.ask).expect("must be valid"),
+                            ttl: market.ttl_seconds.duration().into(),
+                        });
+                    }
                 }
             }
         }
