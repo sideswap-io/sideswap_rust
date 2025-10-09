@@ -101,7 +101,9 @@ impl<const LEN: usize> rand::distributions::Distribution<HashN<LEN>>
     for rand::distributions::Standard
 {
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> HashN<LEN> {
-        HashN(rng.r#gen())
+        let mut data = [0u8; LEN];
+        rng.fill_bytes(&mut data);
+        HashN(data)
     }
 }
 
