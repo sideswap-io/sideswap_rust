@@ -16,7 +16,7 @@ impl TermSignal {
     pub fn new() -> TermSignal {
         let notify = Arc::new(Notify::new());
 
-        #[cfg(target_os = "linux")]
+        #[cfg(unix)]
         {
             let notify_copy = Arc::clone(&notify);
             tokio::spawn(async move {

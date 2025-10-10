@@ -24,6 +24,7 @@ pub mod recipient;
 pub mod registration;
 pub mod rpc;
 pub mod send_tx;
+pub mod signals;
 pub mod target_os;
 pub mod tx_type;
 pub mod types;

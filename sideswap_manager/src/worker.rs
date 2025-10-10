@@ -1238,7 +1238,7 @@ pub async fn run(
         addresses,
     };
 
-    let term_signal = sideswap_dealer::signals::TermSignal::new();
+    let term_signal = sideswap_common::signals::TermSignal::new();
 
     loop {
         tokio::select! {

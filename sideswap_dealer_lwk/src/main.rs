@@ -199,7 +199,7 @@ async fn main() -> Result<(), anyhow::Error> {
 
     let mut interval = tokio::time::interval(Duration::from_secs(1));
 
-    let term_signal = sideswap_dealer::signals::TermSignal::new();
+    let term_signal = sideswap_common::signals::TermSignal::new();
 
     loop {
         tokio::select! {

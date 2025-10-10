@@ -1219,7 +1219,7 @@ async fn main() {
         ));
     }
 
-    let term_signal = sideswap_dealer::signals::TermSignal::new();
+    let term_signal = sideswap_common::signals::TermSignal::new();
 
     let (dealer_command_sender, mut dealer_event_receiver) = spawn_async(params.clone());
 
