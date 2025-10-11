@@ -6,7 +6,7 @@ pub struct NormalFloat(f64);
 impl<'de> Deserialize<'de> for NormalFloat {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let value = f64::deserialize(deserializer)?;
-        NormalFloat::new(value).map_err(|err| serde::de::Error::custom(err.to_string()))
+        NormalFloat::new(value).map_err(serde::de::Error::custom)
     }
 }
 

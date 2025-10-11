@@ -13,6 +13,7 @@ pub mod env;
 pub mod error_utils;
 pub mod fee_rate;
 pub mod hex_encoded;
+pub mod hex_vec;
 pub mod network;
 pub mod normal_float;
 pub mod proxy_address;
