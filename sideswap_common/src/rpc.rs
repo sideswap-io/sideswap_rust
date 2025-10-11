@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 use std::vec::Vec;
 
 pub mod balances;
+pub mod get_transaction;
 pub mod sign_raw_transaction;
 pub mod wallet_process_psbt;
 
