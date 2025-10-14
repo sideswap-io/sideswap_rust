@@ -7,6 +7,7 @@ use std::vec::Vec;
 
 pub mod balances;
 pub mod get_transaction;
+pub mod get_tx_out;
 pub mod sign_raw_transaction;
 pub mod wallet_process_psbt;
 
@@ -88,6 +89,15 @@ pub async fn make_rpc_call<T: RpcCall>(
         None => serde_json::from_value::<T::Response>(serde_json::Value::Null)?,
     };
     Ok(resp)
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ScriptPubKey {
+    pub addresses: Option<Vec<String>>,
+    #[serde(rename = "type")]
+    pub type_: String,
+    pub address: Option<elements::Address>,
+    pub hex: elements::Script,
 }
 
 pub struct GetWalletInfoCall {}
