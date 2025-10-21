@@ -12,7 +12,10 @@ use sideswap_common::{
 use sideswap_types::{env::Env, normal_float::NormalFloat};
 use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 
-use crate::{dealer_rpc, market};
+use crate::{
+    dealer_rpc::{self, apply_interest_ask, apply_interest_bid},
+    market,
+};
 
 enum Msg {
     Price {
@@ -136,8 +139,23 @@ impl Data {
 
                 match base_price {
                     Some(base_price) => {
-                        let submit_price = dealer_rpc::apply_interest(&base_price, market.interest);
-                        self.submit_prices.insert(exchange_pair, submit_price);
+                        let interest_bid = market
+                            .interest_bid
+                            .or(market.interest)
+                            .expect("interest_bid value is empty");
+
+                        let interest_ask = market
+                            .interest_ask
+                            .or(market.interest)
+                            .expect("interest_ask value is empty");
+
+                        self.submit_prices.insert(
+                            exchange_pair,
+                            PricePair {
+                                bid: apply_interest_bid(base_price.bid, interest_bid),
+                                ask: apply_interest_ask(base_price.ask, interest_ask),
+                            },
+                        );
                     }
                     None => {
                         self.submit_prices.remove(&exchange_pair);

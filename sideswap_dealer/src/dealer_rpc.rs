@@ -132,12 +132,25 @@ struct OwnOrderKey {
     send_bitcoins: bool,
 }
 
-pub fn apply_interest(price: &PricePair, interest: f64) -> PricePair {
+fn verify_interest(interest: f64) {
     // Limit to 10% as sanity check
     assert!((1.0..=1.1).contains(&interest));
+}
+
+pub fn apply_interest_bid(price: f64, interest: f64) -> f64 {
+    verify_interest(interest);
+    price / interest
+}
+
+pub fn apply_interest_ask(price: f64, interest: f64) -> f64 {
+    verify_interest(interest);
+    price * interest
+}
+
+pub fn apply_interest(price: &PricePair, interest: f64) -> PricePair {
     PricePair {
-        bid: price.bid / interest,
-        ask: price.ask * interest,
+        bid: apply_interest_bid(price.bid, interest),
+        ask: apply_interest_ask(price.ask, interest),
     }
 }
 
