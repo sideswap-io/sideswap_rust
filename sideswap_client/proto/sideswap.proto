@@ -387,6 +387,10 @@ message To {
     required bool accept = 2;
   }
 
+  message AppLink {
+    required string url = 1;
+  }
+
   oneof msg {
     Login login = 1;
     Empty logout = 2;
@@ -398,6 +402,7 @@ message To {
     string push_message = 6;
     AppState app_state = 8;
     ActivePage active_page = 19;
+    AppLink app_link = 90;
 
     SetMemo set_memo = 10;
     Account get_recv_address = 11;
