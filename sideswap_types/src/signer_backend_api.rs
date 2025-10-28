@@ -1,56 +1,79 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct StartedReq {
+pub struct StartLoginReq {
     pub code: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct StartedResp {}
+pub struct StartLoginResp {}
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct ConnectedReq {
+pub struct AcceptLoginReq {
     pub code: String,
     pub descriptor: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct ConnectedResp {}
+pub struct AcceptLoginResp {}
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct RejectedReq {
+pub struct RejectLoginReq {
     pub code: String,
     pub reason: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct RejectedResp {}
+pub struct RejectLoginResp {}
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct SignedReq {
+pub struct StartSignReq {
+    pub code: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct StartSignResp {
+    pub pset: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AcceptSignReq {
     pub code: String,
     pub pset: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct SignedResp {}
+pub struct AcceptSignResp {}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RejectSignReq {
+    pub code: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RejectSignResp {}
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Req {
-    Started(StartedReq),
-    Connected(ConnectedReq),
-    Rejected(RejectedReq),
-    Signed(SignedReq),
+    StartLogin(StartLoginReq),
+    AcceptLogin(AcceptLoginReq),
+    RejectLogin(RejectLoginReq),
+    StartSign(StartSignReq),
+    AcceptSign(AcceptSignReq),
+    RejectSign(RejectSignReq),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Resp {
-    Started(StartedResp),
-    Connected(ConnectedResp),
-    Rejected(RejectedResp),
-    Signed(SignedResp),
+    StartLogin(StartLoginResp),
+    AcceptLogin(AcceptLoginResp),
+    RejectLogin(RejectLoginResp),
+    StartSign(StartSignResp),
+    AcceptSign(AcceptSignResp),
+    RejectSign(RejectSignResp),
 }
 
 #[derive(Serialize, Deserialize)]

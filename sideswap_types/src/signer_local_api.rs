@@ -1,10 +1,10 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct DescriptorReq {}
+pub struct LoginReq {}
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct DescriptorResp {
+pub struct LoginResp {
     pub descriptor: String,
 }
 
@@ -21,14 +21,14 @@ pub struct SignResp {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Req {
-    Descriptor(DescriptorReq),
+    Login(LoginReq),
     Sign(SignReq),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Resp {
-    Descriptor(DescriptorResp),
+    Login(LoginResp),
     Sign(SignResp),
 }
 

@@ -3,7 +3,7 @@ use std::{collections::BTreeMap, str::FromStr, time::Duration};
 use anyhow::{Context, anyhow, bail, ensure};
 use elements::pset::PartiallySignedTransaction;
 use sideswap_common::channel_helpers::UncheckedOneshotSender;
-use sideswap_types::{abort, signer_api, signer_backend_api};
+use sideswap_types::{abort, signer_backend_api, signer_local_api};
 
 use crate::{
     ffi::proto,
@@ -13,19 +13,19 @@ use crate::{
 };
 
 enum Request {
-    Connect {},
+    Login {},
     Sign { pset: String },
 }
 
 #[derive(Clone)]
 enum Response {
-    Connect { descriptor: String },
+    Login { descriptor: String },
     Sign { pset: String },
 }
 
 enum Receiver {
     Web {
-        res_sender: UncheckedOneshotSender<Result<signer_api::Resp, SignerError>>,
+        res_sender: UncheckedOneshotSender<Result<signer_local_api::Resp, SignerError>>,
     },
     AppLink {
         code: String,
@@ -58,7 +58,7 @@ fn try_send_new_request(
     let req_id = wallet_data.signer_requests.last_signer_req_id;
 
     let ui_req = match &req {
-        Request::Connect {} => proto::from::signer_request::Msg::Connect(proto::Empty {}),
+        Request::Login {} => proto::from::signer_request::Msg::Connect(proto::Empty {}),
 
         Request::Sign { pset } => {
             let details = wallet_data
@@ -132,15 +132,34 @@ fn try_process_app_link(data: &mut Data, resp: &proto::to::AppLink) -> Result<()
         .ok_or_else(|| anyhow!("invalid link: no code query parameter"))?
         .clone();
 
-    send_request_to_upload_url(
-        &upload_url,
-        signer_backend_api::Req::Started(signer_backend_api::StartedReq { code: code.clone() }),
-    )?;
-
     let request = match url.path() {
-        "/connect/" => Request::Connect {},
+        "/login/" => {
+            send_request_to_upload_url(
+                &upload_url,
+                signer_backend_api::Req::StartLogin(signer_backend_api::StartLoginReq {
+                    code: code.clone(),
+                }),
+            )?;
 
-        "/sign/" => todo!(), // FIXME: Download the PSET from the upload_url
+            Request::Login {}
+        }
+
+        "/sign/" => {
+            let resp = send_request_to_upload_url(
+                &upload_url,
+                signer_backend_api::Req::StartSign(signer_backend_api::StartSignReq {
+                    code: code.clone(),
+                }),
+            )?;
+
+            let pset = if let signer_backend_api::Resp::StartSign(resp) = resp {
+                resp.pset
+            } else {
+                bail!("unexpected response, expected GetPset")
+            };
+
+            Request::Sign { pset }
+        }
 
         _ => bail!("unknown path: {path}", path = url.path()),
     };
@@ -161,8 +180,8 @@ fn try_process_app_link(data: &mut Data, resp: &proto::to::AppLink) -> Result<()
 
 pub fn new_web_request(data: &mut Data, req: WebRequest) {
     let request = match req.req {
-        signer_api::Req::Descriptor(_req) => Request::Connect {},
-        signer_api::Req::Sign(req) => Request::Sign { pset: req.pset },
+        signer_local_api::Req::Login(_req) => Request::Login {},
+        signer_local_api::Req::Sign(req) => Request::Sign { pset: req.pset },
     };
 
     let res = try_send_new_request(data, req.origin, &request);
@@ -212,81 +231,98 @@ pub fn ui_response(data: &mut Data, resp: proto::to::SignerResponse) {
         match receiver {
             Receiver::Web { res_sender } => res_sender.send(Err(SignerError::UserRejected)),
             Receiver::AppLink { code, upload_url } => {
-                let _res = send_request_to_upload_url(
-                    &upload_url,
-                    signer_backend_api::Req::Rejected(signer_backend_api::RejectedReq {
-                        code,
-                        reason: SignerError::UserRejected.to_string(),
-                    }),
-                );
+                let req = match request {
+                    Request::Login {} => {
+                        signer_backend_api::Req::RejectLogin(signer_backend_api::RejectLoginReq {
+                            code,
+                            reason: SignerError::UserRejected.to_string(),
+                        })
+                    }
+                    Request::Sign { .. } => {
+                        signer_backend_api::Req::RejectSign(signer_backend_api::RejectSignReq {
+                            code,
+                            reason: SignerError::UserRejected.to_string(),
+                        })
+                    }
+                };
+                let _res = send_request_to_upload_url(&upload_url, req);
             }
         }
         return;
     }
 
-    let res = process_accepted_signer_request(data, request);
+    let res = process_accepted_signer_request(data, &request);
 
     match res {
-        Ok(resp) => {
-            match receiver {
-                Receiver::Web { res_sender } => {
-                    let resp = match resp {
-                        Response::Connect { descriptor } => {
-                            signer_api::Resp::Descriptor(signer_api::DescriptorResp { descriptor })
-                        }
+        Ok(resp) => match receiver {
+            Receiver::Web { res_sender } => {
+                let resp = match resp {
+                    Response::Login { descriptor } => {
+                        signer_local_api::Resp::Login(signer_local_api::LoginResp { descriptor })
+                    }
+                    Response::Sign { pset } => {
+                        signer_local_api::Resp::Sign(signer_local_api::SignResp { pset })
+                    }
+                };
+                res_sender.send(Ok(resp));
+            }
+
+            Receiver::AppLink { code, upload_url } => {
+                let request =
+                    match resp {
+                        Response::Login { descriptor } => signer_backend_api::Req::AcceptLogin(
+                            signer_backend_api::AcceptLoginReq { code, descriptor },
+                        ),
                         Response::Sign { pset } => {
-                            signer_api::Resp::Sign(signer_api::SignResp { pset })
+                            signer_backend_api::Req::AcceptSign(signer_backend_api::AcceptSignReq {
+                                code,
+                                pset,
+                            })
                         }
                     };
-                    res_sender.send(Ok(resp));
-                }
-
-                Receiver::AppLink { code, upload_url } => {
-                    let request =
-                        match resp {
-                            Response::Connect { descriptor } => signer_backend_api::Req::Connected(
-                                signer_backend_api::ConnectedReq { code, descriptor },
-                            ),
-                            Response::Sign { pset } => {
-                                signer_backend_api::Req::Signed(signer_backend_api::SignedReq {
-                                    code,
-                                    pset,
-                                })
-                            }
-                        };
-                    let _res = send_request_to_upload_url(&upload_url, request);
-                }
+                let _res = send_request_to_upload_url(&upload_url, request);
             }
-        }
+        },
 
         Err(err) => match receiver {
             Receiver::Web { res_sender } => res_sender.send(Err(err)),
 
             Receiver::AppLink { code, upload_url } => {
-                let _res = send_request_to_upload_url(
-                    &upload_url,
-                    signer_backend_api::Req::Rejected(signer_backend_api::RejectedReq {
-                        code,
-                        reason: err.to_string(),
-                    }),
-                );
+                let req = match request {
+                    Request::Login {} => {
+                        signer_backend_api::Req::RejectLogin(signer_backend_api::RejectLoginReq {
+                            code,
+                            reason: err.to_string(),
+                        })
+                    }
+                    Request::Sign { .. } => {
+                        signer_backend_api::Req::RejectSign(signer_backend_api::RejectSignReq {
+                            code,
+                            reason: err.to_string(),
+                        })
+                    }
+                };
+                let _res = send_request_to_upload_url(&upload_url, req);
             }
         },
     }
 }
 
-fn process_accepted_signer_request(data: &mut Data, req: Request) -> Result<Response, SignerError> {
+fn process_accepted_signer_request(
+    data: &mut Data,
+    req: &Request,
+) -> Result<Response, SignerError> {
     let wallet_data = data.wallet_data.as_mut().ok_or(SignerError::NoWalletData)?;
 
     match req {
-        Request::Connect {} => {
+        Request::Login {} => {
             let descriptor = wallet_data
                 .wallet_reg
                 .default_account()
                 .descriptor()
                 .to_string();
 
-            Ok(Response::Connect { descriptor })
+            Ok(Response::Login { descriptor })
         }
 
         Request::Sign { pset } => {

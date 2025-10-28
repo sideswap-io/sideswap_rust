@@ -14,7 +14,7 @@ use axum::{
 };
 use http::HeaderMap;
 use sideswap_common::channel_helpers::UncheckedOneshotSender;
-use sideswap_types::{env::Env, retry_delay::RetryDelay, signer_api};
+use sideswap_types::{env::Env, retry_delay::RetryDelay, signer_local_api};
 use tokio::net::TcpSocket;
 use tokio_util::sync::CancellationToken;
 use tower_http::cors::CorsLayer;
@@ -32,8 +32,8 @@ pub struct Params {
 
 pub struct WebRequest {
     pub origin: String,
-    pub req: signer_api::Req,
-    pub res_sender: UncheckedOneshotSender<Result<signer_api::Resp, SignerError>>,
+    pub req: signer_local_api::Req,
+    pub res_sender: UncheckedOneshotSender<Result<signer_local_api::Resp, SignerError>>,
 }
 
 impl SignerServer {
@@ -93,7 +93,7 @@ impl IntoResponse for SignerError {
     fn into_response(self) -> axum::response::Response {
         (
             StatusCode::BAD_REQUEST,
-            Json(signer_api::Error {
+            Json(signer_local_api::Error {
                 error: self.to_string(),
             }),
         )
@@ -104,8 +104,8 @@ impl IntoResponse for SignerError {
 async fn sign(
     headers: HeaderMap,
     State(params): State<Arc<Params>>,
-    Json(req): Json<signer_api::Req>,
-) -> Result<Json<signer_api::Resp>, SignerError> {
+    Json(req): Json<signer_local_api::Req>,
+) -> Result<Json<signer_local_api::Resp>, SignerError> {
     let origin = headers
         .get(http::header::ORIGIN)
         .ok_or(SignerError::NoOrigin)?
@@ -124,6 +124,7 @@ async fn sign(
 }
 
 fn build_cors() -> CorsLayer {
+    // FIXME:
     let origins = [
         "http://localhost:8080",
         "https://swaption.io",
@@ -137,7 +138,6 @@ fn build_cors() -> CorsLayer {
     CorsLayer::new()
         .allow_origin(tower_http::cors::AllowOrigin::list(origins))
         .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
-        // Add headers you actually need. This is a safe default:
         .allow_headers([AUTHORIZATION, CONTENT_TYPE])
 }
 
