@@ -127,6 +127,8 @@ fn build_cors() -> CorsLayer {
     // FIXME:
     let origins = [
         "http://localhost:8080",
+        "https://sideswap.io",
+        "https://testnet.sideswap.io",
         "https://swaption.io",
         "https://testnet.swaption.io",
     ];
@@ -186,12 +188,9 @@ async fn bind_socket_with_retry(addr: std::net::SocketAddr) -> tokio::net::TcpLi
 pub async fn try_run(params: Params, cancel_token: CancellationToken) -> Result<(), anyhow::Error> {
     let env = params.env;
 
-    let enabled = match env {
-        Env::Prod => false,
-        Env::Testnet | Env::LocalLiquid | Env::LocalTestnet | Env::LocalRegtest => true,
-    };
+    let enabled = true;
     if !enabled {
-        // FIXME: Start the web server if the user allow it
+        // FIXME: Start the web server only if the user allows it
         log::debug!("web server is not allowed");
         return Ok(());
     }
