@@ -13,7 +13,7 @@ use axum::{
     routing::post,
 };
 use http::HeaderMap;
-use sideswap_common::channel_helpers::UncheckedOneshotSender;
+use sideswap_common::{channel_helpers::UncheckedOneshotSender, target_os::TargetOs};
 use sideswap_types::{env::Env, retry_delay::RetryDelay, signer_local_api};
 use tokio::net::TcpSocket;
 use tokio_util::sync::CancellationToken;
@@ -188,7 +188,11 @@ async fn bind_socket_with_retry(addr: std::net::SocketAddr) -> tokio::net::TcpLi
 pub async fn try_run(params: Params, cancel_token: CancellationToken) -> Result<(), anyhow::Error> {
     let env = params.env;
 
-    let enabled = true;
+    let enabled = match TargetOs::get() {
+        TargetOs::Linux | TargetOs::Windows | TargetOs::MacOs => true,
+        TargetOs::Android | TargetOs::IOS => false,
+    };
+
     if !enabled {
         // FIXME: Start the web server only if the user allows it
         log::debug!("web server is not allowed");
