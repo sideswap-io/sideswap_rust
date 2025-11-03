@@ -60,6 +60,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "aes-gcm"
+version = "0.10.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "831010a0f742e1209b3bcea8fab6a8e149051ba6099432c8cb2cc117dec3ead1"
+dependencies = [
+ "aead 0.5.2",
+ "aes 0.8.4",
+ "cipher 0.4.4",
+ "ctr 0.9.2",
+ "ghash",
+ "subtle",
+]
+
+[[package]]
 name = "aes-gcm-siv"
 version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -584,7 +598,7 @@ version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2cb03d1bed155d89dce0f845b7899b18a9a163e148fd004e1c28421a783e2d8e"
 dependencies = [
- "block-padding",
+ "block-padding 0.2.1",
  "cipher 0.3.0",
 ]
 
@@ -593,6 +607,15 @@ name = "block-padding"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8d696c370c750c948ada61c69a0ee2cbbb9c50b1019ddb86d9317157a99c2cae"
+
+[[package]]
+name = "block-padding"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a8894febbff9f758034a5b8e12d87918f56dfc64a8e1fe757d65e29041538d93"
+dependencies = [
+ "generic-array",
+]
 
 [[package]]
 name = "bmp-monochrome"
@@ -669,6 +692,15 @@ dependencies = [
  "serde 1.0.219",
  "serde_json",
  "thiserror 1.0.69",
+]
+
+[[package]]
+name = "cbc"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "26b52a9543ae338f279b96b0b9fed9c8093744685043739079ce85cd58f289a6"
+dependencies = [
+ "cipher 0.4.4",
 ]
 
 [[package]]
@@ -1210,13 +1242,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "elements"
+version = "0.26.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9d562b364c5d2aced40b01b3f73fc968311787e6813957593d4ffa94cd8733e3"
+dependencies = [
+ "bech32 0.11.0",
+ "bitcoin",
+ "secp256k1-zkp",
+ "serde_json",
+]
+
+[[package]]
 name = "elements-miniscript"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "571fa105690f83c7833df2109eb2e14ca0e62d633d2624ffcb166ff18a3da870"
 dependencies = [
  "bitcoin",
- "elements",
+ "elements 0.25.2",
  "miniscript",
  "serde 1.0.219",
 ]
@@ -1557,7 +1601,7 @@ dependencies = [
  "bip39",
  "bitcoin",
  "electrum-client",
- "elements",
+ "elements 0.25.2",
  "elements-miniscript",
  "libc",
  "log",
@@ -1654,6 +1698,16 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.101",
+]
+
+[[package]]
+name = "ghash"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f0d8a4362ccb29cb0b265253fb0a2728f592895ee6854fd9bc13f2ffda266ff1"
+dependencies = [
+ "opaque-debug",
+ "polyval 0.6.2",
 ]
 
 [[package]]
@@ -2266,6 +2320,7 @@ version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "879f10e63c20629ecabbb64a8010319738c66a5cd0c29b02d63d272b03751d01"
 dependencies = [
+ "block-padding 0.3.3",
  "generic-array",
 ]
 
@@ -2547,25 +2602,26 @@ checksum = "112b39cec0b298b6c1999fee3e31427f74f676e4cb9879ed1a121b43661a4154"
 
 [[package]]
 name = "lwk_common"
-version = "0.9.0"
-source = "git+https://github.com/sideswap-io/lwk.git?rev=7fc753028bbcc52e26c01eb614a2235fc2a73e20#7fc753028bbcc52e26c01eb614a2235fc2a73e20"
+version = "0.12.0"
+source = "git+https://github.com/sideswap-io/lwk.git?rev=ae2df3177f3e5343b132e77b9992698c34a5f1af#ae2df3177f3e5343b132e77b9992698c34a5f1af"
 dependencies = [
  "base64 0.21.7",
- "elements",
+ "elements 0.25.2",
  "elements-miniscript",
  "getrandom 0.2.16",
  "qr_code",
  "rand 0.8.5",
  "serde 1.0.219",
+ "serde_json",
  "thiserror 1.0.69",
 ]
 
 [[package]]
 name = "lwk_signer"
-version = "0.9.0"
-source = "git+https://github.com/sideswap-io/lwk.git?rev=7fc753028bbcc52e26c01eb614a2235fc2a73e20#7fc753028bbcc52e26c01eb614a2235fc2a73e20"
+version = "0.12.0"
+source = "git+https://github.com/sideswap-io/lwk.git?rev=ae2df3177f3e5343b132e77b9992698c34a5f1af#ae2df3177f3e5343b132e77b9992698c34a5f1af"
 dependencies = [
- "base64 0.13.1",
+ "base64 0.21.7",
  "bip39",
  "elements-miniscript",
  "lwk_common",
@@ -2574,31 +2630,43 @@ dependencies = [
 
 [[package]]
 name = "lwk_wollet"
-version = "0.9.0"
-source = "git+https://github.com/sideswap-io/lwk.git?rev=7fc753028bbcc52e26c01eb614a2235fc2a73e20#7fc753028bbcc52e26c01eb614a2235fc2a73e20"
+version = "0.12.0"
+source = "git+https://github.com/sideswap-io/lwk.git?rev=ae2df3177f3e5343b132e77b9992698c34a5f1af#ae2df3177f3e5343b132e77b9992698c34a5f1af"
 dependencies = [
+ "aes 0.8.4",
+ "aes-gcm",
  "aes-gcm-siv 0.11.1",
  "age",
  "base64 0.21.7",
  "bip39",
  "bitcoincore-rpc",
+ "cbc",
  "electrum-client",
- "elements",
+ "elements 0.25.2",
+ "elements 0.26.1",
  "elements-miniscript",
+ "flate2",
  "futures",
  "fxhash",
+ "hmac",
  "idna",
  "js-sys",
  "log",
  "lwk_common",
  "once_cell",
+ "pbkdf2",
  "rand 0.8.5",
  "regex-lite",
  "reqwest",
+ "rmp-serde",
+ "rmpv",
+ "scrypt",
  "serde 1.0.219",
  "serde_json",
+ "sha2",
  "thiserror 1.0.69",
  "tokio",
+ "tokio-tungstenite 0.24.0",
  "url",
  "wasm-bindgen-futures",
  "web-sys",
@@ -2903,6 +2971,17 @@ dependencies = [
  "redox_syscall",
  "smallvec",
  "windows-targets 0.52.6",
+]
+
+[[package]]
+name = "password-hash"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "346f04948ba92c43e8469c1ee6736c7563d71012b17d40745260fe106aac2166"
+dependencies = [
+ "base64ct",
+ "rand_core 0.6.4",
+ "subtle",
 ]
 
 [[package]]
@@ -3814,6 +3893,7 @@ version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0516a385866c09368f0b5bcd1caff3366aace790fcd46e2bb032697bb172fd1f"
 dependencies = [
+ "password-hash",
  "pbkdf2",
  "salsa20",
  "sha2",
@@ -4098,7 +4178,7 @@ dependencies = [
  "bitcoin_hashes 0.14.0",
  "bytes",
  "ciborium",
- "elements",
+ "elements 0.25.2",
  "elements-miniscript",
  "futures",
  "hex",
@@ -4117,7 +4197,7 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tokio-socks",
- "tokio-tungstenite",
+ "tokio-tungstenite 0.26.2",
  "url",
 ]
 
@@ -4125,7 +4205,7 @@ dependencies = [
 name = "sideswap_api"
 version = "0.1.2"
 dependencies = [
- "elements",
+ "elements 0.25.2",
  "hex",
  "rand 0.8.5",
  "serde 1.0.219",
@@ -4148,7 +4228,7 @@ dependencies = [
  "chrono",
  "ciborium",
  "derive_more 0.99.20",
- "elements",
+ "elements 0.25.2",
  "elements-miniscript",
  "flexi_logger",
  "gdk-common",
@@ -4197,7 +4277,7 @@ dependencies = [
  "blake3",
  "ciborium",
  "derive_more 0.99.20",
- "elements",
+ "elements 0.25.2",
  "flexi_logger",
  "futures",
  "gdk-pin-client",
@@ -4216,8 +4296,8 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tokio-socks",
- "tokio-tungstenite",
- "tungstenite",
+ "tokio-tungstenite 0.26.2",
+ "tungstenite 0.26.2",
  "ureq",
  "url",
 ]
@@ -4228,7 +4308,7 @@ version = "0.1.2"
 dependencies = [
  "anyhow",
  "base64 0.21.7",
- "elements",
+ "elements 0.25.2",
  "futures",
  "hex",
  "log",
@@ -4244,7 +4324,7 @@ dependencies = [
  "sideswap_types",
  "thiserror 1.0.69",
  "tokio",
- "tokio-tungstenite",
+ "tokio-tungstenite 0.26.2",
  "vergen",
 ]
 
@@ -4256,7 +4336,7 @@ dependencies = [
  "base64 0.21.7",
  "bip39",
  "config",
- "elements",
+ "elements 0.25.2",
  "log",
  "serde 1.0.219",
  "sideswap_amp",
@@ -4276,7 +4356,7 @@ dependencies = [
  "base64 0.21.7",
  "config",
  "crc32fast",
- "elements",
+ "elements 0.25.2",
  "futures",
  "hex",
  "log",
@@ -4292,8 +4372,8 @@ dependencies = [
  "sideswap_types",
  "thiserror 1.0.69",
  "tokio",
- "tokio-tungstenite",
- "tungstenite",
+ "tokio-tungstenite 0.26.2",
+ "tungstenite 0.26.2",
  "url",
 ]
 
@@ -4323,7 +4403,7 @@ dependencies = [
  "base64 0.21.7",
  "bip39",
  "config",
- "elements",
+ "elements 0.25.2",
  "hex",
  "log",
  "lwk_common",
@@ -4346,7 +4426,7 @@ dependencies = [
  "base64 0.21.7",
  "ciborium",
  "ciborium-io",
- "elements",
+ "elements 0.25.2",
  "hex",
  "log",
  "serde 1.0.219",
@@ -4366,7 +4446,7 @@ dependencies = [
  "anyhow",
  "base64 0.21.7",
  "bip39",
- "elements",
+ "elements 0.25.2",
  "hex",
  "log",
  "lwk_common",
@@ -4388,7 +4468,7 @@ dependencies = [
  "anyhow",
  "bip39",
  "config",
- "elements",
+ "elements 0.25.2",
  "futures",
  "log",
  "log4rs",
@@ -4402,7 +4482,7 @@ dependencies = [
  "sqlx",
  "thiserror 1.0.69",
  "tokio",
- "tokio-tungstenite",
+ "tokio-tungstenite 0.26.2",
  "ureq",
 ]
 
@@ -4428,7 +4508,7 @@ version = "0.1.2"
 dependencies = [
  "anyhow",
  "base64 0.21.7",
- "elements",
+ "elements 0.25.2",
  "rand 0.8.5",
  "serde 1.0.219",
  "sideswap_common",
@@ -4443,7 +4523,7 @@ dependencies = [
  "anyhow",
  "base64 0.21.7",
  "bip39",
- "elements",
+ "elements 0.25.2",
  "hex",
  "log",
  "serde 1.0.219",
@@ -4452,7 +4532,7 @@ dependencies = [
  "sideswap_types",
  "thiserror 1.0.69",
  "tokio",
- "tokio-tungstenite",
+ "tokio-tungstenite 0.26.2",
 ]
 
 [[package]]
@@ -4460,7 +4540,7 @@ name = "sideswap_types"
 version = "0.1.2"
 dependencies = [
  "base64 0.21.7",
- "elements",
+ "elements 0.25.2",
  "hex",
  "hex-literal",
  "rand 0.8.5",
@@ -4767,7 +4847,7 @@ checksum = "a8f112729512f8e442d81f95a8a7ddf2b7c6b8a1a6f509a95864142b30cab2d3"
 name = "stableapp_api"
 version = "0.1.0"
 dependencies = [
- "elements",
+ "elements 0.25.2",
  "serde 1.0.219",
  "sideswap_api",
  "thiserror 1.0.69",
@@ -5092,6 +5172,22 @@ dependencies = [
 
 [[package]]
 name = "tokio-tungstenite"
+version = "0.24.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "edc5f74e248dc973e0dbb7b74c7e0d6fcc301c694ff50049504004ef4d0cdcd9"
+dependencies = [
+ "futures-util",
+ "log",
+ "rustls",
+ "rustls-pki-types",
+ "tokio",
+ "tokio-rustls",
+ "tungstenite 0.24.0",
+ "webpki-roots 0.26.11",
+]
+
+[[package]]
+name = "tokio-tungstenite"
 version = "0.26.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7a9daff607c6d2bf6c16fd681ccb7eecc83e4e2cdc1ca067ffaadfca5de7f084"
@@ -5102,7 +5198,7 @@ dependencies = [
  "rustls-pki-types",
  "tokio",
  "tokio-rustls",
- "tungstenite",
+ "tungstenite 0.26.2",
  "webpki-roots 0.26.11",
 ]
 
@@ -5249,6 +5345,26 @@ name = "try-lock"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
+
+[[package]]
+name = "tungstenite"
+version = "0.24.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "18e5b8366ee7a95b16d32197d0b2604b43a0be89dc5fac9f8e96ccafbaedda8a"
+dependencies = [
+ "byteorder",
+ "bytes",
+ "data-encoding",
+ "http 1.3.1",
+ "httparse",
+ "log",
+ "rand 0.8.5",
+ "rustls",
+ "rustls-pki-types",
+ "sha1",
+ "thiserror 1.0.69",
+ "utf-8",
+]
 
 [[package]]
 name = "tungstenite"

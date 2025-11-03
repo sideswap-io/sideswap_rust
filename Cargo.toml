@@ -56,9 +56,9 @@ jni = "0.21.1"
 libc = "0.2"
 log = "0.4"
 log4rs = { version = "1.2", features = ["gzip", "toml_format"] }
-lwk_common = { version = "0.9" }
-lwk_signer = { version = "0.9", default-features = false }
-lwk_wollet = { version = "0.9" }
+lwk_common = { version = "0.12" }
+lwk_signer = { version = "0.12", default-features = false }
+lwk_wollet = { version = "0.12" }
 poem = "3"
 poem-openapi = { version = "5", features = ["swagger-ui"] }
 prost = "0.12"
@@ -94,6 +94,6 @@ uuid = { version = "1.8" }
 vergen = { version = "5.1", default-features = false, features = ["build", "rustc", "git"] }
 
 [patch.crates-io]
-lwk_common = { git = "https://github.com/sideswap-io/lwk.git", rev = "7fc753028bbcc52e26c01eb614a2235fc2a73e20" }
-lwk_signer = { git = "https://github.com/sideswap-io/lwk.git", rev = "7fc753028bbcc52e26c01eb614a2235fc2a73e20" }
-lwk_wollet = { git = "https://github.com/sideswap-io/lwk.git", rev = "7fc753028bbcc52e26c01eb614a2235fc2a73e20" }
+lwk_common = { git = "https://github.com/sideswap-io/lwk.git", rev = "ae2df3177f3e5343b132e77b9992698c34a5f1af" }
+lwk_signer = { git = "https://github.com/sideswap-io/lwk.git", rev = "ae2df3177f3e5343b132e77b9992698c34a5f1af" }
+lwk_wollet = { git = "https://github.com/sideswap-io/lwk.git", rev = "ae2df3177f3e5343b132e77b9992698c34a5f1af" }
