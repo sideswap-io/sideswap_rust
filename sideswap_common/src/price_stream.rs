@@ -37,13 +37,15 @@ pub struct Market {
     pub source: PriceSource,
     pub base: DealerTicker,
     pub quote: DealerTicker,
+    pub ttl_seconds: DurationSec,
+
+    pub fixed: Option<fixed::Params>,
+
     pub interest: Option<f64>,
     pub interest_ask: Option<f64>,
     pub interest_bid: Option<f64>,
-    pub fixed: Option<fixed::Params>,
     pub bid_amount: Option<f64>,
     pub ask_amount: Option<f64>,
-    pub ttl_seconds: DurationSec,
 }
 
 impl Market {
@@ -81,12 +83,18 @@ async fn get_price(
     market: &Market,
     ticker_loader: &TickerLoader,
 ) -> Result<PricePair, anyhow::Error> {
+    let exchange_pair = market.exchange_pair();
     match market.source {
-        PriceSource::Binance => binance::get_price(client, market).await,
-        PriceSource::Bitfinex => bitfinex::get_price(client, market).await,
-        PriceSource::BitPreco => bitpreco::get_price(client, market).await,
-        PriceSource::SideSwap => sideswap::get_price(env, client, market, ticker_loader).await,
-        PriceSource::Fixed => fixed::get_price(client, market).await,
+        PriceSource::Binance => binance::get_price(client, exchange_pair).await,
+        PriceSource::Bitfinex => bitfinex::get_price(client, exchange_pair).await,
+        PriceSource::BitPreco => bitpreco::get_price(client, exchange_pair).await,
+        PriceSource::SideSwap => {
+            sideswap::get_price(env, client, exchange_pair, ticker_loader).await
+        }
+        PriceSource::Fixed => {
+            let params = market.fixed.as_ref().expect("fixed field must be set");
+            fixed::get_price(client, exchange_pair, params).await
+        }
     }
 }
 

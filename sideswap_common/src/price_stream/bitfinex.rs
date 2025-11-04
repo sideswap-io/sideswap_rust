@@ -1,13 +1,12 @@
 use anyhow::anyhow;
 use sideswap_api::PricePair;
 
-use crate::{dealer_ticker::DealerTicker, http_client::HttpClient};
+use crate::{dealer_ticker::DealerTicker, exchange_pair::ExchangePair, http_client::HttpClient};
 
-use super::Market;
-
-pub async fn get_price(client: &HttpClient, market: &Market) -> Result<PricePair, anyhow::Error> {
-    let exchange_pair = market.exchange_pair();
-
+pub async fn get_price(
+    client: &HttpClient,
+    exchange_pair: ExchangePair,
+) -> Result<PricePair, anyhow::Error> {
     let symbol = match (exchange_pair.base, exchange_pair.quote) {
         (DealerTicker::LBTC, DealerTicker::USDT) => "tBTCUST",
         (DealerTicker::LBTC, DealerTicker::EURX) => "tBTCEUR",

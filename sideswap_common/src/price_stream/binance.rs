@@ -3,14 +3,12 @@ use sideswap_api::PricePair;
 
 use crate::{dealer_ticker::DealerTicker, exchange_pair::ExchangePair, http_client::HttpClient};
 
-use super::Market;
-
 #[derive(Deserialize)]
 struct TickerPrice {
     price: String,
 }
 
-pub async fn get_price_for_exchange_pair(
+pub async fn get_price(
     client: &HttpClient,
     exchange_pair: ExchangePair,
 ) -> Result<PricePair, anyhow::Error> {
@@ -33,10 +31,4 @@ pub async fn get_price_for_exchange_pair(
         bid: price,
         ask: price,
     })
-}
-
-pub async fn get_price(client: &HttpClient, market: &Market) -> Result<PricePair, anyhow::Error> {
-    let exchange_pair = market.exchange_pair();
-
-    get_price_for_exchange_pair(client, exchange_pair).await
 }

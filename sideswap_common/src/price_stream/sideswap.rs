@@ -2,19 +2,17 @@ use anyhow::anyhow;
 use sideswap_api::{PricePair, mkt::AssetPair};
 use sideswap_types::env::Env;
 
-use crate::{dealer_ticker::TickerLoader, http_client::HttpClient};
-
-use super::Market;
+use crate::{dealer_ticker::TickerLoader, exchange_pair::ExchangePair, http_client::HttpClient};
 
 pub async fn get_price(
     env: Env,
     client: &HttpClient,
-    market: &Market,
+    exchange_pair: ExchangePair,
     ticker_loader: &TickerLoader,
 ) -> Result<PricePair, anyhow::Error> {
     let asset_pair = AssetPair {
-        base: *ticker_loader.asset_id(market.base),
-        quote: *ticker_loader.asset_id(market.quote),
+        base: *ticker_loader.asset_id(exchange_pair.base),
+        quote: *ticker_loader.asset_id(exchange_pair.quote),
     };
 
     let base_url = env.base_server_http_url();
