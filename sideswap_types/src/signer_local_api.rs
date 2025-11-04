@@ -11,6 +11,7 @@ pub struct LoginResp {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SignReq {
     pub pset: String,
+    pub blinding_nonces: Option<Vec<String>>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

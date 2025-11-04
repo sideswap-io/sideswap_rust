@@ -59,8 +59,8 @@ impl Drop for SignerServer {
 pub enum SignerError {
     #[error("user rejected")]
     UserRejected,
-    #[error("jade is not implemented")]
-    JadeNotImplemented,
+    #[error("jade: {0}")]
+    Jade(anyhow::Error),
     #[error("channel closed")]
     ChannelClosed,
     #[error("invalid PSET: {0}")]

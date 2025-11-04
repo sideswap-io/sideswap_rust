@@ -127,6 +127,7 @@ fn add_input_explicit_proofs(
     Ok(())
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BlindedOutput {
     pub asset_id: AssetId,
     pub value: u64,

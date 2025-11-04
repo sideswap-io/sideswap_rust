@@ -1,20 +1,28 @@
-use std::{collections::BTreeMap, str::FromStr, time::Duration};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    str::FromStr,
+    time::Duration,
+};
 
 use anyhow::{Context, anyhow, bail, ensure};
 use elements::pset::PartiallySignedTransaction;
 use sideswap_common::channel_helpers::UncheckedOneshotSender;
-use sideswap_types::{abort, signer_backend_api, signer_local_api};
+use sideswap_jade::jade_mng;
+use sideswap_types::{signer_backend_api, signer_local_api};
 
 use crate::{
     ffi::proto,
     gdk_ses::{GdkSes, WalletInfo},
-    signer_server::{self, SignerError, WebRequest},
+    signer_server::{SignerError, WebRequest},
     worker::{Data, SignerReqId},
 };
 
 enum Request {
     Login {},
-    Sign { pset: String },
+    Sign {
+        pset: String,
+        blinding_nonces: Option<Vec<String>>,
+    },
 }
 
 #[derive(Clone)]
@@ -60,7 +68,10 @@ fn try_send_new_request(
     let ui_req = match &req {
         Request::Login {} => proto::from::signer_request::Msg::Connect(proto::Empty {}),
 
-        Request::Sign { pset } => {
+        Request::Sign {
+            pset,
+            blinding_nonces: _,
+        } => {
             let details = wallet_data
                 .wallet_reg
                 .default_account()
@@ -152,13 +163,21 @@ fn try_process_app_link(data: &mut Data, resp: &proto::to::AppLink) -> Result<()
                 }),
             )?;
 
-            let pset = if let signer_backend_api::Resp::StartSign(resp) = resp {
-                resp.pset
-            } else {
-                bail!("unexpected response, expected GetPset")
-            };
+            let (pset, blinding_nonces) =
+                if let signer_backend_api::Resp::StartSign(signer_backend_api::StartSignResp {
+                    pset,
+                    blinding_nonces,
+                }) = resp
+                {
+                    (pset, blinding_nonces)
+                } else {
+                    bail!("unexpected response, expected GetPset")
+                };
 
-            Request::Sign { pset }
+            Request::Sign {
+                pset,
+                blinding_nonces,
+            }
         }
 
         _ => bail!("unknown path: {path}", path = url.path()),
@@ -181,7 +200,10 @@ fn try_process_app_link(data: &mut Data, resp: &proto::to::AppLink) -> Result<()
 pub fn new_web_request(data: &mut Data, req: WebRequest) {
     let request = match req.req {
         signer_local_api::Req::Login(_req) => Request::Login {},
-        signer_local_api::Req::Sign(req) => Request::Sign { pset: req.pset },
+        signer_local_api::Req::Sign(req) => Request::Sign {
+            pset: req.pset,
+            blinding_nonces: req.blinding_nonces,
+        },
     };
 
     let res = try_send_new_request(data, req.origin, &request);
@@ -325,7 +347,10 @@ fn process_accepted_signer_request(
             Ok(Response::Login { descriptor })
         }
 
-        Request::Sign { pset } => {
+        Request::Sign {
+            pset,
+            blinding_nonces,
+        } => {
             let mut pset = PartiallySignedTransaction::from_str(&pset)?;
 
             match &wallet_data.wallet_reg.login_info().wallet_info {
@@ -343,8 +368,22 @@ fn process_accepted_signer_request(
                 }
 
                 WalletInfo::Jade(_jade, _watch_only) => {
-                    // FIXME: Implement Jade
-                    abort!(signer_server::SignerError::JadeNotImplemented);
+                    let pset = crate::worker::market_worker::try_sign_pset_jade(
+                        data,
+                        &[],
+                        &[],
+                        &[],
+                        None,
+                        pset,
+                        BTreeSet::new(),
+                        blinding_nonces.as_ref(),
+                        jade_mng::TxType::Normal,
+                    )
+                    .map_err(SignerError::Jade)?;
+
+                    Ok(Response::Sign {
+                        pset: pset.to_string(),
+                    })
                 }
             }
         }
