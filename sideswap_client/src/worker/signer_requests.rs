@@ -216,6 +216,11 @@ pub fn new_web_request(data: &mut Data, req: WebRequest) {
 }
 
 pub fn new_app_link(data: &mut Data, resp: proto::to::AppLink) {
+    if data.wallet_data.is_none() {
+        data.show_message("Create or import a new wallet");
+        return;
+    }
+
     let res = try_process_app_link(data, &resp);
     if let Err(err) = res {
         data.show_message(&format!("invalid url link: {url}: {err}", url = &resp.url));
