@@ -1253,8 +1253,10 @@ pub fn try_sign_pset_jade(
                     .commitment()
                     .ok_or_else(|| anyhow!("can't find value_commitment"))?,
                 blinding_key: output_blinding_pk.inner.into(),
-                abf: tx_sec.asset_bf,
-                vbf: tx_sec.value_bf,
+                abf: Some(tx_sec.asset_bf),
+                vbf: Some(tx_sec.value_bf),
+                asset_blind_proof: None,
+                value_blind_proof: None,
             })
         } else {
             None
@@ -1332,18 +1334,19 @@ pub fn try_sign_pset_jade(
                     path: user_path,
                     script: ByteBuf::from(utxo.prevout_script.as_bytes()),
                     sighash: None,
-                    asset_id: utxo.asset_id.into(),
-                    value: utxo.satoshi,
-                    abf: utxo.assetblinder,
-                    vbf: utxo.amountblinder,
+                    asset_id: Some(utxo.asset_id.into()),
+                    value: Some(utxo.satoshi),
+                    abf: Some(utxo.assetblinder),
+                    vbf: Some(utxo.amountblinder),
                     value_commitment: utxo
                         .value_commitment
                         .commitment()
                         .ok_or_else(|| anyhow!("the input must be blinded"))?,
-                    asset_generator: utxo
-                        .asset_commitment
-                        .commitment()
-                        .ok_or_else(|| anyhow!("the input must be blinded"))?,
+                    asset_generator: Some(
+                        utxo.asset_commitment
+                            .commitment()
+                            .ok_or_else(|| anyhow!("the input must be blinded"))?,
+                    ),
                     ae_host_commitment: AE_STUB_DATA,
                     ae_host_entropy: AE_STUB_DATA,
                 }))?;
@@ -2087,8 +2090,10 @@ fn try_offline_order_submit(
             asset_generator: output_gen,
             value_commitment,
             blinding_key: output_blinding_pk.into(),
-            abf: output_asset_bf,
-            vbf: output_value_bf,
+            abf: Some(output_asset_bf),
+            vbf: Some(output_value_bf),
+            asset_blind_proof: None,
+            value_blind_proof: None,
         })];
 
         let variant = match receive_address.address_type {
@@ -2143,18 +2148,19 @@ fn try_offline_order_submit(
             path: user_path,
             script: ByteBuf::from(utxo.prevout_script.as_bytes()),
             sighash: Some(EcdsaSighashType::SinglePlusAnyoneCanPay as u8),
-            asset_id: utxo.asset_id.into(),
-            value: utxo.satoshi,
-            abf: utxo.assetblinder,
-            vbf: utxo.amountblinder,
+            asset_id: Some(utxo.asset_id.into()),
+            value: Some(utxo.satoshi),
+            abf: Some(utxo.assetblinder),
+            vbf: Some(utxo.amountblinder),
             value_commitment: utxo
                 .value_commitment
                 .commitment()
                 .ok_or_else(|| anyhow!("input must be blinded"))?,
-            asset_generator: utxo
-                .asset_commitment
-                .commitment()
-                .ok_or_else(|| anyhow!("input must be blinded"))?,
+            asset_generator: Some(
+                utxo.asset_commitment
+                    .commitment()
+                    .ok_or_else(|| anyhow!("input must be blinded"))?,
+            ),
             ae_host_commitment: AE_STUB_DATA,
             ae_host_entropy: AE_STUB_DATA,
         }))?;

@@ -34,7 +34,6 @@ pub struct StartSignReq {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct StartSignResp {
     pub pset: String,
-    pub blinding_nonces: Option<Vec<String>>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

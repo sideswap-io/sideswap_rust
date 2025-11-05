@@ -266,6 +266,7 @@ pub struct ReqSignTx {
 
 pub type RespSignTx = bool;
 
+/// Either abf/vbf or asset_blind_proof/value_blind_proof must be set
 #[derive(Debug, Serialize, Clone)]
 pub struct TrustedCommitment {
     pub asset_id: AssetId,
@@ -273,8 +274,14 @@ pub struct TrustedCommitment {
     pub asset_generator: secp256k1_zkp::Generator,
     pub value_commitment: secp256k1_zkp::PedersenCommitment,
     pub blinding_key: PublicKey,
-    pub abf: AssetBlindingFactor,
-    pub vbf: ValueBlindingFactor,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub abf: Option<AssetBlindingFactor>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vbf: Option<ValueBlindingFactor>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub asset_blind_proof: Option<ByteBuf>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value_blind_proof: Option<ByteBuf>,
 }
 
 #[derive(Debug, Serialize)]
@@ -297,6 +304,7 @@ pub enum OutputVariant {
 pub struct Output {
     pub variant: Option<OutputVariant>,
     pub path: Vec<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub recovery_xpub: Option<String>,
     pub is_change: bool,
 }
@@ -311,11 +319,16 @@ pub struct ReqTxInput {
     pub ae_host_commitment: ByteArray32,
     pub ae_host_entropy: ByteArray32,
 
-    pub asset_id: AssetId,
-    pub value: u64,
-    pub abf: AssetBlindingFactor,
-    pub vbf: ValueBlindingFactor,
-    pub asset_generator: secp256k1_zkp::Generator,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub asset_id: Option<AssetId>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub abf: Option<AssetBlindingFactor>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vbf: Option<ValueBlindingFactor>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub asset_generator: Option<secp256k1_zkp::Generator>,
     pub value_commitment: secp256k1_zkp::PedersenCommitment,
 }
 
