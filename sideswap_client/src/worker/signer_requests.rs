@@ -528,6 +528,13 @@ pub fn try_sign_pset_jade(
         change.push(own_output);
     }
 
+    let asset_ids = pset
+        .inputs()
+        .iter()
+        .filter_map(|input| input.asset)
+        .chain(pset.outputs().iter().filter_map(|output| output.asset))
+        .collect::<BTreeSet<_>>();
+
     let sign_tx = sideswap_jade::models::ReqSignTx {
         network,
         use_ae_signatures: true,
@@ -535,7 +542,7 @@ pub fn try_sign_pset_jade(
         num_inputs: tx.input.len() as u32,
         trusted_commitments,
         change,
-        asset_info: get_jade_asset_info(&worker.assets, BTreeSet::new()),
+        asset_info: get_jade_asset_info(&worker.assets, asset_ids),
         additional_info: None,
     };
 
