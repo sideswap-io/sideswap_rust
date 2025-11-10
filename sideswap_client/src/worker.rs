@@ -794,6 +794,15 @@ impl Data {
         // self.process_pending_requests();
         market_worker::ws_connected(self);
 
+        for value in [
+            api::SubscribedValueType::SignerCors,
+            api::SubscribedValueType::SignerUrls,
+        ] {
+            self.send_request_msg(api::Request::SubscribeValue(api::SubscribeValueRequest {
+                value,
+            }));
+        }
+
         self.ui
             .send(proto::from::Msg::ServerConnected(proto::Empty {}));
     }
@@ -2167,6 +2176,7 @@ impl Data {
         let web_server = signer_server::SignerServer::new(signer_server::Params {
             env: self.env,
             msg_sender: self.msg_sender.clone(),
+            cors_origins: self.settings.signer_cors_origins.clone(),
         });
 
         self.wallet_data = Some(WalletData {
@@ -2470,6 +2480,16 @@ impl Data {
         }
     }
 
+    fn recreate_signer(&mut self) {
+        if let Some(wallet) = self.wallet_data.as_mut() {
+            wallet.web_server = signer_server::SignerServer::new(signer_server::Params {
+                env: self.env,
+                msg_sender: self.msg_sender.clone(),
+                cors_origins: self.settings.signer_cors_origins.clone(),
+            });
+        }
+    }
+
     fn process_subscribed_value(&mut self, notif: api::SubscribedValueNotification) {
         let msg = match notif.value {
             api::SubscribedValue::PegInMinAmount { min_amount } => {
@@ -2486,6 +2506,21 @@ impl Data {
             }
             api::SubscribedValue::PegOutNextBlockFeeRate { fee_rate } => {
                 proto::from::subscribed_value::Result::PegOutNextBlockFeeRate(fee_rate.raw())
+            }
+            api::SubscribedValue::SignerCors { origins } => {
+                if self.settings.signer_cors_origins != origins {
+                    self.settings.signer_cors_origins = origins;
+                    self.recreate_signer();
+                    self.save_settings();
+                }
+                return;
+            }
+            api::SubscribedValue::SignerUrls { allowed_urls } => {
+                if self.settings.signer_allowed_urls != allowed_urls {
+                    self.settings.signer_allowed_urls = allowed_urls;
+                    self.save_settings();
+                }
+                return;
             }
         };
 

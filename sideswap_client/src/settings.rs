@@ -98,6 +98,12 @@ pub struct Settings {
 
     #[serde(default)]
     pub tx_secrets: BTreeMap<elements::Txid, Vec<elements::TxOutSecrets>>,
+
+    #[serde(default)]
+    pub signer_cors_origins: Vec<String>,
+
+    #[serde(default)]
+    pub signer_allowed_urls: Vec<String>,
 }
 
 const SETTINGS_NAME: &str = "settings.json";

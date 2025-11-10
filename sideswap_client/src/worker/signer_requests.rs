@@ -139,6 +139,11 @@ fn try_process_app_link(data: &mut Data, resp: &proto::to::AppLink) -> Result<()
         .ok_or_else(|| anyhow!("invalid link: no upload_url query parameter"))?
         .clone();
 
+    ensure!(
+        data.settings.signer_allowed_urls.contains(&upload_url),
+        "upload_url is not allowed, please contact support"
+    );
+
     let code = params
         .get("code")
         .ok_or_else(|| anyhow!("invalid link: no code query parameter"))?
@@ -222,8 +227,9 @@ pub fn new_app_link(data: &mut Data, resp: proto::to::AppLink) {
     }
 
     let res = try_process_app_link(data, &resp);
+
     if let Err(err) = res {
-        data.show_message(&format!("invalid url link: {url}: {err}", url = &resp.url));
+        data.show_message(&format!("{err}: {url}", url = &resp.url));
     }
 }
 

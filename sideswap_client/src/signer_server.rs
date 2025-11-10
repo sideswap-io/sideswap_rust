@@ -28,6 +28,7 @@ pub struct SignerServer {
 pub struct Params {
     pub env: Env,
     pub msg_sender: mpsc::Sender<Message>,
+    pub cors_origins: Vec<String>,
 }
 
 pub struct WebRequest {
@@ -123,16 +124,7 @@ async fn sign(
     Ok(Json(resp))
 }
 
-fn build_cors() -> CorsLayer {
-    // FIXME:
-    let origins = [
-        "http://localhost:8080",
-        "https://sideswap.io",
-        "https://testnet.sideswap.io",
-        "https://swaption.io",
-        "https://testnet.swaption.io",
-    ];
-
+fn build_cors(origins: Vec<String>) -> CorsLayer {
     let origins = origins
         .into_iter()
         .map(|origin| origin.parse::<HeaderValue>().expect("must be valid"));
@@ -194,17 +186,18 @@ pub async fn try_run(params: Params, cancel_token: CancellationToken) -> Result<
     };
 
     if !enabled {
-        // FIXME: Start the web server only if the user allows it
         log::debug!("web server is not allowed");
         return Ok(());
     }
+
+    let cors_origins = params.cors_origins.clone();
 
     let app = Router::new()
         .route("/", post(sign))
         .with_state(Arc::new(params))
         // Order: CORS first so it can short-circuit OPTIONS;
         // the PNA header still gets added after by the middleware.
-        .layer(build_cors())
+        .layer(build_cors(cors_origins))
         .layer(middleware::from_fn(allow_private_network_header));
 
     let addr = std::net::SocketAddr::from(([127, 0, 0, 1], env.d().wallet_port));
