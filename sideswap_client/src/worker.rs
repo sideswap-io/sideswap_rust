@@ -198,6 +198,7 @@ struct CreatedTx {
     change_addresses: Vec<models::AddressInfo>,
     blinding_nonces: Vec<String>,
     assets: BTreeSet<AssetId>,
+    tx_secrets: Vec<TxOutSecrets>,
 }
 
 type SignerReqId = u32;
@@ -1421,7 +1422,6 @@ impl Data {
             )?;
 
             let tx = resp.pset.extract_tx()?;
-
             let id = tx.txid().to_string();
 
             let TxSize {
@@ -1463,6 +1463,7 @@ impl Data {
                     change_addresses,
                     blinding_nonces: resp.blinding_nonces,
                     assets,
+                    tx_secrets: resp.tx_secrets,
                 },
             );
 
@@ -1628,6 +1629,17 @@ impl Data {
                     })
                 })
                 .collect::<Vec<_>>();
+            let tx_secrets = blinded_outputs
+                .iter()
+                .filter_map(|out| {
+                    out.as_ref().map(|blinded_out| TxOutSecrets {
+                        asset: blinded_out.asset_id,
+                        value: blinded_out.value,
+                        asset_bf: blinded_out.abf,
+                        value_bf: blinded_out.vbf,
+                    })
+                })
+                .collect();
 
             wallet_data.created_txs.insert(
                 id.clone(),
@@ -1637,6 +1649,7 @@ impl Data {
                     change_addresses,
                     blinding_nonces: get_blinding_nonces(&blinded_outputs),
                     assets,
+                    tx_secrets,
                 },
             );
 
@@ -1730,6 +1743,8 @@ impl Data {
 
         let wallet = self.get_wallet(Account::Reg)?;
         wallet.broadcast_tx(&tx)?;
+        self.settings.tx_secrets.insert(txid, created_tx.tx_secrets);
+        self.save_settings();
 
         self.start_fast_sync();
 
@@ -1776,12 +1791,20 @@ impl Data {
             .filter_map(|res_receiver| res_receiver.recv().expect("channel must be open").ok())
             .filter_map(|tx_list| tx_list.list.into_iter().find(|tx| tx.txid == txid))
             .flat_map(|tx| tx.inputs.into_iter().chain(tx.outputs))
-            .flat_map(|in_out| {
+            .map(|in_out| in_out.unblinded)
+            .chain(
+                self.settings
+                    .tx_secrets
+                    .get(&txid)
+                    .cloned()
+                    .unwrap_or_default(),
+            )
+            .flat_map(|unblinded| {
                 [
-                    in_out.unblinded.value.to_string(),
-                    in_out.unblinded.asset.to_string(),
-                    in_out.unblinded.value_bf.to_string(),
-                    in_out.unblinded.asset_bf.to_string(),
+                    unblinded.value.to_string(),
+                    unblinded.asset.to_string(),
+                    unblinded.value_bf.to_string(),
+                    unblinded.asset_bf.to_string(),
                 ]
             })
             .collect::<Vec<_>>();

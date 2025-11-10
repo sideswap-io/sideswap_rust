@@ -54,6 +54,7 @@ pub struct CreatedPayjoin {
     pub blinding_nonces: Vec<String>,
     pub asset_fee: u64,
     pub network_fee: u64,
+    pub tx_secrets: Vec<TxOutSecrets>,
 }
 
 static AGENT: std::sync::LazyLock<ureq::Agent> = std::sync::LazyLock::new(|| {
@@ -203,7 +204,10 @@ pub fn create_payjoin(
         .collect::<Vec<_>>();
 
     inputs.append(&mut take_utxos(client_utxos, selected_utxos.iter()));
-    inputs.append(&mut take_utxos(server_utxos, server_inputs.iter()));
+    let mut server_inputs = take_utxos(server_utxos, server_inputs.iter());
+    let server_input_sec: Vec<_> = server_inputs.iter().map(|i| i.tx_out_sec.clone()).collect();
+
+    inputs.append(&mut server_inputs);
 
     for recipient in updated_recipients {
         // Use corrected amount if deduct_fee was set
@@ -248,6 +252,19 @@ pub fn create_payjoin(
         network_fee,
     })?;
 
+    let tx_secrets = blinded_outputs
+        .iter()
+        .filter_map(|out| {
+            out.as_ref().map(|blinded_out| TxOutSecrets {
+                asset: blinded_out.asset_id,
+                value: blinded_out.value,
+                asset_bf: blinded_out.abf,
+                value_bf: blinded_out.vbf,
+            })
+        })
+        .chain(server_input_sec)
+        .collect();
+
     let mut server_pset = blinded_pset.clone();
     sideswap_common::pset_blind::remove_explicit_values(&mut server_pset);
     let server_pset = elements::encode::serialize(&server_pset);
@@ -274,6 +291,7 @@ pub fn create_payjoin(
         blinding_nonces: get_blinding_nonces(&blinded_outputs),
         asset_fee: server_fee,
         network_fee,
+        tx_secrets,
     })
 }
 

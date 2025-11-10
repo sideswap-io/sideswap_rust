@@ -95,6 +95,9 @@ pub struct Settings {
     /// The previous hash of the mnemonic or jade id used for login.
     /// The old settings must be cleared when it changes.
     pub login_id: Option<String>,
+
+    #[serde(default)]
+    pub tx_secrets: BTreeMap<elements::Txid, Vec<elements::TxOutSecrets>>,
 }
 
 const SETTINGS_NAME: &str = "settings.json";
