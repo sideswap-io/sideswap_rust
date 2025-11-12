@@ -109,6 +109,16 @@ pub enum TxType {
     Unknown,
 }
 
+#[derive(Serialize)]
+pub struct WalletOutput {
+    /// Output index
+    pub vout: u32,
+    /// Confidential wallet address
+    pub address: elements::Address,
+    pub ticker: Ticker,
+    pub value: f64,
+}
+
 /// Wallet transaction from the Liquid Bitcoin network as reported by LWK
 #[derive(Serialize)]
 pub struct WalletTx {
@@ -125,6 +135,9 @@ pub struct WalletTx {
     pub timestamp: Option<TimestampMs>,
     /// Transaction type determined from the balance change (heuristic)
     pub tx_type: TxType,
+    /// Received to wallet addresses (only whitelisted assets) in the asset precisions.
+    /// Only from the External chain, the Internal chain (change) is not included here.
+    pub outputs: Vec<WalletOutput>,
 }
 
 #[derive(Serialize)]

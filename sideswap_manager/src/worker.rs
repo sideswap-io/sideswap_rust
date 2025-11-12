@@ -247,6 +247,27 @@ fn convert_wallet_tx(
             .timestamp
             .map(|value| TimestampMs::from_millis(u64::from(value) * 1000)),
         tx_type: get_tx_type(&tx.balance, policy_asset, tx.fee),
+        outputs: tx
+            .outputs
+            .iter()
+            .filter_map(|output| {
+                let output = output.as_ref()?;
+                match output.ext_int {
+                    lwk_wollet::Chain::External => {
+                        let ticker = ticker_loader.ticker(&output.unblinded.asset)?;
+                        let precision = ticker_loader.precision(ticker);
+                        let value = asset_float_amount_(output.unblinded.value, precision);
+                        Some(api::WalletOutput {
+                            address: output.address.clone(),
+                            ticker,
+                            value,
+                            vout: output.outpoint.vout,
+                        })
+                    }
+                    lwk_wollet::Chain::Internal => None,
+                }
+            })
+            .collect(),
     }
 }
 

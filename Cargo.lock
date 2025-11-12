@@ -4472,6 +4472,7 @@ dependencies = [
  "futures",
  "log",
  "log4rs",
+ "lwk_wollet",
  "serde 1.0.219",
  "serde_json",
  "sideswap_api",

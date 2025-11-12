@@ -17,6 +17,7 @@ elements.workspace = true
 futures.workspace = true
 log.workspace = true
 log4rs.workspace = true
+lwk_wollet.workspace = true
 serde_json.workspace = true
 serde.workspace = true
 sqlx.workspace = true
