@@ -154,9 +154,10 @@ Below is a step-by-step example of using the manager to receive assets.
    {"Req":{"id":1,"req":{"GetWalletTxs": {}}}}
    ```
    ```json
-   {"Resp":{"id":1,"resp":{"GetWalletTxs":{"txs":[{"txid":"4616ba6f6707544712aa1838481e3b6f7b03ff37d8946a404d7a5630d82b2e08","height":null,"balance":{"L-BTC":0.00049974},"network_fee":26,"timestamp":null,"tx_type":"Incoming"},{"txid":"64f15dd0720677df640f285b8a89cd085967e994d6d27ca31f443a20b88ee19e","height":3320223,"balance":{"L-BTC":0.00037277},"network_fee":22,"timestamp":1743746770000,"tx_type":"Incoming"}]}}}}
+   {"Resp":{"id":1,"resp":{"GetWalletTxs":{"txs":[{"txid":"0e976602c48d442c4135d92b73da559892a436f8f4fe0667a048f36b7c08c715","height":1792959,"balance":{"L-BTC":0.001},"network_fee":28,"timestamp":1739781182000,"tx_type":"Incoming","outputs":[{"vout":1,"address":"tlq1qq2d79arkkcq2fx0tpelmtf9a4q70drunq7ldku3kcq25azhptznsukq3asngcvs58ceeu6lppkwvc8x9dkwrvr33gmelyr9n6","ticker":"L-BTC","value":0.001}]}]}}}}
    ```
    `height` and `timestamp` will be `null` for transactions still in the mempool.
+   The `outputs` field can be used to detect incoming transactions.
 
 1. **List generated addresses**
 
