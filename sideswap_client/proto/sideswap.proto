@@ -850,6 +850,10 @@ message From {
     }
   }
 
+  message SignerReturn {
+    optional string return_url = 1;
+  }
+
   oneof msg {
     Login login = 17;
     Empty logout = 16;
@@ -936,6 +940,7 @@ message From {
     HistoryUpdated history_updated = 161;
 
     SignerRequest signer_request = 170;
+    SignerReturn signer_return = 171;
   }
 }
 
