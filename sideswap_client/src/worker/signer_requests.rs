@@ -15,7 +15,6 @@ use sideswap_jade::{
     models::{OutputVariant, TrustedCommitment},
 };
 use sideswap_types::{signer_backend_api, signer_local_api};
-use url::Url;
 
 use crate::{
     ffi::proto::{self, Account},
@@ -43,7 +42,6 @@ enum Receiver {
     AppLink {
         code: String,
         upload_url: url::Url,
-        return_url: Option<url::Url>,
     },
 }
 
@@ -141,12 +139,6 @@ fn try_process_app_link(data: &mut Data, resp: &proto::to::AppLink) -> Result<()
         .ok_or_else(|| anyhow!("no upload_url query parameter"))?
         .clone();
 
-    let return_url = params
-        .get("return_url")
-        .map(|url| Url::parse(url))
-        .transpose()
-        .context("return_url")?;
-
     let upload_url = url::Url::parse(&upload_url).context("upload_url")?;
     let upload_url_domain = upload_url
         .domain()
@@ -164,16 +156,6 @@ fn try_process_app_link(data: &mut Data, resp: &proto::to::AppLink) -> Result<()
             || allow_localhost && upload_url_domain == "localhost",
         "upload_url is not allowed, please contact support"
     );
-
-    if let Some(return_url) = &return_url {
-        let return_url_domain = return_url
-            .domain()
-            .ok_or_else(|| anyhow!("no domain in return_url"))?;
-        ensure!(
-            return_url.scheme() == "https" || allow_localhost && return_url_domain == "localhost"
-        );
-        ensure!(return_url_domain == upload_url_domain);
-    }
 
     let code = params
         .get("code")
@@ -216,11 +198,7 @@ fn try_process_app_link(data: &mut Data, resp: &proto::to::AppLink) -> Result<()
 
     let wallet_data = data.wallet_data.as_mut().ok_or(SignerError::NoWalletData)?;
 
-    let receiver = Receiver::AppLink {
-        code,
-        upload_url,
-        return_url,
-    };
+    let receiver = Receiver::AppLink { code, upload_url };
 
     wallet_data
         .signer_requests
@@ -268,11 +246,9 @@ pub fn new_app_link(data: &mut Data, resp: proto::to::AppLink) {
     }
 }
 
-fn handle_return_url(data: &mut Data, return_url: Option<url::Url>) {
+fn signer_return(data: &mut Data) {
     data.ui
-        .send(proto::from::Msg::SignerReturn(proto::from::SignerReturn {
-            return_url: return_url.as_ref().map(ToString::to_string),
-        }));
+        .send(proto::from::Msg::SignerReturn(proto::Empty {}));
 }
 
 pub fn ui_response(data: &mut Data, resp: proto::to::SignerResponse) {
@@ -295,11 +271,7 @@ pub fn ui_response(data: &mut Data, resp: proto::to::SignerResponse) {
     if !resp.accept {
         match receiver {
             Receiver::Web { res_sender } => res_sender.send(Err(SignerError::UserRejected)),
-            Receiver::AppLink {
-                code,
-                upload_url,
-                return_url,
-            } => {
+            Receiver::AppLink { code, upload_url } => {
                 let req = match request {
                     Request::Login {} => {
                         signer_backend_api::Req::RejectLogin(signer_backend_api::RejectLoginReq {
@@ -315,7 +287,7 @@ pub fn ui_response(data: &mut Data, resp: proto::to::SignerResponse) {
                     }
                 };
                 let _res = send_request_to_upload_url(&upload_url, req);
-                handle_return_url(data, return_url);
+                signer_return(data);
             }
         }
         return;
@@ -338,11 +310,7 @@ pub fn ui_response(data: &mut Data, resp: proto::to::SignerResponse) {
                 res_sender.send(Ok(resp));
             }
 
-            Receiver::AppLink {
-                code,
-                upload_url,
-                return_url,
-            } => {
+            Receiver::AppLink { code, upload_url } => {
                 let request =
                     match resp {
                         Response::Login { descriptor } => signer_backend_api::Req::AcceptLogin(
@@ -356,18 +324,14 @@ pub fn ui_response(data: &mut Data, resp: proto::to::SignerResponse) {
                         }
                     };
                 let _res = send_request_to_upload_url(&upload_url, request);
-                handle_return_url(data, return_url);
+                signer_return(data);
             }
         },
 
         Err(err) => match receiver {
             Receiver::Web { res_sender } => res_sender.send(Err(err)),
 
-            Receiver::AppLink {
-                code,
-                upload_url,
-                return_url,
-            } => {
+            Receiver::AppLink { code, upload_url } => {
                 let req = match request {
                     Request::Login {} => {
                         signer_backend_api::Req::RejectLogin(signer_backend_api::RejectLoginReq {
@@ -383,7 +347,7 @@ pub fn ui_response(data: &mut Data, resp: proto::to::SignerResponse) {
                     }
                 };
                 let _res = send_request_to_upload_url(&upload_url, req);
-                handle_return_url(data, return_url);
+                signer_return(data);
             }
         },
     }
