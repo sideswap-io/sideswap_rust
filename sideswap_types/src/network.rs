@@ -53,6 +53,8 @@ pub struct NetworkData {
     pub service_chain_code: &'static str,
 
     pub known_assets: KnownAssetIds,
+
+    pub wallet_port: u16,
 }
 
 pub const NETWORK_LIQUID: NetworkData = NetworkData {
@@ -77,6 +79,8 @@ pub const NETWORK_LIQUID: NetworkData = NetworkData {
         DePix: const_asset_id("02f22f8d9c76ab41661a2729e4752e2c5d1a263012141b86ea98af5472df5189"),
         SSWP: const_asset_id("06d1085d6a3a1328fb8189d106c7a8afbef3d327e34504828c4cac2c74ac0802"),
     },
+
+    wallet_port: 41687,
 };
 
 pub const NETWORK_LIQUID_TESTNET: NetworkData = NetworkData {
@@ -102,6 +106,8 @@ pub const NETWORK_LIQUID_TESTNET: NetworkData = NetworkData {
 
         SSWP: const_asset_id("1f9f9319beeded3aa3751190ec9b2d77df570c3b9e6e84a4aa321c11331e0118"),
     },
+
+    wallet_port: 41688,
 };
 
 pub const NETWORK_LIQUID_REGTEST: NetworkData = NetworkData {
@@ -127,6 +133,8 @@ pub const NETWORK_LIQUID_REGTEST: NetworkData = NetworkData {
 
         SSWP: const_asset_id("e3c747d55d55e0a06a392a0063d3626a5e93bf6a216eff1b655251bed1f09c9a"),
     },
+
+    wallet_port: 41689,
 };
 
 impl Network {

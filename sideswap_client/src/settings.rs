@@ -100,10 +100,7 @@ pub struct Settings {
     pub tx_secrets: BTreeMap<elements::Txid, Vec<elements::TxOutSecrets>>,
 
     #[serde(default)]
-    pub signer_cors_origins: Vec<String>,
-
-    #[serde(default)]
-    pub signer_allowed_urls: Vec<String>,
+    pub signer_whitelisted_domains: Vec<String>,
 }
 
 const SETTINGS_NAME: &str = "settings.json";

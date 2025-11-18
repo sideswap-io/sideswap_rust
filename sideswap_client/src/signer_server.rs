@@ -28,7 +28,7 @@ pub struct SignerServer {
 pub struct Params {
     pub env: Env,
     pub msg_sender: mpsc::Sender<Message>,
-    pub cors_origins: Vec<String>,
+    pub whitelisted_domains: Vec<String>,
 }
 
 pub struct WebRequest {
@@ -177,6 +177,16 @@ async fn bind_socket_with_retry(addr: std::net::SocketAddr) -> tokio::net::TcpLi
     }
 }
 
+pub fn allow_localhost(env: Env) -> bool {
+    match env {
+        sideswap_types::env::Env::Prod => false,
+        sideswap_types::env::Env::Testnet
+        | sideswap_types::env::Env::LocalLiquid
+        | sideswap_types::env::Env::LocalTestnet
+        | sideswap_types::env::Env::LocalRegtest => true,
+    }
+}
+
 pub async fn try_run(params: Params, cancel_token: CancellationToken) -> Result<(), anyhow::Error> {
     let env = params.env;
 
@@ -190,7 +200,16 @@ pub async fn try_run(params: Params, cancel_token: CancellationToken) -> Result<
         return Ok(());
     }
 
-    let cors_origins = params.cors_origins.clone();
+    let mut cors_origins = params
+        .whitelisted_domains
+        .iter()
+        .map(|domain| format!("https://{domain}"))
+        .collect::<Vec<_>>();
+
+    let allow_localhost = crate::signer_server::allow_localhost(env);
+    if allow_localhost {
+        cors_origins.push("http://localhost".to_owned());
+    }
 
     let app = Router::new()
         .route("/", post(sign))
@@ -200,7 +219,7 @@ pub async fn try_run(params: Params, cancel_token: CancellationToken) -> Result<
         .layer(build_cors(cors_origins))
         .layer(middleware::from_fn(allow_private_network_header));
 
-    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], env.d().wallet_port));
+    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], env.nd().wallet_port));
 
     let listener = tokio::select! {
         listener = bind_socket_with_retry(addr) => {

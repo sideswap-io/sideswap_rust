@@ -794,14 +794,9 @@ impl Data {
         // self.process_pending_requests();
         market_worker::ws_connected(self);
 
-        for value in [
-            api::SubscribedValueType::SignerCors,
-            api::SubscribedValueType::SignerUrls,
-        ] {
-            self.send_request_msg(api::Request::SubscribeValue(api::SubscribeValueRequest {
-                value,
-            }));
-        }
+        self.send_request_msg(api::Request::SubscribeValue(api::SubscribeValueRequest {
+            value: api::SubscribedValueType::SignerWhitelistedDomains,
+        }));
 
         self.ui
             .send(proto::from::Msg::ServerConnected(proto::Empty {}));
@@ -2176,7 +2171,7 @@ impl Data {
         let web_server = signer_server::SignerServer::new(signer_server::Params {
             env: self.env,
             msg_sender: self.msg_sender.clone(),
-            cors_origins: self.settings.signer_cors_origins.clone(),
+            whitelisted_domains: self.settings.signer_whitelisted_domains.clone(),
         });
 
         self.wallet_data = Some(WalletData {
@@ -2485,7 +2480,7 @@ impl Data {
             wallet.web_server = signer_server::SignerServer::new(signer_server::Params {
                 env: self.env,
                 msg_sender: self.msg_sender.clone(),
-                cors_origins: self.settings.signer_cors_origins.clone(),
+                whitelisted_domains: self.settings.signer_whitelisted_domains.clone(),
             });
         }
     }
@@ -2507,17 +2502,10 @@ impl Data {
             api::SubscribedValue::PegOutNextBlockFeeRate { fee_rate } => {
                 proto::from::subscribed_value::Result::PegOutNextBlockFeeRate(fee_rate.raw())
             }
-            api::SubscribedValue::SignerCors { origins } => {
-                if self.settings.signer_cors_origins != origins {
-                    self.settings.signer_cors_origins = origins;
+            api::SubscribedValue::SignerWhitelistedDomains { domains } => {
+                if self.settings.signer_whitelisted_domains != domains {
+                    self.settings.signer_whitelisted_domains = domains;
                     self.recreate_signer();
-                    self.save_settings();
-                }
-                return;
-            }
-            api::SubscribedValue::SignerUrls { allowed_urls } => {
-                if self.settings.signer_allowed_urls != allowed_urls {
-                    self.settings.signer_allowed_urls = allowed_urls;
                     self.save_settings();
                 }
                 return;

@@ -15,6 +15,7 @@ use sideswap_jade::{
     models::{OutputVariant, TrustedCommitment},
 };
 use sideswap_types::{signer_backend_api, signer_local_api};
+use url::Url;
 
 use crate::{
     ffi::proto::{self, Account},
@@ -41,8 +42,8 @@ enum Receiver {
     },
     AppLink {
         code: String,
-        upload_url: String,
-        return_url: Option<String>,
+        upload_url: url::Url,
+        return_url: Option<url::Url>,
     },
 }
 
@@ -140,17 +141,38 @@ fn try_process_app_link(data: &mut Data, resp: &proto::to::AppLink) -> Result<()
         .ok_or_else(|| anyhow!("no upload_url query parameter"))?
         .clone();
 
-    let return_url = params.get("return_url").cloned();
+    let return_url = params
+        .get("return_url")
+        .map(|url| Url::parse(url))
+        .transpose()
+        .context("return_url")?;
+
+    let upload_url = url::Url::parse(&upload_url).context("upload_url")?;
+    let upload_url_domain = upload_url
+        .domain()
+        .ok_or_else(|| anyhow!("no domain in upload_url"))?;
+
+    let allow_localhost = crate::signer_server::allow_localhost(data.env);
+
+    ensure!(upload_url.scheme() == "https" || allow_localhost && upload_url_domain == "localhost");
 
     ensure!(
-        data.settings.signer_allowed_urls.contains(&upload_url),
+        data.settings
+            .signer_whitelisted_domains
+            .iter()
+            .any(|domain| domain == upload_url_domain)
+            || allow_localhost && upload_url_domain == "localhost",
         "upload_url is not allowed, please contact support"
     );
 
     if let Some(return_url) = &return_url {
-        let upload_url = url::Url::parse(&upload_url).context("upload_url")?;
-        let return_url = url::Url::parse(&return_url).context("return_url")?;
-        ensure!(upload_url.domain() == return_url.domain());
+        let return_url_domain = return_url
+            .domain()
+            .ok_or_else(|| anyhow!("no domain in return_url"))?;
+        ensure!(
+            return_url.scheme() == "https" || allow_localhost && return_url_domain == "localhost"
+        );
+        ensure!(return_url_domain == upload_url_domain);
     }
 
     let code = params
@@ -190,7 +212,7 @@ fn try_process_app_link(data: &mut Data, resp: &proto::to::AppLink) -> Result<()
         _ => bail!("unknown path: {path}", path = url.path()),
     };
 
-    let req_id = try_send_new_request(data, upload_url.clone(), &request)?;
+    let req_id = try_send_new_request(data, upload_url.to_string(), &request)?;
 
     let wallet_data = data.wallet_data.as_mut().ok_or(SignerError::NoWalletData)?;
 
@@ -246,10 +268,10 @@ pub fn new_app_link(data: &mut Data, resp: proto::to::AppLink) {
     }
 }
 
-fn handle_return_url(data: &mut Data, return_url: Option<String>) {
+fn handle_return_url(data: &mut Data, return_url: Option<url::Url>) {
     data.ui
         .send(proto::from::Msg::SignerReturn(proto::from::SignerReturn {
-            return_url,
+            return_url: return_url.as_ref().map(ToString::to_string),
         }));
 }
 
@@ -417,10 +439,10 @@ fn process_accepted_signer_request(
 }
 
 fn send_request_to_upload_url(
-    upload_url: &str,
+    upload_url: &url::Url,
     req: signer_backend_api::Req,
 ) -> Result<signer_backend_api::Resp, anyhow::Error> {
-    let resp = ureq::post(&upload_url)
+    let resp = ureq::post(&upload_url.to_string())
         .timeout(Duration::from_secs(10))
         .send_json(req)
         .context("sending request failed")?;

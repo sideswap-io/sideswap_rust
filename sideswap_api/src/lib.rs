@@ -49,8 +49,7 @@ pub enum SubscribedValueType {
     PegOutMinAmount,
     PegOutWalletBalance,
     PegOutNextBlockFeeRate,
-    SignerCors,
-    SignerUrls,
+    SignerWhitelistedDomains,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -84,16 +83,11 @@ pub enum SubscribedValue {
         fee_rate: FeeRateSats,
     },
 
-    SignerCors {
-        /// Used on desktop to build allowed CORS for the external signer server.
-        /// Example: ["https://sideswap.io"].
-        origins: Vec<String>,
-    },
-
-    SignerUrls {
-        /// Used on desktop and mobile to build allowed QR/app link for the allowed upload signer URLs.
-        /// Example: "https://sideswap.io/signer/"
-        allowed_urls: Vec<String>,
+    SignerWhitelistedDomains {
+        /// On desktop builds used as allowed CORS for the external signer server.
+        /// On mobile builds used as allowed signer upload links.
+        /// Example: ["sideswap.io", "testnet.sideswap.io"].
+        domains: Vec<String>,
     },
 }
 

@@ -16,7 +16,6 @@ pub struct EnvData {
     pub name: &'static str,
     pub mainnet: bool,
     pub network: Network,
-    pub wallet_port: u16,
 }
 
 const ENV_PROD: EnvData = EnvData {
@@ -26,7 +25,6 @@ const ENV_PROD: EnvData = EnvData {
     name: "prod",
     mainnet: true,
     network: Network::Liquid,
-    wallet_port: 41687,
 };
 
 const ENV_TESTNET: EnvData = EnvData {
@@ -36,7 +34,6 @@ const ENV_TESTNET: EnvData = EnvData {
     name: "testnet",
     mainnet: false,
     network: Network::LiquidTestnet,
-    wallet_port: 41688,
 };
 
 const ENV_LOCAL_LIQUID: EnvData = EnvData {
@@ -46,7 +43,6 @@ const ENV_LOCAL_LIQUID: EnvData = EnvData {
     name: "local_liquid",
     mainnet: true,
     network: Network::Liquid,
-    wallet_port: 41689,
 };
 
 const ENV_LOCAL_TESTNET: EnvData = EnvData {
@@ -56,7 +52,6 @@ const ENV_LOCAL_TESTNET: EnvData = EnvData {
     name: "local_testnet",
     mainnet: false,
     network: Network::LiquidTestnet,
-    wallet_port: 41690,
 };
 
 const ENV_LOCAL_REGTEST: EnvData = EnvData {
@@ -66,7 +61,6 @@ const ENV_LOCAL_REGTEST: EnvData = EnvData {
     name: "local_regtest",
     mainnet: false,
     network: Network::Regtest,
-    wallet_port: 41691,
 };
 
 impl Env {
