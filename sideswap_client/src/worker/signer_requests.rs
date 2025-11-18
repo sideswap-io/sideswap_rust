@@ -137,7 +137,7 @@ fn try_process_app_link(data: &mut Data, resp: &proto::to::AppLink) -> Result<()
 
     let upload_url = params
         .get("upload_url")
-        .ok_or_else(|| anyhow!("invalid link: no upload_url query parameter"))?
+        .ok_or_else(|| anyhow!("no upload_url query parameter"))?
         .clone();
 
     let return_url = params.get("return_url").cloned();
@@ -146,6 +146,12 @@ fn try_process_app_link(data: &mut Data, resp: &proto::to::AppLink) -> Result<()
         data.settings.signer_allowed_urls.contains(&upload_url),
         "upload_url is not allowed, please contact support"
     );
+
+    if let Some(return_url) = &return_url {
+        let upload_url = url::Url::parse(&upload_url).context("upload_url")?;
+        let return_url = url::Url::parse(&return_url).context("return_url")?;
+        ensure!(upload_url.domain() == return_url.domain());
+    }
 
     let code = params
         .get("code")
