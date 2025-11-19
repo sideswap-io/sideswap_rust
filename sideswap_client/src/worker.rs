@@ -192,6 +192,7 @@ enum TimerEvent {
     RetryStartQuote,
 }
 
+#[derive(Clone)]
 struct CreatedTx {
     pset: PartiallySignedTransaction,
     selected_utxos: Vec<models::Utxo>,
@@ -1700,8 +1701,9 @@ impl Data {
 
         let created_tx = wallet_data
             .created_txs
-            .remove(&req.id)
-            .ok_or_else(|| anyhow!("can't find created tx"))?;
+            .get(&req.id)
+            .ok_or_else(|| anyhow!("can't find created tx"))?
+            .clone();
 
         let selected_utxos = created_tx.selected_utxos.iter().collect::<Vec<_>>();
         let change_addresses = created_tx.change_addresses.iter().collect::<Vec<_>>();
@@ -1751,6 +1753,9 @@ impl Data {
         self.save_settings();
 
         self.start_fast_sync();
+
+        let wallet_data = self.wallet_data.as_mut().expect("already checked");
+        wallet_data.created_txs.remove(&req.id);
 
         Ok(txid)
     }
