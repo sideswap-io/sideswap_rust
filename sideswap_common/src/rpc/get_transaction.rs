@@ -15,6 +15,9 @@ pub struct GetTransactionResp {
     /// Negative confirmations means the transaction conflicted that many blocks ago.
     pub confirmations: i32,
 
+    /// The block time expressed in UNIX timestamp
+    pub blocktime: Option<i64>,
+
     /// Raw data for transaction
     pub hex: String,
 }
