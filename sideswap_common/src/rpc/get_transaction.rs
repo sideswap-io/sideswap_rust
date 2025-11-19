@@ -18,6 +18,9 @@ pub struct GetTransactionResp {
     /// The block time expressed in UNIX timestamp
     pub blocktime: Option<i64>,
 
+    /// The transaction time expressed in UNIX epoch time
+    pub time: i64,
+
     /// Raw data for transaction
     pub hex: String,
 }
