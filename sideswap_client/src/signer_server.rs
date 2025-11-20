@@ -177,7 +177,7 @@ async fn bind_socket_with_retry(addr: std::net::SocketAddr) -> tokio::net::TcpLi
     }
 }
 
-pub fn allow_localhost(env: Env) -> bool {
+pub fn is_dev_env(env: Env) -> bool {
     match env {
         sideswap_types::env::Env::Prod => false,
         sideswap_types::env::Env::Testnet
@@ -206,8 +206,9 @@ pub async fn try_run(params: Params, cancel_token: CancellationToken) -> Result<
         .map(|domain| format!("https://{domain}"))
         .collect::<Vec<_>>();
 
-    let allow_localhost = crate::signer_server::allow_localhost(env);
-    if allow_localhost {
+    let is_dev_env = is_dev_env(env);
+
+    if is_dev_env {
         cors_origins.push("http://localhost".to_owned());
     }
 

@@ -140,22 +140,24 @@ fn try_process_app_link(data: &mut Data, resp: &proto::to::AppLink) -> Result<()
         .clone();
 
     let upload_url = url::Url::parse(&upload_url).context("upload_url")?;
-    let upload_url_domain = upload_url
-        .domain()
-        .ok_or_else(|| anyhow!("no domain in upload_url"))?;
 
-    let allow_localhost = crate::signer_server::allow_localhost(data.env);
+    let is_dev_env = crate::signer_server::is_dev_env(data.env);
 
-    ensure!(upload_url.scheme() == "https" || allow_localhost && upload_url_domain == "localhost");
+    if !is_dev_env {
+        ensure!(upload_url.scheme() == "https");
 
-    ensure!(
-        data.settings
-            .signer_whitelisted_domains
-            .iter()
-            .any(|domain| domain == upload_url_domain)
-            || allow_localhost && upload_url_domain == "localhost",
-        "upload_url is not allowed, please contact support"
-    );
+        let upload_url_domain = upload_url
+            .domain()
+            .ok_or_else(|| anyhow!("no domain in upload_url"))?;
+
+        ensure!(
+            data.settings
+                .signer_whitelisted_domains
+                .iter()
+                .any(|domain| domain == upload_url_domain),
+            "upload_url is not allowed, please contact support"
+        );
+    }
 
     let code = params
         .get("code")
