@@ -154,10 +154,11 @@ Below is a step-by-step example of using the manager to receive assets.
    {"Req":{"id":1,"req":{"GetWalletTxs": {}}}}
    ```
    ```json
-   {"Resp":{"id":1,"resp":{"GetWalletTxs":{"txs":[{"txid":"0e976602c48d442c4135d92b73da559892a436f8f4fe0667a048f36b7c08c715","height":1792959,"balance":{"L-BTC":0.001},"network_fee":28,"timestamp":1739781182000,"tx_type":"Incoming","outputs":[{"vout":1,"address":"tlq1qq2d79arkkcq2fx0tpelmtf9a4q70drunq7ldku3kcq25azhptznsukq3asngcvs58ceeu6lppkwvc8x9dkwrvr33gmelyr9n6","ticker":"L-BTC","value":0.001}]}]}}}}
+   {"Resp":{"id":1,"resp":{"GetWalletTxs":{"txs":[{"txid":"14a06cabc66eb1dfecb81866a6819b3671cede7db1d8c9fbd0c940eddc62352f","height":2189070,"balance":{"L-BTC":0.00115421,"USDt":-100.0},"network_fee":67,"timestamp":1763694726000,"tx_type":"Swap","outputs":[{"vout":2,"address":"tlq1qqtnn3wpck6gx0wwy8ylywdgn74lg82kvm6v6hceh2ruf48zr65nj2pc2cpv2ak2p8xuep5pyl0srp2fqzdrd2u9dlmgekkr5n","ticker":"L-BTC","value":0.00115421}],"unblinded_link":"https://blockstream.info/liquidtestnet/tx/14a06cabc66eb1dfecb81866a6819b3671cede7db1d8c9fbd0c940eddc62352f/#blinded=4986000000000,b612eb46313a2cd6ebabd8b7a8eed5696e29898b87a43bff41c94f51acef9d73,1c3a1d95d84177e16a41ebd020f3d6106f8d9966d2195e5b6acd441437fb2a0f,e519636564f8cb495fb93dfc74fc13d3f26b6f3b51f7848d5f3b2e0f939e8e6e,4976000000000,b612eb46313a2cd6ebabd8b7a8eed5696e29898b87a43bff41c94f51acef9d73,55760748092c6abeb64a88798f3fd861214d7c99a20af6c21680dde982a9ec4f,53fff88ce599c2dafe277e45b12386484a61c316c504b805c19120aefcbdf709,115421,144c654344aa716d6f3abcc1ca90e5641e4e2a7f633bc09fe3baf64585819a49,6abd56903a5918556e4969694ea175193af061a8102e0e4dbf6bdae496caea63,6d41b93c5961cfc2c5e3eced88cda99ab9d25ffa82abff62d579d1c3fec428dc"}]}}}}
    ```
    `height` and `timestamp` will be `null` for transactions still in the mempool.
    The `outputs` field can be used to detect incoming transactions.
+   `unblinded_link` is an unblinded link to the Blockstream Explorer. Only the wallet inputs and outputs are unblinded.
 
 1. **List generated addresses**
 

@@ -138,6 +138,9 @@ pub struct WalletTx {
     /// Received to wallet addresses (only whitelisted assets) in the asset precisions.
     /// Only from the External chain, the Internal chain (change) is not included here.
     pub outputs: Vec<WalletOutput>,
+    /// Unblinded link to the Blockstream Explorer.
+    /// Only the wallet inputs and outputs are unblinded.
+    pub unblinded_link: String,
 }
 
 #[derive(Serialize)]

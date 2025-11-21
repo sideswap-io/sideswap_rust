@@ -24,6 +24,7 @@ use sideswap_types::{
     abort,
     asset_precision::{AssetPrecision, asset_float_amount, asset_float_amount_, asset_int_amount_},
     b64,
+    network::Network,
     timestamp_ms::TimestampMs,
     verify,
 };
@@ -88,6 +89,8 @@ struct PegData {
 
 struct Data {
     settings: Settings,
+
+    network: Network,
 
     policy_asset: AssetId,
 
@@ -227,8 +230,33 @@ fn get_tx_type(
 fn convert_wallet_tx(
     ticker_loader: &TickerLoader,
     tx: &sideswap_lwk::WalletTx,
-    policy_asset: &AssetId,
+    network: Network,
 ) -> api::WalletTx {
+    let policy_asset = &network.d().policy_asset;
+
+    let blinded_values = tx
+        .inputs
+        .iter()
+        .chain(tx.outputs.iter())
+        .flatten()
+        .map(|item| {
+            [
+                item.unblinded.value.to_string(),
+                item.unblinded.asset.to_string(),
+                item.unblinded.value_bf.to_string(),
+                item.unblinded.asset_bf.to_string(),
+            ]
+        })
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(",");
+
+    let unblinded_link = format!(
+        "{tx_explorer_url}{txid}/#blinded={blinded_values}",
+        tx_explorer_url = network.d().tx_explorer_url,
+        txid = tx.txid,
+    );
+
     api::WalletTx {
         txid: tx.txid,
         height: tx.height,
@@ -268,6 +296,7 @@ fn convert_wallet_tx(
                 }
             })
             .collect(),
+        unblinded_link,
     }
 }
 
@@ -895,7 +924,7 @@ async fn get_wallet_txs(
     let txs = resp
         .txs
         .into_iter()
-        .map(|tx| convert_wallet_tx(&data.ticker_loader, &tx, &data.policy_asset))
+        .map(|tx| convert_wallet_tx(&data.ticker_loader, &tx, data.network))
         .collect();
 
     Ok(api::GetWalletTxsResp { txs })
@@ -1241,8 +1270,11 @@ pub async fn run(
         .map(|addr| (addr.ind as u32, addr))
         .collect::<BTreeMap<_, _>>();
 
+    let network = settings.env.d().network;
+
     let mut data = Data {
         settings,
+        network,
         policy_asset,
         ticker_loader,
         db,
