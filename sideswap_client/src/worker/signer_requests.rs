@@ -42,6 +42,7 @@ enum Receiver {
     AppLink {
         code: String,
         upload_url: url::Url,
+        is_mobile: bool,
     },
 }
 
@@ -164,6 +165,13 @@ fn try_process_app_link(data: &mut Data, resp: &proto::to::AppLink) -> Result<()
         .ok_or_else(|| anyhow!("invalid link: no code query parameter"))?
         .clone();
 
+    let is_mobile = params
+        .get("mobile")
+        .map(|value| bool::from_str(value))
+        .transpose()
+        .context("invalid `mobile` query parameter value")?
+        .unwrap_or_default();
+
     let request = match url.path() {
         "/login/" => {
             send_request_to_upload_url(
@@ -200,7 +208,11 @@ fn try_process_app_link(data: &mut Data, resp: &proto::to::AppLink) -> Result<()
 
     let wallet_data = data.wallet_data.as_mut().ok_or(SignerError::NoWalletData)?;
 
-    let receiver = Receiver::AppLink { code, upload_url };
+    let receiver = Receiver::AppLink {
+        code,
+        upload_url,
+        is_mobile,
+    };
 
     wallet_data
         .signer_requests
@@ -248,9 +260,27 @@ pub fn new_app_link(data: &mut Data, resp: proto::to::AppLink) {
     }
 }
 
-fn signer_return(data: &mut Data) {
-    data.ui
-        .send(proto::from::Msg::SignerReturn(proto::Empty {}));
+fn signer_return(
+    data: &mut Data,
+    upload_url: url::Url,
+    is_mobile: bool,
+    req: signer_backend_api::Req,
+) {
+    let res = send_request_to_upload_url(&upload_url, req);
+
+    match res {
+        Ok(_resp) => {
+            if is_mobile {
+                data.ui
+                    .send(proto::from::Msg::SignerReturn(proto::Empty {}));
+            }
+        }
+        Err(err) => {
+            data.show_message(&format!(
+                "sending signer request failed: {err}, upload_url: {upload_url}"
+            ));
+        }
+    }
 }
 
 pub fn ui_response(data: &mut Data, resp: proto::to::SignerResponse) {
@@ -273,7 +303,11 @@ pub fn ui_response(data: &mut Data, resp: proto::to::SignerResponse) {
     if !resp.accept {
         match receiver {
             Receiver::Web { res_sender } => res_sender.send(Err(SignerError::UserRejected)),
-            Receiver::AppLink { code, upload_url } => {
+            Receiver::AppLink {
+                code,
+                upload_url,
+                is_mobile,
+            } => {
                 let req = match request {
                     Request::Login {} => {
                         signer_backend_api::Req::RejectLogin(signer_backend_api::RejectLoginReq {
@@ -288,8 +322,7 @@ pub fn ui_response(data: &mut Data, resp: proto::to::SignerResponse) {
                         })
                     }
                 };
-                let _res = send_request_to_upload_url(&upload_url, req);
-                signer_return(data);
+                signer_return(data, upload_url, is_mobile, req);
             }
         }
         return;
@@ -312,8 +345,12 @@ pub fn ui_response(data: &mut Data, resp: proto::to::SignerResponse) {
                 res_sender.send(Ok(resp));
             }
 
-            Receiver::AppLink { code, upload_url } => {
-                let request =
+            Receiver::AppLink {
+                code,
+                upload_url,
+                is_mobile,
+            } => {
+                let req =
                     match resp {
                         Response::Login { descriptor } => signer_backend_api::Req::AcceptLogin(
                             signer_backend_api::AcceptLoginReq { code, descriptor },
@@ -325,15 +362,18 @@ pub fn ui_response(data: &mut Data, resp: proto::to::SignerResponse) {
                             })
                         }
                     };
-                let _res = send_request_to_upload_url(&upload_url, request);
-                signer_return(data);
+                signer_return(data, upload_url, is_mobile, req);
             }
         },
 
         Err(err) => match receiver {
             Receiver::Web { res_sender } => res_sender.send(Err(err)),
 
-            Receiver::AppLink { code, upload_url } => {
+            Receiver::AppLink {
+                code,
+                upload_url,
+                is_mobile,
+            } => {
                 let req = match request {
                     Request::Login {} => {
                         signer_backend_api::Req::RejectLogin(signer_backend_api::RejectLoginReq {
@@ -348,8 +388,7 @@ pub fn ui_response(data: &mut Data, resp: proto::to::SignerResponse) {
                         })
                     }
                 };
-                let _res = send_request_to_upload_url(&upload_url, req);
-                signer_return(data);
+                signer_return(data, upload_url, is_mobile, req);
             }
         },
     }
