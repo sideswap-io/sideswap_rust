@@ -124,13 +124,9 @@ async fn sign(
     Ok(Json(resp))
 }
 
-fn build_cors(origins: Vec<String>) -> CorsLayer {
-    let origins = origins
-        .into_iter()
-        .map(|origin| origin.parse::<HeaderValue>().expect("must be valid"));
-
+fn build_cors(allow_origin: tower_http::cors::AllowOrigin) -> CorsLayer {
     CorsLayer::new()
-        .allow_origin(tower_http::cors::AllowOrigin::list(origins))
+        .allow_origin(allow_origin)
         .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
         .allow_headers([AUTHORIZATION, CONTENT_TYPE])
 }
@@ -200,17 +196,18 @@ pub async fn try_run(params: Params, cancel_token: CancellationToken) -> Result<
         return Ok(());
     }
 
-    let mut cors_origins = params
-        .whitelisted_domains
-        .iter()
-        .map(|domain| format!("https://{domain}"))
-        .collect::<Vec<_>>();
-
     let is_dev_env = is_dev_env(env);
 
-    if is_dev_env {
-        cors_origins.push("http://localhost".to_owned());
-    }
+    let cors_origins = if !is_dev_env {
+        tower_http::cors::AllowOrigin::list(
+            params
+                .whitelisted_domains
+                .iter()
+                .filter_map(|domain| HeaderValue::from_str(&format!("https://{domain}")).ok()),
+        )
+    } else {
+        tower_http::cors::AllowOrigin::any()
+    };
 
     let app = Router::new()
         .route("/", post(sign))
