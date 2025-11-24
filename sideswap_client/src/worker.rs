@@ -2208,6 +2208,9 @@ impl Data {
 
         self.send_ws_connect();
 
+        self.sync_wallet(Account::Reg);
+        self.sync_wallet(Account::Amp);
+
         Ok(())
     }
 
