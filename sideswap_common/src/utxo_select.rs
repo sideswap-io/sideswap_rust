@@ -120,6 +120,8 @@ pub enum Error {
     InvalidArgs(&'static str),
     #[error("insufficient funds")]
     InsufficientFunds,
+    #[error("no LBTC for the network fee")]
+    NoUtxosForNetworkFee,
 }
 
 fn change_wallets(utxos: &[Utxo], force_change_wallets: ChangeWallets) -> ChangeWallets {
@@ -529,6 +531,11 @@ fn try_select(args: Args) -> Result<Res, Error> {
         .get(&policy_asset)
         .copied()
         .unwrap_or_default();
+
+    verify!(
+        recipients_bitcoin_total != 0 || !bitcoin_utxos.is_empty(),
+        Error::NoUtxosForNetworkFee
+    );
 
     let (bitcoin_inputs, bitcoin_change, network_fee) = select_bitcoin_inputs(
         &policy_asset,

@@ -654,7 +654,9 @@ impl Wallet {
         })
         .map_err(|err| match err {
             utxo_select::Error::InvalidArgs(err) => Error::ProtocolError(err),
-            utxo_select::Error::InsufficientFunds => Error::InsufficientFunds,
+            utxo_select::Error::InsufficientFunds | utxo_select::Error::NoUtxosForNetworkFee => {
+                Error::InsufficientFunds
+            }
         })?;
 
         let selected_utxos = utxo_select
