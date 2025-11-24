@@ -83,6 +83,14 @@ fn convert_value(value: &serde_json::Value) -> ciborium::Value {
     }
 }
 
+pub fn encode_jade_tx(mut tx: elements::Transaction) -> serde_bytes::ByteBuf {
+    // Remove unnecessary data to ensure that the request fits into DIY Jade
+    for output in tx.output.iter_mut() {
+        output.witness.rangeproof = None;
+    }
+    serde_bytes::ByteBuf::from(elements::encode::serialize(&tx))
+}
+
 pub fn get_jade_asset_info(
     all_assets: &BTreeMap<AssetId, Asset>,
     required: BTreeSet<AssetId>,

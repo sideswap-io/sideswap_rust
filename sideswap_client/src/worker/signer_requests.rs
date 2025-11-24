@@ -8,7 +8,6 @@ use std::{
 use anyhow::{Context, anyhow, bail, ensure};
 use bitcoin::bip32::{ChildNumber, DerivationPath, Fingerprint};
 use elements::{Script, pset::PartiallySignedTransaction};
-use serde_bytes::ByteBuf;
 use sideswap_common::channel_helpers::UncheckedOneshotSender;
 use sideswap_jade::{
     jade_mng::{self, AE_STUB_DATA},
@@ -20,7 +19,7 @@ use crate::{
     ffi::proto::{self, Account},
     gdk_ses::{GdkSes, WalletInfo},
     signer_server::{SignerError, WebRequest},
-    utils::{get_jade_asset_info, get_jade_network, unlock_hw},
+    utils::{encode_jade_tx, get_jade_asset_info, get_jade_network, unlock_hw},
     worker::{Data, SignerReqId},
 };
 
@@ -491,8 +490,6 @@ pub fn try_sign_pset_jade(
 
     let tx = pset.extract_tx()?;
 
-    let tx_bin = elements::encode::serialize(&tx);
-
     // We can use any account here, jade instance will be the same
     let jade = Arc::clone(
         &worker
@@ -604,11 +601,13 @@ pub fn try_sign_pset_jade(
         .chain(pset.outputs().iter().filter_map(|output| output.asset))
         .collect::<BTreeSet<_>>();
 
+    let num_inputs = tx.input.len() as u32;
+
     let sign_tx = sideswap_jade::models::ReqSignTx {
         network,
         use_ae_signatures: true,
-        txn: ByteBuf::from(tx_bin),
-        num_inputs: tx.input.len() as u32,
+        txn: encode_jade_tx(tx),
+        num_inputs,
         trusted_commitments,
         change,
         asset_info: get_jade_asset_info(&worker.assets, asset_ids),

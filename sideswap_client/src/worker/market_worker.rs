@@ -57,8 +57,8 @@ use crate::{
     settings::{AddressCacheEntry, AddressWallet},
     utils::{
         convert_chart_point, convert_to_swap_utxo, decode_pset, derive_amp_address,
-        derive_native_address, derive_nested_address, encode_pset, get_jade_asset_info,
-        get_jade_network, get_script_sig, get_witness, unlock_hw,
+        derive_native_address, derive_nested_address, encode_jade_tx, encode_pset,
+        get_jade_asset_info, get_jade_network, get_script_sig, get_witness, unlock_hw,
     },
     worker::{self, wallet},
 };
@@ -1167,7 +1167,6 @@ pub fn try_sign_pset_jade(
     let network = get_jade_network(worker.env);
 
     let tx = pset.extract_tx()?;
-    let tx_bin = elements::encode::serialize(&tx);
 
     // We can use any account here, jade instance will be the same
     let jade = Arc::clone(
@@ -1290,11 +1289,13 @@ pub fn try_sign_pset_jade(
         change.push(change_output);
     }
 
+    let num_inputs = tx.input.len() as u32;
+
     let sign_tx = sideswap_jade::models::ReqSignTx {
         network,
         use_ae_signatures: true,
-        txn: ByteBuf::from(tx_bin),
-        num_inputs: tx.input.len() as u32,
+        txn: encode_jade_tx(tx),
+        num_inputs,
         trusted_commitments,
         change,
         asset_info: get_jade_asset_info(&worker.assets, asset_ids),
@@ -2058,8 +2059,6 @@ fn try_offline_order_submit(
         let wallet = worker.get_wallet(Account::Reg)?;
         let network = get_jade_network(worker.env);
 
-        let tx_bin = elements::encode::serialize(&tx);
-
         let jade = Arc::clone(
             &wallet
                 .login_info()
@@ -2111,11 +2110,13 @@ fn try_offline_order_submit(
             is_change: false,
         })];
 
+        let num_inputs = tx.input.len() as u32;
+
         let sign_tx = sideswap_jade::models::ReqSignTx {
             network,
             use_ae_signatures: true,
-            txn: ByteBuf::from(tx_bin),
-            num_inputs: tx.input.len() as u32,
+            txn: encode_jade_tx(tx),
+            num_inputs,
             trusted_commitments: trusted_commitments.clone(),
             change,
             asset_info,
