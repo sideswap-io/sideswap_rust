@@ -152,7 +152,7 @@ fn try_process_app_link(data: &mut Data, resp: &proto::to::AppLink) -> Result<()
 
         ensure!(
             data.settings
-                .signer_whitelisted_domains
+                .get_signer_whitelisted_domains(data.env)
                 .iter()
                 .any(|domain| domain == upload_url_domain),
             "upload_url is not allowed, please contact support"

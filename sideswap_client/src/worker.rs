@@ -2176,7 +2176,7 @@ impl Data {
         let web_server = signer_server::SignerServer::new(signer_server::Params {
             env: self.env,
             msg_sender: self.msg_sender.clone(),
-            whitelisted_domains: self.settings.signer_whitelisted_domains.clone(),
+            whitelisted_domains: self.settings.get_signer_whitelisted_domains(self.env),
         });
 
         self.wallet_data = Some(WalletData {
@@ -2488,7 +2488,7 @@ impl Data {
             wallet.web_server = signer_server::SignerServer::new(signer_server::Params {
                 env: self.env,
                 msg_sender: self.msg_sender.clone(),
-                whitelisted_domains: self.settings.signer_whitelisted_domains.clone(),
+                whitelisted_domains: self.settings.get_signer_whitelisted_domains(self.env),
             });
         }
     }
@@ -2511,8 +2511,8 @@ impl Data {
                 proto::from::subscribed_value::Result::PegOutNextBlockFeeRate(fee_rate.raw())
             }
             api::SubscribedValue::SignerWhitelistedDomains { domains } => {
-                if self.settings.signer_whitelisted_domains != domains {
-                    self.settings.signer_whitelisted_domains = domains;
+                if self.settings.get_signer_whitelisted_domains(self.env) != domains {
+                    self.settings.set_signer_whitelisted_domains(domains);
                     self.recreate_signer();
                     self.save_settings();
                 }
