@@ -34,6 +34,7 @@ pub struct StartSignReq {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct StartSignResp {
     pub pset: String,
+    pub ttl_milliseconds: Option<u64>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

@@ -842,6 +842,7 @@ message From {
       repeated Balance balances = 1;
       repeated AddressAmount recipients = 2;
       required uint64 network_fee = 3;
+      optional uint64 ttl_milliseconds = 4;
     }
 
     oneof msg {

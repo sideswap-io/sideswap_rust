@@ -1,20 +1,19 @@
 use std::sync::{Arc, mpsc};
 
 use axum::{
-    Json, Router,
+    Router,
     body::Body,
     extract::State,
     http::{
-        HeaderName, HeaderValue, Method, Request, StatusCode,
+        HeaderName, HeaderValue, Method, Request,
         header::{AUTHORIZATION, CONTENT_TYPE},
     },
     middleware::{self, Next},
     response::IntoResponse,
     routing::post,
 };
-use http::HeaderMap;
-use sideswap_common::{channel_helpers::UncheckedOneshotSender, target_os::TargetOs};
-use sideswap_types::{env::Env, retry_delay::RetryDelay, signer_local_api};
+use sideswap_common::target_os::TargetOs;
+use sideswap_types::{env::Env, retry_delay::RetryDelay};
 use tokio::net::TcpSocket;
 use tokio_util::sync::CancellationToken;
 use tower_http::cors::CorsLayer;
@@ -32,9 +31,7 @@ pub struct Params {
 }
 
 pub struct WebRequest {
-    pub origin: String,
-    pub req: signer_local_api::Req,
-    pub res_sender: UncheckedOneshotSender<Result<signer_local_api::Resp, SignerError>>,
+    pub app_link: String,
 }
 
 impl SignerServer {
@@ -56,72 +53,10 @@ impl Drop for SignerServer {
     }
 }
 
-#[derive(thiserror::Error, Debug)]
-pub enum SignerError {
-    #[error("user rejected")]
-    UserRejected,
-    #[error("jade: {0}")]
-    Jade(anyhow::Error),
-    #[error("channel closed")]
-    ChannelClosed,
-    #[error("invalid PSET: {0}")]
-    ParseError(#[from] elements::pset::ParseError),
-    #[error("no wallet data")]
-    NoWalletData,
-    #[error("sign error: {0}")]
-    Sign(#[from] lwk_signer::SignError),
-    #[error("no origin header set")]
-    NoOrigin,
-    #[error("invalid header: {0}")]
-    ToStrError(#[from] http::header::ToStrError),
-    #[error("lwk: {0}")]
-    Lwk(#[from] lwk_wollet::Error),
-}
-
-impl<T> From<std::sync::mpsc::SendError<T>> for SignerError {
-    fn from(_value: std::sync::mpsc::SendError<T>) -> Self {
-        SignerError::ChannelClosed
-    }
-}
-
-impl From<tokio::sync::oneshot::error::RecvError> for SignerError {
-    fn from(_value: tokio::sync::oneshot::error::RecvError) -> Self {
-        SignerError::ChannelClosed
-    }
-}
-
-impl IntoResponse for SignerError {
-    fn into_response(self) -> axum::response::Response {
-        (
-            StatusCode::BAD_REQUEST,
-            Json(signer_local_api::Error {
-                error: self.to_string(),
-            }),
-        )
-            .into_response()
-    }
-}
-
-async fn sign(
-    headers: HeaderMap,
-    State(params): State<Arc<Params>>,
-    Json(req): Json<signer_local_api::Req>,
-) -> Result<Json<signer_local_api::Resp>, SignerError> {
-    let origin = headers
-        .get(http::header::ORIGIN)
-        .ok_or(SignerError::NoOrigin)?
-        .to_str()?
-        .to_owned();
-
-    let (res_sender, res_receiver) = tokio::sync::oneshot::channel();
-    params.msg_sender.send(Message::SignerRequest(WebRequest {
-        origin,
-        req,
-        res_sender: res_sender.into(),
-    }))?;
-    let resp = res_receiver.await??;
-
-    Ok(Json(resp))
+async fn app_link(State(params): State<Arc<Params>>, app_link: String) {
+    let _ = params
+        .msg_sender
+        .send(Message::SignerRequest(WebRequest { app_link }));
 }
 
 fn build_cors(allow_origin: tower_http::cors::AllowOrigin) -> CorsLayer {
@@ -210,7 +145,7 @@ pub async fn try_run(params: Params, cancel_token: CancellationToken) -> Result<
     };
 
     let app = Router::new()
-        .route("/", post(sign))
+        .route("/app_link", post(app_link))
         .with_state(Arc::new(params))
         // Order: CORS first so it can short-circuit OPTIONS;
         // the PNA header still gets added after by the middleware.

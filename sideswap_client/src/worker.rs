@@ -35,7 +35,6 @@ use market_worker::{REGISTER_PATH, get_wallet_account};
 use serde::{Deserialize, Serialize};
 use sideswap_amp::sw_signer::SwSigner;
 use sideswap_api::mkt::AssetPair;
-use sideswap_common::channel_helpers::UncheckedOneshotSender;
 use sideswap_common::cipher::derive_key;
 use sideswap_common::event_proofs::EventProofs;
 use sideswap_common::pin;
@@ -294,8 +293,6 @@ pub struct Data {
     wallet_event_callback: wallet::EventCallback,
     last_ui_message: SystemTime,
 }
-
-pub type PsetSignSender = UncheckedOneshotSender<Result<String, signer_server::SignerError>>;
 
 pub enum Message {
     Ui(ffi::ToMsg),
