@@ -6,7 +6,9 @@ pub struct StartLoginReq {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct StartLoginResp {}
+pub struct StartLoginResp {
+    pub ttl_milliseconds: Option<u64>,
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AcceptLoginReq {

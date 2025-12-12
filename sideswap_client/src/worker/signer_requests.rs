@@ -22,7 +22,9 @@ use crate::{
 };
 
 enum Request {
-    Login {},
+    Login {
+        ttl_milliseconds: Option<u64>,
+    },
     Sign {
         pset: String,
         ttl_milliseconds: Option<u64>,
@@ -82,11 +84,13 @@ fn try_send_new_request(
     let req_id = wallet_data.signer_requests.last_signer_req_id;
 
     let ui_req = match &req {
-        Request::Login {} => proto::from::signer_request::Msg::Connect(proto::Empty {}),
+        Request::Login {
+            ttl_milliseconds: _,
+        } => proto::from::signer_request::Msg::Connect(proto::Empty {}),
 
         Request::Sign {
             pset,
-            ttl_milliseconds,
+            ttl_milliseconds: _,
         } => {
             let details = wallet_data
                 .wallet_reg
@@ -122,15 +126,23 @@ fn try_send_new_request(
                     })
                     .collect(),
                 network_fee: details.balance.fee,
-                ttl_milliseconds: *ttl_milliseconds,
             })
         }
+    };
+
+    let ttl_milliseconds = match &req {
+        Request::Login { ttl_milliseconds } => *ttl_milliseconds,
+        Request::Sign {
+            pset: _,
+            ttl_milliseconds,
+        } => *ttl_milliseconds,
     };
 
     data.ui.send(proto::from::Msg::SignerRequest(
         proto::from::SignerRequest {
             req_id,
             origin,
+            ttl_milliseconds,
             msg: Some(ui_req),
         },
     ));
@@ -189,14 +201,21 @@ fn try_process_app_link(data: &mut Data, resp: &proto::to::AppLink) -> Result<()
 
     let request = match url.path() {
         "/login/" => {
-            send_request_to_upload_url(
+            let resp = send_request_to_upload_url(
                 &upload_url,
                 signer_backend_api::Req::StartLogin(signer_backend_api::StartLoginReq {
                     code: code.clone(),
                 }),
             )?;
 
-            Request::Login {}
+            if let signer_backend_api::Resp::StartLogin(signer_backend_api::StartLoginResp {
+                ttl_milliseconds,
+            }) = resp
+            {
+                Request::Login { ttl_milliseconds }
+            } else {
+                bail!("unexpected response, expected StartLogin")
+            }
         }
 
         "/sign/" => {
@@ -217,7 +236,7 @@ fn try_process_app_link(data: &mut Data, resp: &proto::to::AppLink) -> Result<()
                     ttl_milliseconds,
                 }
             } else {
-                bail!("unexpected response, expected GetPset")
+                bail!("unexpected response, expected StartSign")
             }
         }
 
@@ -301,7 +320,7 @@ pub fn ui_response(data: &mut Data, resp: proto::to::SignerResponse) {
 
     if !resp.accept {
         let req = match request {
-            Request::Login {} => {
+            Request::Login { .. } => {
                 signer_backend_api::Req::RejectLogin(signer_backend_api::RejectLoginReq {
                     code: receiver.code,
                     reason: SignerError::UserRejected.to_string(),
@@ -342,7 +361,7 @@ pub fn ui_response(data: &mut Data, resp: proto::to::SignerResponse) {
 
         Err(err) => {
             let req = match request {
-                Request::Login {} => {
+                Request::Login { .. } => {
                     signer_backend_api::Req::RejectLogin(signer_backend_api::RejectLoginReq {
                         code: receiver.code,
                         reason: err.to_string(),
@@ -367,7 +386,9 @@ fn process_accepted_signer_request(
     let wallet_data = data.wallet_data.as_mut().ok_or(SignerError::NoWalletData)?;
 
     match req {
-        Request::Login {} => {
+        Request::Login {
+            ttl_milliseconds: _,
+        } => {
             let descriptor = wallet_data
                 .wallet_reg
                 .default_account()
