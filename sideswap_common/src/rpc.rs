@@ -1,4 +1,3 @@
-use anyhow::{bail, ensure};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sideswap_types::bitcoin_amount::BtcAmount;
@@ -9,6 +8,7 @@ pub mod balances;
 pub mod get_transaction;
 pub mod get_tx_out;
 pub mod sign_raw_transaction;
+pub mod test_mempool_accept;
 pub mod wallet_process_psbt;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -255,67 +255,4 @@ impl RpcCall for SendRawTransactionCall {
             params: vec![json!(self.tx)].into(),
         }
     }
-}
-
-// Use `test_mempool_accepted` instead (to not forget to check the `allowed` value)
-struct TestMempoolAcceptedCall {
-    rawtxs: Vec<String>,
-}
-
-#[derive(Deserialize, Debug)]
-struct TestMempoolAcceptValue {
-    pub txid: String,
-    pub allowed: Option<bool>,
-    #[serde(rename = "reject-reason")]
-    pub reject_reason: Option<String>,
-}
-
-impl RpcCall for TestMempoolAcceptedCall {
-    type Response = Vec<TestMempoolAcceptValue>;
-
-    fn get_request(self) -> RpcRequest {
-        RpcRequest {
-            method: "testmempoolaccept".to_owned(),
-            params: vec![json!(self.rawtxs)].into(),
-        }
-    }
-}
-
-pub async fn test_mempool_accepted_list(
-    rpc_server: &RpcServer,
-    txs: Vec<String>,
-) -> Result<Vec<String>, anyhow::Error> {
-    let count = txs.len();
-    let check_acceptence =
-        make_rpc_call(rpc_server, TestMempoolAcceptedCall { rawtxs: txs }).await?;
-
-    ensure!(
-        check_acceptence.len() == count,
-        "invalid mempool test result"
-    );
-
-    for resp in check_acceptence.iter() {
-        if let Some(reject_reason) = &resp.reject_reason {
-            bail!(
-                "mempool test failed: '{reject_reason}', txid: {}",
-                resp.txid
-            );
-        }
-    }
-
-    let mut txids = Vec::new();
-    for resp in check_acceptence.into_iter() {
-        ensure!(resp.allowed.unwrap_or_default());
-        txids.push(resp.txid);
-    }
-
-    Ok(txids)
-}
-
-pub async fn test_mempool_accepted(
-    rpc_server: &RpcServer,
-    tx: String,
-) -> Result<String, anyhow::Error> {
-    let resp = test_mempool_accepted_list(rpc_server, vec![tx]).await?;
-    Ok(resp[0].clone())
 }
