@@ -189,7 +189,12 @@ impl TickerLoader {
         whitelisted_assets: Option<&WhitelistedAssets>,
         network: Network,
     ) -> Result<TickerLoader, anyhow::Error> {
-        let gdk_registry = GdkRegistryCache::new(network, work_dir).await;
+        let gdk_registry = GdkRegistryCache::new(
+            network,
+            work_dir,
+            crate::gdk_registry_cache::Source::Blockstream,
+        )
+        .await;
 
         let mut ticker_loader = TickerLoader::new(&gdk_registry, network);
 
