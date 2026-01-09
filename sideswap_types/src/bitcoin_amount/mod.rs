@@ -12,6 +12,12 @@ impl<'de> serde::Deserialize<'de> for BtcAmount {
     }
 }
 
+impl serde::Serialize for BtcAmount {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        bitcoin::amount::serde::as_btc::serialize(&bitcoin::amount::Amount::from_sat(self.0), s)
+    }
+}
+
 impl BtcAmount {
     pub fn to_sat(&self) -> u64 {
         self.0
