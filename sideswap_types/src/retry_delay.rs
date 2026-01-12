@@ -40,7 +40,7 @@ impl RetryDelay {
 
     pub fn next_delay(&mut self) -> Duration {
         let mut rng = rand::thread_rng();
-        let random = rng.gen_range(-self.spread..self.spread);
+        let random = rng.gen_range(-self.spread..=self.spread);
         let value = self.base * (1.0 + random);
         self.base = f64::min(self.max, value * self.multiply);
         Duration::from_secs_f64(value)
@@ -61,3 +61,6 @@ impl Default for RetryDelay {
         })
     }
 }
+
+#[cfg(test)]
+mod tests;
