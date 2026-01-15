@@ -176,7 +176,11 @@ fn try_process_app_link(data: &mut Data, resp: &proto::to::AppLink) -> Result<()
     let is_dev_env = crate::signer_server::is_dev_env(data.env);
 
     if !is_dev_env {
-        ensure!(upload_url.scheme() == "https");
+        let scheme = upload_url.scheme();
+        ensure!(
+            scheme == "https",
+            "unuspported upload link scheme: {scheme}, must be https",
+        );
 
         let upload_url_domain = upload_url
             .domain()
