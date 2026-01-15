@@ -153,8 +153,12 @@ fn try_send_new_request(
 fn try_process_app_link(data: &mut Data, resp: &proto::to::AppLink) -> Result<(), anyhow::Error> {
     let url = url::Url::parse(&resp.url)?;
 
-    anyhow::ensure!(url.scheme() == "https");
-    ensure!(url.host() == Some(url::Host::Domain("app.sideswap.io")));
+    let host = url.host().ok_or_else(|| anyhow!("no host"))?;
+    let domain = match host {
+        url::Host::Domain(domain) => domain,
+        url::Host::Ipv4(ipv4_addr) => bail!("Ipv4 domains are not supported: {ipv4_addr}"),
+        url::Host::Ipv6(ipv6_addr) => bail!("Ipv6 domains are not supported: {ipv6_addr}"),
+    };
     ensure!(url.port() == None);
 
     let params = url
@@ -199,8 +203,8 @@ fn try_process_app_link(data: &mut Data, resp: &proto::to::AppLink) -> Result<()
         .context("invalid `mobile` query parameter value")?
         .unwrap_or_default();
 
-    let request = match url.path() {
-        "/login/" => {
+    let request = match (url.scheme(), domain, url.path()) {
+        ("https", "app.sideswap.io", "/login/") | ("liquidconnect", "login", "/") => {
             let resp = send_request_to_upload_url(
                 &upload_url,
                 signer_backend_api::Req::StartLogin(signer_backend_api::StartLoginReq {
@@ -218,7 +222,7 @@ fn try_process_app_link(data: &mut Data, resp: &proto::to::AppLink) -> Result<()
             }
         }
 
-        "/sign/" => {
+        ("https", "app.sideswap.io", "/sign/") | ("liquidconnect", "sign", "/") => {
             let resp = send_request_to_upload_url(
                 &upload_url,
                 signer_backend_api::Req::StartSign(signer_backend_api::StartSignReq {
