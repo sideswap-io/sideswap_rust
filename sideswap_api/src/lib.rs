@@ -1,3 +1,4 @@
+pub mod connect_api;
 pub mod fcm_models;
 pub mod gdk;
 pub mod http_rpc;
