@@ -35,13 +35,10 @@ pub struct WebRequest {
 }
 
 impl SignerServer {
-    pub fn new(params: Params) -> Self {
+    pub fn new(runtime: &tokio::runtime::Runtime, params: Params) -> Self {
         let cancel_token = CancellationToken::new();
 
-        let cancel_token_copy = cancel_token.clone();
-        std::thread::spawn(move || {
-            run(params, cancel_token_copy);
-        });
+        runtime.spawn(run(params, cancel_token.clone()));
 
         Self { cancel_token }
     }
@@ -171,13 +168,8 @@ pub async fn try_run(params: Params, cancel_token: CancellationToken) -> Result<
     Ok(())
 }
 
-pub fn run(params: Params, cancel_token: CancellationToken) {
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("must not fail");
-
-    let res = runtime.block_on(try_run(params, cancel_token));
+pub async fn run(params: Params, cancel_token: CancellationToken) {
+    let res = try_run(params, cancel_token).await;
 
     if let Err(err) = res {
         log::error!("web server failed: {err}");

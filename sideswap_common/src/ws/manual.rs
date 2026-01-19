@@ -231,16 +231,11 @@ async fn run(
 }
 
 pub fn start(
+    runtime: &tokio::runtime::Runtime,
     resp_callback: ResponseCallback,
 ) -> (UnboundedSender<WrappedRequest>, UnboundedSender<()>) {
     let (req_sender, req_receiver) = tokio::sync::mpsc::unbounded_channel::<WrappedRequest>();
     let (hint_sender, hint_receiver) = tokio::sync::mpsc::unbounded_channel::<()>();
-    std::thread::spawn(move || {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
-        rt.block_on(run(req_receiver, resp_callback, hint_receiver));
-    });
+    runtime.spawn(run(req_receiver, resp_callback, hint_receiver));
     (req_sender, hint_sender)
 }

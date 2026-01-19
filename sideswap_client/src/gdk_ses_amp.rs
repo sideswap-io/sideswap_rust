@@ -677,6 +677,7 @@ async fn run(
 }
 
 pub fn start_processing(
+    runtime: &tokio::runtime::Runtime,
     login_info: gdk_ses::LoginInfo,
     notif_callback: NotifCallback,
 ) -> Arc<GdkSesAmp> {
@@ -687,14 +688,7 @@ pub fn start_processing(
         command_sender,
     };
 
-    std::thread::spawn(move || {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("must not fail");
-
-        runtime.block_on(run(login_info, notif_callback, command_receiver));
-    });
+    runtime.spawn(run(login_info, notif_callback, command_receiver));
 
     Arc::new(ses)
 }

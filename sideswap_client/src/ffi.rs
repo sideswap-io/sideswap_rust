@@ -137,7 +137,7 @@ pub fn sideswap_client_start_impl(
         .spawn(move || {
             worker::start_processing(env, msg_sender, msg_receiver, from_callback, start_params);
         })
-        .unwrap();
+        .expect("must not fail");
 
     let client = Box::into_raw(client) as IntPtr;
     GLOBAL_CLIENT.store(client, std::sync::atomic::Ordering::Relaxed);

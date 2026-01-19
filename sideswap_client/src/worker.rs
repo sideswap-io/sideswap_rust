@@ -262,6 +262,7 @@ impl From<&WalletAddress> for AddressPointer {
 }
 
 pub struct Data {
+    runtime: tokio::runtime::Runtime,
     policy_asset: AssetId,
     active_page: proto::ActivePage,
     app_active: bool,
@@ -1876,18 +1877,13 @@ impl Data {
             });
         }
 
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("must not fail");
-
         let event_callback = Arc::new(|_event| {});
 
-        let _enter_guard = runtime.enter();
+        let _enter_guard = self.runtime.enter();
 
         let amp_wallet = match &login {
             LoginData::Mnemonic { mnemonic } => {
-                runtime.block_on(sideswap_amp::Wallet::connect_once(
+                self.runtime.block_on(sideswap_amp::Wallet::connect_once(
                     &sideswap_amp::LoginType::Full(Arc::new(SwSigner::new(
                         self.env.d().network,
                         mnemonic,
@@ -1905,7 +1901,7 @@ impl Data {
                     jade: jade.clone(),
                 };
 
-                runtime.block_on(sideswap_amp::Wallet::connect_once(
+                self.runtime.block_on(sideswap_amp::Wallet::connect_once(
                     &sideswap_amp::LoginType::Full(Arc::new(jade_data)),
                     event_callback,
                     self.proxy(),
@@ -1913,7 +1909,7 @@ impl Data {
             }
         };
 
-        let new_address = runtime.block_on(amp_wallet.receive_address())?;
+        let new_address = self.runtime.block_on(amp_wallet.receive_address())?;
         let amp_service_xpub = new_address.service_xpub;
         let amp_user_path = new_address.user_path[0..3].to_vec();
 
@@ -1922,7 +1918,8 @@ impl Data {
             LoginData::Jade { jade } => {
                 let credentials = derive_amp_wo_login(amp_wallet.master_blinding_key());
 
-                runtime.block_on(amp_wallet.set_watch_only(credentials))?;
+                self.runtime
+                    .block_on(amp_wallet.set_watch_only(credentials))?;
 
                 let jade_data = JadeData {
                     env: self.env,
@@ -2068,7 +2065,7 @@ impl Data {
                 proxy: self.proxy().clone(),
             };
 
-            gdk_ses_amp::start_processing(info_amp, self.get_notif_callback())
+            gdk_ses_amp::start_processing(&self.runtime, info_amp, self.get_notif_callback())
         };
 
         let nested_account_path = self.env.nd().account_path_sh_wpkh;
@@ -2170,11 +2167,14 @@ impl Data {
             master_blinding_key,
         };
 
-        let web_server = signer_server::SignerServer::new(signer_server::Params {
-            env: self.env,
-            msg_sender: self.msg_sender.clone(),
-            whitelisted_domains: self.settings.get_signer_whitelisted_domains(self.env),
-        });
+        let web_server = signer_server::SignerServer::new(
+            &self.runtime,
+            signer_server::Params {
+                env: self.env,
+                msg_sender: self.msg_sender.clone(),
+                whitelisted_domains: self.settings.get_signer_whitelisted_domains(self.env),
+            },
+        );
 
         self.wallet_data = Some(WalletData {
             xpubs,
@@ -2285,7 +2285,8 @@ impl Data {
         drop(wallet_amp);
 
         let wallet_reg = gdk_ses_rust::start_processing(login_info_reg, self.get_notif_callback());
-        let wallet_amp = gdk_ses_amp::start_processing(login_info_amp, self.get_notif_callback());
+        let wallet_amp =
+            gdk_ses_amp::start_processing(&self.runtime, login_info_amp, self.get_notif_callback());
 
         self.wallet_data = Some(WalletData {
             xpubs,
@@ -2482,11 +2483,14 @@ impl Data {
 
     fn recreate_signer(&mut self) {
         if let Some(wallet) = self.wallet_data.as_mut() {
-            wallet.web_server = signer_server::SignerServer::new(signer_server::Params {
-                env: self.env,
-                msg_sender: self.msg_sender.clone(),
-                whitelisted_domains: self.settings.get_signer_whitelisted_domains(self.env),
-            });
+            wallet.web_server = signer_server::SignerServer::new(
+                &self.runtime,
+                signer_server::Params {
+                    env: self.env,
+                    msg_sender: self.msg_sender.clone(),
+                    whitelisted_domains: self.settings.get_signer_whitelisted_domains(self.env),
+                },
+            );
         }
     }
 
@@ -3859,6 +3863,12 @@ pub fn start_processing(
     };
     ui.send(proto::from::Msg::EnvSettings(env_settings));
 
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(4)
+        .enable_all()
+        .build()
+        .expect("must not fail");
+
     let (resp_sender, resp_receiver) = mpsc::channel::<ServerResp>();
     let msg_sender_copy = msg_sender.clone();
     let ws_resp_callback = Box::new(move |resp| {
@@ -3879,7 +3889,7 @@ pub fn start_processing(
             }
         }
     });
-    let (ws_sender, ws_hint) = ws::start(ws_resp_callback);
+    let (ws_sender, ws_hint) = ws::start(&runtime, ws_resp_callback);
 
     let ui_copy = ui.clone();
     let jade_status_callback: JadeStatusCallback =
@@ -3929,6 +3939,7 @@ pub fn start_processing(
     let market = market_worker::new();
 
     let mut data = Data {
+        runtime,
         app_active: true,
         active_page: proto::ActivePage::Other,
         amp_connected: false,
