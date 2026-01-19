@@ -5,11 +5,11 @@ use serde::Deserialize;
 use sideswap_types::{chain::Chain, normal_float::NormalFloat};
 use tokio::{
     net::{TcpListener, TcpStream},
-    sync::mpsc::{unbounded_channel, UnboundedReceiver},
+    sync::mpsc::{UnboundedReceiver, unbounded_channel},
 };
-use tokio_tungstenite::{tungstenite::Message, WebSocketStream};
+use tokio_tungstenite::{WebSocketStream, tungstenite::Message};
 
-use super::{api, controller::Controller, ClientEvent, ClientId, Error, StartQuotesResp};
+use super::{ClientEvent, ClientId, Error, StartQuotesResp, api, controller::Controller};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
@@ -41,7 +41,7 @@ async fn send_notif(data: &mut Data, notif: api::Notif) {
 async fn process_ws_req(data: &mut Data, req: api::Req) -> Result<api::Resp, Error> {
     match req {
         api::Req::NewAddress(api::NewAddressReq {}) => {
-            let address = data.controller.new_address(Chain::External).await?;
+            let address = data.controller.new_address(Chain::External, false).await?;
             Ok(api::Resp::NewAddress(api::NewAddressResp { address }))
         }
 

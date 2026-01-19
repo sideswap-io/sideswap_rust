@@ -409,6 +409,7 @@ enum ClientCommand {
     },
     NewAddress {
         chain: Chain,
+        allow_cache: bool,
         res_sender: UncheckedOneshotSender<Result<Address, anyhow::Error>>,
     },
     Balances {
@@ -569,6 +570,8 @@ struct Data {
     received_quotes: BTreeMap<QuoteId, ReceivedQuote>,
 
     accepting_quotes: BTreeMap<QuoteId, AcceptingQuote>,
+
+    addr_cache: BTreeMap<Chain, Address>,
 }
 
 impl From<tokio::sync::oneshot::error::RecvError> for Error {
@@ -1180,6 +1183,11 @@ fn process_market_notif(data: &mut Data, notif: Notification) {
         Notification::NewEvent(_) => {}
 
         Notification::TxBroadcast(notif) => {
+            let res = invalidate_addr_cache(data, &notif.tx);
+            if let Err(err) = res {
+                log::error!("invalidate_addr_cache failed: {err}");
+            }
+
             data.event_sender.send(Event::BroadcastTx { tx: notif.tx });
         }
     }
@@ -1478,14 +1486,33 @@ fn signed_accepted_quote(
 async fn new_address(
     event_sender: &UncheckedUnboundedSender<Event>,
     chain: Chain,
+    addr_cache: &mut BTreeMap<Chain, Address>,
+    allow_cache: bool,
 ) -> Result<Address, Error> {
+    if allow_cache {
+        if let Some(address) = addr_cache.get(&chain) {
+            return Ok(address.clone());
+        }
+    }
     let (res_sender, res_receiver) = oneshot::channel();
     event_sender.send(Event::NewAddress {
         chain,
         res_sender: res_sender.into(),
     });
     let address = res_receiver.await?.map_err(Error::Wallet)?;
+    addr_cache.insert(chain, address.clone());
     Ok(address)
+}
+
+fn invalidate_addr_cache(data: &mut Data, tx: &str) -> Result<(), anyhow::Error> {
+    let tx = hex::decode(&tx)?;
+    let tx = elements::encode::deserialize::<elements::Transaction>(&tx)?;
+    data.addr_cache.retain(|_chain, addr| {
+        tx.output
+            .iter()
+            .all(|output| output.script_pubkey != addr.script_pubkey())
+    });
+    Ok(())
 }
 
 fn get_own_order(data: &Data, order_id: OrdId) -> Result<OwnOrder, Error> {
@@ -1564,9 +1591,15 @@ async fn process_client_command(data: &mut Data, command: ClientCommand) {
             res_sender.send(res);
         }
 
-        ClientCommand::NewAddress { chain, res_sender } => {
-            data.event_sender
-                .send(Event::NewAddress { chain, res_sender });
+        ClientCommand::NewAddress {
+            chain,
+            allow_cache,
+            res_sender,
+        } => {
+            let res = new_address(&data.event_sender, chain, &mut data.addr_cache, allow_cache)
+                .await
+                .map_err(Into::into);
+            res_sender.send(res);
         }
 
         ClientCommand::Balances { res_sender } => {
@@ -2026,10 +2059,22 @@ async fn try_sync_market(data: &mut Data, key: &OrderGroupKey) -> Result<(), any
 
             resp.address
         } else {
-            new_address(&data.event_sender, Chain::External).await?
+            new_address(
+                &data.event_sender,
+                Chain::External,
+                &mut data.addr_cache,
+                true,
+            )
+            .await?
         };
 
-        let change_address = new_address(&data.event_sender, Chain::Internal).await?;
+        let change_address = new_address(
+            &data.event_sender,
+            Chain::Internal,
+            &mut data.addr_cache,
+            true,
+        )
+        .await?;
 
         let resp = make_market_request!(
             data.ws,
@@ -2145,6 +2190,7 @@ async fn run(
         started_quote: None,
         received_quotes: BTreeMap::new(),
         accepting_quotes: BTreeMap::new(),
+        addr_cache: BTreeMap::new(),
     };
 
     let mut interval = tokio::time::interval(Duration::from_secs(1));

@@ -1335,6 +1335,12 @@ async fn process_command(data: &mut Data, command: Command) -> Result<(), Error>
                             .collect();
                         assert_eq!(derived_address.prevout_script, resp.script);
 
+                        log::debug!(
+                            "new address {addr}, pointer: {pointer}",
+                            addr = derived_address.address,
+                            pointer = resp.pointer
+                        );
+
                         Ok(AddressInfo {
                             address: derived_address.address,
                             pointer: resp.pointer,

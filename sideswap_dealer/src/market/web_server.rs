@@ -51,7 +51,7 @@ impl Api {
     async fn new_address(&self) -> Result<PlainText<String>, ErrorResponse> {
         let resp = self
             .controller
-            .new_address(Chain::External)
+            .new_address(Chain::External, false)
             .await?
             .to_string();
         Ok(PlainText(resp))

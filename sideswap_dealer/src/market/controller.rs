@@ -169,10 +169,11 @@ impl Controller {
         Ok(resp)
     }
 
-    pub async fn new_address(&self, chain: Chain) -> Result<Address, Error> {
+    pub async fn new_address(&self, chain: Chain, allow_cache: bool) -> Result<Address, Error> {
         let (res_sender, res_receiver) = oneshot::channel();
         self.make_request(ClientCommand::NewAddress {
             chain,
+            allow_cache,
             res_sender: res_sender.into(),
         })?;
         let address = res_receiver.await?.map_err(Error::Wallet)?;
@@ -187,7 +188,7 @@ impl Controller {
             let gaid = self.get_gaid().await?;
             self.resolve_gaid(recv_asset_id, gaid).await?
         } else {
-            self.new_address(Chain::External).await?
+            self.new_address(Chain::External, true).await?
         };
         Ok(receive_address)
     }
@@ -211,7 +212,7 @@ impl Controller {
         let recv_asset_id = self.ticker_loader.asset_id(recv_asset);
 
         let receive_address = self.resolve_recv_address(*recv_asset_id).await?;
-        let change_address = self.new_address(Chain::Internal).await?;
+        let change_address = self.new_address(Chain::Internal, true).await?;
 
         let ttl = ttl
             .map(Duration::try_from_secs_f64)
@@ -347,7 +348,7 @@ impl Controller {
         let receive_asset_id = asset_pair.asset(recv_asset);
 
         let receive_address = self.resolve_recv_address(receive_asset_id).await?;
-        let change_address = self.new_address(Chain::Internal).await?;
+        let change_address = self.new_address(Chain::Internal, true).await?;
 
         let asset = exchange_pair.asset(asset_type);
         let asset_precision = self.ticker_loader.precision(asset);

@@ -32,6 +32,8 @@ pub struct Data {
 
 impl Data {
     pub fn new(env: Env, markets: price_stream::Markets, ticker_loader: Arc<TickerLoader>) -> Data {
+        log::debug!("start price streams: {markets:?}");
+
         let (msg_sender, msg_receiver) = unbounded_channel::<Msg>();
 
         for market in markets.iter() {
