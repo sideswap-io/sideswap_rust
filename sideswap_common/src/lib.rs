@@ -32,6 +32,7 @@ pub mod utxo_select;
 pub mod wallet_id;
 pub mod web_notif;
 pub mod ws;
+pub mod ws_client;
 
 #[cfg(test)]
 pub mod test_utils;
