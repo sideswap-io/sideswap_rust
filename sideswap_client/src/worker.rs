@@ -37,7 +37,6 @@ use sideswap_amp::sw_signer::SwSigner;
 use sideswap_api::mkt::AssetPair;
 use sideswap_common::cipher::derive_key;
 use sideswap_common::event_proofs::EventProofs;
-use sideswap_common::pin;
 use sideswap_common::pset_blind::get_blinding_nonces;
 use sideswap_common::recipient::Recipient;
 use sideswap_common::send_tx::pset::{
@@ -47,6 +46,7 @@ use sideswap_common::target_os::TargetOs;
 use sideswap_common::types::{self, Amount, peg_out_amount};
 use sideswap_common::utxo_select::{self, WalletType};
 use sideswap_common::ws::next_request_id;
+use sideswap_common::{pin, ws_client};
 use sideswap_jade::jade_mng::{self, JadeStatus, JadeStatusCallback, ManagedJade};
 use sideswap_types::asset_precision::AssetPrecision;
 use sideswap_types::env::Env;
@@ -126,6 +126,7 @@ mod assets_registry;
 mod market_worker;
 mod signer_requests;
 mod wallet;
+mod wallet_connect;
 
 const CLIENT_API_KEY: &str = "f8b7a12ee96aa68ee2b12ebfc51d804a4a404c9732652c298d24099a3d922a84";
 
@@ -225,6 +226,7 @@ pub struct WalletData {
     watching_txid: Option<elements::Txid>,
     web_server: signer_server::SignerServer,
     signer_requests: signer_requests::SignerRequests,
+    wallet_connect: wallet_connect::WalletConnect,
 }
 
 #[derive(Clone)]
@@ -302,6 +304,7 @@ pub enum Message {
     WalletNotif(Account, WalletNotif),
     BackgroundMessage(String, mpsc::Sender<()>),
     SignerRequest(WebRequest),
+    WalletConnect(ws_client::Event),
     Quit,
 }
 
@@ -2176,6 +2179,8 @@ impl Data {
             },
         );
 
+        let wallet_connect = wallet_connect::new(self, wallet_reg.default_account().descriptor());
+
         self.wallet_data = Some(WalletData {
             xpubs,
             wallet_reg,
@@ -2196,6 +2201,7 @@ impl Data {
             watching_txid: None,
             web_server,
             signer_requests: signer_requests::SignerRequests::new(),
+            wallet_connect,
         });
 
         if self.skip_wallet_sync() {
@@ -2270,6 +2276,7 @@ impl Data {
             watching_txid,
             web_server,
             signer_requests,
+            wallet_connect,
         } = wallet_data;
 
         let mut login_info_reg = wallet_reg.login_info().clone();
@@ -2308,6 +2315,7 @@ impl Data {
             watching_txid,
             web_server,
             signer_requests,
+            wallet_connect,
         });
     }
 
@@ -2445,6 +2453,7 @@ impl Data {
             wallet_data.wallet_reg.set_app_state(req.active);
             wallet_data.wallet_amp.set_app_state(req.active);
         }
+        wallet_connect::handle_app_state(self);
     }
 
     fn subscribe_active_page(&mut self, subscribe: bool) {
@@ -3986,6 +3995,7 @@ pub fn start_processing(
             Message::WalletNotif(account_id, msg) => data.process_wallet_notif(account_id, msg),
             Message::BackgroundMessage(msg, sender) => data.process_background_message(msg, sender),
             Message::SignerRequest(req) => signer_requests::new_web_request(&mut data, req),
+            Message::WalletConnect(event) => wallet_connect::handle_msg(&mut data, event),
             Message::Quit => {
                 warn!("quit message received, exit");
                 break;

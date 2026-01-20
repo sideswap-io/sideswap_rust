@@ -1,3 +1,4 @@
+use elements::{schnorr::XOnlyPublicKey, secp256k1_zkp::schnorr::Signature};
 use serde::{Deserialize, Serialize};
 
 // Common
@@ -13,6 +14,15 @@ pub struct ChallengeReq {}
 pub struct ChallengeResp {
     pub challenge: String,
 }
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct LoginReq {
+    pub public_key: XOnlyPublicKey,
+    pub signature: Signature,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct LoginResp {}
 
 // Notifications
 
@@ -41,11 +51,13 @@ pub struct Error {
 #[derive(Serialize, Deserialize)]
 pub enum Req {
     Challenge(ChallengeReq),
+    Login(LoginReq),
 }
 
 #[derive(Serialize, Deserialize)]
 pub enum Resp {
     Challenge(ChallengeResp),
+    Login(LoginResp),
 }
 
 #[derive(Serialize, Deserialize)]

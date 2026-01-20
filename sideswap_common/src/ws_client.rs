@@ -11,11 +11,13 @@ use tokio::{
 use tokio_tungstenite::tungstenite::Message;
 use tungstenite::Utf8Bytes;
 
+#[derive(Debug)]
 pub enum Command {
     ConnectAck,
     Send { data: Utf8Bytes },
 }
 
+#[derive(Debug)]
 pub enum Event {
     Connected,
     Recv { data: Utf8Bytes },
@@ -44,7 +46,7 @@ struct ConnData {
 }
 
 impl WsClient {
-    pub fn new(url: String, runtime: &tokio::runtime::Runtime, event_cb: EventCb) -> Self {
+    pub fn new(url: String, runtime: &tokio::runtime::Handle, event_cb: EventCb) -> Self {
         let (command_sender, command_receiver) = mpsc::unbounded_channel::<Command>();
         let (app_active_sender, app_active_receiver) = watch::channel(true);
 
