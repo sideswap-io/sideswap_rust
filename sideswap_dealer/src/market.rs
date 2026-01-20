@@ -7,6 +7,7 @@ use std::{
     time::Duration,
 };
 
+use anyhow::{Context, anyhow, ensure};
 use controller::Controller;
 use elements::{
     Address, AssetId, OutPoint, Txid,
@@ -817,17 +818,52 @@ fn process_ws_disconnected(data: &mut Data) {
     }
 }
 
-fn process_sign_notif(data: &mut Data, notif: mkt::MakerSignNotif) {
-    let pset = b64::decode(&notif.pset).expect("invalid base64 pset");
-    let pset =
-        elements::encode::deserialize::<PartiallySignedTransaction>(&pset).expect("invalid pset");
+fn verify_sign_request(
+    data: &mut Data,
+    notif: mkt::MakerSignNotif,
+) -> Result<PartiallySignedTransaction, anyhow::Error> {
+    let pset = b64::decode(&notif.pset).context("invalid base64 pset")?;
+    let pset = elements::encode::deserialize::<PartiallySignedTransaction>(&pset)
+        .context("invalid pset")?;
+
+    ensure!(!notif.orders.is_empty(), "empty orders list");
+    let mut found_orders = BTreeMap::new();
+    for order_info in notif.orders.iter() {
+        let order_id = order_info.order_id;
+        let own_order = data
+            .orders
+            .values()
+            .find_map(|list| list.server_orders.get(&order_info.order_id))
+            .ok_or_else(|| anyhow!("order not found, order_id: {order_id}"))?;
+        let old_value = found_orders.insert(order_id, own_order);
+        ensure!(
+            old_value.is_none(),
+            "duplicate order found, order_id: {order_id}"
+        );
+    }
+
+    let is_sell = found_orders
+        .values()
+        .any(|order| order.trade_dir == TradeDir::Sell);
+    let is_buy = found_orders
+        .values()
+        .any(|order| order.trade_dir == TradeDir::Buy);
+    assert!(is_sell || is_buy);
+
+    ensure!(!is_sell || !is_buy, "self-trade is not allowed");
 
     // FIXME: Verify PSET amounts
 
-    data.event_sender.send(Event::SignSwap {
-        quote_id: notif.quote_id,
-        pset,
-    });
+    Ok(pset)
+}
+
+fn process_sign_notif(data: &mut Data, notif: mkt::MakerSignNotif) {
+    let quote_id = notif.quote_id;
+    let res = verify_sign_request(data, notif);
+    match res {
+        Ok(pset) => data.event_sender.send(Event::SignSwap { quote_id, pset }),
+        Err(err) => log::error!("PSET sign verify failed: {err}, quote_id: {quote_id:?}"),
+    };
 }
 
 struct GetQuoteAmounts {
@@ -1985,7 +2021,7 @@ async fn try_sync_market(data: &mut Data, key: &OrderGroupKey) -> Result<(), any
     let market = data
         .orders
         .get_mut(key)
-        .ok_or_else(|| anyhow::anyhow!("can't find group {key:?}"))?;
+        .ok_or_else(|| anyhow!("can't find group {key:?}"))?;
 
     // Drop removed orders
     while market.server_orders.len() > market.dealer_orders.len() {
@@ -2043,10 +2079,7 @@ async fn try_sync_market(data: &mut Data, key: &OrderGroupKey) -> Result<(), any
         };
 
         let receive_address = if data.amp_assets.contains(&recv_asset) {
-            let gaid = data
-                .gaid
-                .as_ref()
-                .ok_or_else(|| anyhow::anyhow!("no gaid"))?;
+            let gaid = data.gaid.as_ref().ok_or_else(|| anyhow!("no gaid"))?;
 
             let resp = make_market_request!(
                 data.ws,
