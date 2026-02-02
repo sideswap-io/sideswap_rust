@@ -15,9 +15,14 @@ pub async fn get_price(
     let symbol = match (exchange_pair.base, exchange_pair.quote) {
         (DealerTicker::LBTC, DealerTicker::USDT) => "BTCUSDT",
         (DealerTicker::LBTC, DealerTicker::EURX) => "BTCEUR",
-        (DealerTicker::EURX, DealerTicker::USDT) => "EURUSDT",
         (DealerTicker::LBTC, DealerTicker::MEX) => "BTCMXN",
+        (DealerTicker::LBTC, DealerTicker::DEPIX) => "BTCBRL",
+
         (DealerTicker::USDT, DealerTicker::MEX) => "USDTMXN",
+        (DealerTicker::USDT, DealerTicker::DEPIX) => "USDTBRL",
+
+        (DealerTicker::EURX, DealerTicker::USDT) => "EURUSDT",
+
         _ => panic!("unsupported exchange_pair: {exchange_pair:?}"),
     };
 
