@@ -20,7 +20,7 @@ pub enum Command {
 #[derive(Debug)]
 pub enum Event {
     Connected,
-    Recv { data: Utf8Bytes },
+    Recv { text: Utf8Bytes },
     Disconnected,
 }
 
@@ -119,7 +119,7 @@ fn handle_recv_msg(
 
     match msg {
         Message::Text(text) => {
-            (data.event_cb)(Event::Recv { data: text });
+            (data.event_cb)(Event::Recv { text });
             Ok(())
         }
         Message::Binary(_bytes) => Err(anyhow!("unexpected binary message received")),

@@ -50,7 +50,6 @@ pub enum SubscribedValueType {
     PegOutMinAmount,
     PegOutWalletBalance,
     PegOutNextBlockFeeRate,
-    SignerWhitelistedDomains,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -82,13 +81,6 @@ pub enum SubscribedValue {
         /// The fee rate threshold for the peg-out payments (the tenth percentile of all transaction fee rates from the current block candidate).
         /// A peg-out payment is made when the selected fee rate exceeds than this threshold.
         fee_rate: FeeRateSats,
-    },
-
-    SignerWhitelistedDomains {
-        /// On desktop builds used as allowed CORS for the external signer server.
-        /// On mobile builds used as allowed signer upload links.
-        /// Example: ["sideswap.io", "testnet.sideswap.io"].
-        domains: Vec<String>,
     },
 }
 

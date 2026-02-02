@@ -15,12 +15,11 @@ use crate::gdk_ses_amp::{GdkSesAmp, derive_amp_wo_login};
 use crate::gdk_ses_rust::{self, GdkSesRust};
 use crate::models::AddressType;
 use crate::settings::WatchOnly;
-use crate::signer_server::WebRequest;
 use crate::utils::{
     self, TxSize, convert_tx, derive_amp_address, derive_native_address, derive_nested_address,
     get_jade_network, get_peg_item, get_tx_size, redact_from_msg, redact_to_msg,
 };
-use crate::{gdk_ses_amp, models, settings, signer_server};
+use crate::{gdk_ses_amp, models, settings};
 
 use anyhow::{anyhow, bail, ensure};
 use bitcoin::bip32;
@@ -124,7 +123,6 @@ macro_rules! send_market_request {
 
 mod assets_registry;
 mod market_worker;
-mod signer_requests;
 mod wallet;
 mod wallet_connect;
 
@@ -202,8 +200,6 @@ struct CreatedTx {
     tx_secrets: Vec<TxOutSecrets>,
 }
 
-type SignerReqId = u32;
-
 pub struct WalletData {
     xpubs: XPubInfo,
     wallet_reg: Arc<GdkSesRust>,
@@ -224,8 +220,6 @@ pub struct WalletData {
     peg_out_server_amounts: Option<LastPegOutAmount>,
     last_recv_address: Option<models::AddressInfo>,
     watching_txid: Option<elements::Txid>,
-    web_server: signer_server::SignerServer,
-    signer_requests: signer_requests::SignerRequests,
     wallet_connect: wallet_connect::WalletConnect,
 }
 
@@ -303,7 +297,6 @@ pub enum Message {
     WalletEvent(Account, wallet::Event),
     WalletNotif(Account, WalletNotif),
     BackgroundMessage(String, mpsc::Sender<()>),
-    SignerRequest(WebRequest),
     WalletConnect(ws_client::Event),
     Quit,
 }
@@ -795,10 +788,6 @@ impl Data {
 
         // self.process_pending_requests();
         market_worker::ws_connected(self);
-
-        self.send_request_msg(api::Request::SubscribeValue(api::SubscribeValueRequest {
-            value: api::SubscribedValueType::SignerWhitelistedDomains,
-        }));
 
         self.ui
             .send(proto::from::Msg::ServerConnected(proto::Empty {}));
@@ -2170,15 +2159,6 @@ impl Data {
             master_blinding_key,
         };
 
-        let web_server = signer_server::SignerServer::new(
-            &self.runtime,
-            signer_server::Params {
-                env: self.env,
-                msg_sender: self.msg_sender.clone(),
-                whitelisted_domains: self.settings.get_signer_whitelisted_domains(self.env),
-            },
-        );
-
         let wallet_connect = wallet_connect::new(self, wallet_reg.default_account().descriptor());
 
         self.wallet_data = Some(WalletData {
@@ -2199,8 +2179,6 @@ impl Data {
             peg_out_server_amounts: None,
             last_recv_address: None,
             watching_txid: None,
-            web_server,
-            signer_requests: signer_requests::SignerRequests::new(),
             wallet_connect,
         });
 
@@ -2274,8 +2252,6 @@ impl Data {
             peg_out_server_amounts,
             last_recv_address,
             watching_txid,
-            web_server,
-            signer_requests,
             wallet_connect,
         } = wallet_data;
 
@@ -2313,8 +2289,6 @@ impl Data {
             peg_out_server_amounts,
             last_recv_address,
             watching_txid,
-            web_server,
-            signer_requests,
             wallet_connect,
         });
     }
@@ -2490,19 +2464,6 @@ impl Data {
         }
     }
 
-    fn recreate_signer(&mut self) {
-        if let Some(wallet) = self.wallet_data.as_mut() {
-            wallet.web_server = signer_server::SignerServer::new(
-                &self.runtime,
-                signer_server::Params {
-                    env: self.env,
-                    msg_sender: self.msg_sender.clone(),
-                    whitelisted_domains: self.settings.get_signer_whitelisted_domains(self.env),
-                },
-            );
-        }
-    }
-
     fn process_subscribed_value(&mut self, notif: api::SubscribedValueNotification) {
         let msg = match notif.value {
             api::SubscribedValue::PegInMinAmount { min_amount } => {
@@ -2519,14 +2480,6 @@ impl Data {
             }
             api::SubscribedValue::PegOutNextBlockFeeRate { fee_rate } => {
                 proto::from::subscribed_value::Result::PegOutNextBlockFeeRate(fee_rate.raw())
-            }
-            api::SubscribedValue::SignerWhitelistedDomains { domains } => {
-                if self.settings.get_signer_whitelisted_domains(self.env) != domains {
-                    self.settings.set_signer_whitelisted_domains(domains);
-                    self.recreate_signer();
-                    self.save_settings();
-                }
-                return;
             }
         };
 
@@ -3128,8 +3081,8 @@ impl Data {
             proto::to::Msg::ChartsSubscribe(msg) => market_worker::charts_subscribe(self, msg),
             proto::to::Msg::ChartsUnsubscribe(msg) => market_worker::charts_unsubscribe(self, msg),
             proto::to::Msg::LoadHistory(msg) => market_worker::load_history(self, msg),
-            proto::to::Msg::SignerResponse(resp) => signer_requests::ui_response(self, resp),
-            proto::to::Msg::AppLink(resp) => signer_requests::new_app_link(self, resp),
+            proto::to::Msg::SignerResponse(resp) => wallet_connect::ui_response(self, resp),
+            proto::to::Msg::AppLink(resp) => wallet_connect::new_app_link(self, resp),
         }
     }
 
@@ -3994,7 +3947,6 @@ pub fn start_processing(
             Message::WalletEvent(account_id, event) => data.process_wallet_event(account_id, event),
             Message::WalletNotif(account_id, msg) => data.process_wallet_notif(account_id, msg),
             Message::BackgroundMessage(msg, sender) => data.process_background_message(msg, sender),
-            Message::SignerRequest(req) => signer_requests::new_web_request(&mut data, req),
             Message::WalletConnect(event) => wallet_connect::handle_msg(&mut data, event),
             Message::Quit => {
                 warn!("quit message received, exit");

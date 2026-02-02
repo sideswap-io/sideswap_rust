@@ -771,6 +771,7 @@ async fn try_login(data: &mut Data) -> Result<mkt::LoginResponse, anyhow::Error>
 }
 
 async fn process_ws_connected(data: &mut Data) {
+    // FIXME: This should not crash
     let mkt::LoginResponse {
         orders,
         utxos,

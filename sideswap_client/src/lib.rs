@@ -4,7 +4,6 @@ mod gdk_ses_amp;
 mod gdk_ses_rust;
 mod models;
 mod settings;
-mod signer_server;
 mod utils;
 pub mod worker;
 

@@ -4,7 +4,7 @@ use bitcoin::bip32::{self, Fingerprint};
 use elements_miniscript::slip77::MasterBlindingKey;
 use serde::{Deserialize, Serialize};
 use sideswap_api::{OrderId, SessionId};
-use sideswap_types::{env::Env, str_encoded::StrEncoded};
+use sideswap_types::str_encoded::StrEncoded;
 
 use crate::models;
 
@@ -98,31 +98,6 @@ pub struct Settings {
 
     #[serde(default)]
     pub tx_secrets: BTreeMap<elements::Txid, Vec<elements::TxOutSecrets>>,
-
-    signer_whitelisted_domains: Option<Vec<String>>,
-}
-
-impl Settings {
-    pub fn get_signer_whitelisted_domains(&self, env: Env) -> Vec<String> {
-        self.signer_whitelisted_domains
-            .clone()
-            .unwrap_or_else(|| match env {
-                Env::Prod | Env::LocalLiquid => {
-                    vec!["sideswap.io".to_owned(), "swaption.io".to_owned()]
-                }
-                Env::Testnet | Env::LocalTestnet => {
-                    vec![
-                        "testnet.sideswap.io".to_owned(),
-                        "testnet.swaption.io".to_owned(),
-                    ]
-                }
-                Env::LocalRegtest => vec![],
-            })
-    }
-
-    pub fn set_signer_whitelisted_domains(&mut self, values: Vec<String>) {
-        self.signer_whitelisted_domains = Some(values);
-    }
 }
 
 const SETTINGS_NAME: &str = "settings.json";
