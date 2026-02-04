@@ -31,12 +31,14 @@ fn try_register_desktop_entry() -> Result<(), anyhow::Error> {
         std::fs::write(&icon_path, ICON_BYTES).context("failed to write icon")?;
     }
 
+    let escaped_exec_path = exec_path.replace(' ', "\\ ");
+
     // 5. Construct Desktop File
     let desktop_content = format!(
         "[Desktop Entry]\n\
         Name=SideSwap\n\
         Comment=Privacy-focused Liquid Network Wallet\n\
-        Exec=\"{exec_path}\" %u\n\
+        Exec={escaped_exec_path} %u\n\
         Icon=sideswap\n\
         Type=Application\n\
         Terminal=false\n\
