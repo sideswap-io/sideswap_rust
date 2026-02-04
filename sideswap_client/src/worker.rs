@@ -123,6 +123,7 @@ macro_rules! send_market_request {
 
 mod assets_registry;
 mod market_worker;
+mod register_app_image;
 mod wallet;
 mod wallet_connect;
 
@@ -3937,6 +3938,9 @@ pub fn start_processing(
 
     data.load_default_assets();
     data.process_proxy_settings(Default::default());
+
+    #[cfg(target_os = "linux")]
+    register_app_image::register_desktop_entry();
 
     while let Some(msg) = recv_message(&mut data, &msg_receiver) {
         let started = std::time::Instant::now();
