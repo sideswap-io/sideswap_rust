@@ -230,6 +230,11 @@ message HistoryOrder {
   optional string txid = 9;
 }
 
+message Session {
+  required string session_id = 1;
+  required string domain = 2;
+}
+
 message To {
   message Login {
     oneof wallet {
@@ -391,6 +396,10 @@ message To {
     required string url = 1;
   }
 
+  message StopSession {
+    required string session_id = 1;
+  }
+
   oneof msg {
     Login login = 1;
     Empty logout = 2;
@@ -448,6 +457,8 @@ message To {
     LoadHistory load_history = 130;
 
     SignerResponse signer_response = 140;
+
+    StopSession stop_session = 150;
   }
 }
 
@@ -855,6 +866,18 @@ message From {
     required string req_id = 1;
   }
 
+  message SessionList {
+    repeated Session sessions = 1;
+  }
+
+  message SessionAdded {
+    required Session session = 1;
+  }
+
+  message SessionRemoved {
+    required string session_id = 1;
+  }
+
   oneof msg {
     Login login = 17;
     Empty logout = 16;
@@ -943,6 +966,10 @@ message From {
     SignerRequest signer_request = 170;
     SignerCancel signer_cancel = 172;
     Empty signer_return = 171;
+
+    SessionList session_list = 180;
+    SessionAdded session_added = 181;
+    SessionRemoved session_removed = 182;
   }
 }
 

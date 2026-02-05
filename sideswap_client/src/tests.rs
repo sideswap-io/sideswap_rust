@@ -150,7 +150,10 @@ impl Data {
             | proto::from::Msg::NewTx(_)
             | proto::from::Msg::SignerRequest(_)
             | proto::from::Msg::SignerCancel(_)
-            | proto::from::Msg::SignerReturn(_) => {}
+            | proto::from::Msg::SignerReturn(_)
+            | proto::from::Msg::SessionList(_)
+            | proto::from::Msg::SessionAdded(_)
+            | proto::from::Msg::SessionRemoved(_) => {}
         }
 
         msg

@@ -3084,6 +3084,7 @@ impl Data {
             proto::to::Msg::LoadHistory(msg) => market_worker::load_history(self, msg),
             proto::to::Msg::SignerResponse(resp) => wallet_connect::ui_response(self, resp),
             proto::to::Msg::AppLink(resp) => wallet_connect::new_app_link(self, resp),
+            proto::to::Msg::StopSession(resp) => wallet_connect::stop_session(self, resp),
         }
     }
 

@@ -39,8 +39,6 @@ pub struct WalletConnect {
     /// Map ui id to request_id
     pending_sign_request_ids: BTreeSet<String>,
 
-    sessions: BTreeMap<String, connect_api::Session>,
-
     login_requests: BTreeMap<String, connect_api::LoginRequest>,
 
     sign_requests: BTreeMap<String, connect_api::SignRequest>,
@@ -92,11 +90,19 @@ pub fn new(data: &mut Data, descriptor: &WolletDescriptor) -> WalletConnect {
         client,
         pending_login_request_ids: BTreeSet::new(),
         pending_sign_request_ids: BTreeSet::new(),
-        sessions: BTreeMap::new(),
         login_requests: BTreeMap::new(),
         sign_requests: BTreeMap::new(),
         user_actions: BTreeMap::new(),
         mobile_requests: BTreeSet::new(),
+    }
+}
+
+impl From<connect_api::Session> for proto::Session {
+    fn from(value: connect_api::Session) -> Self {
+        proto::Session {
+            session_id: value.session_id,
+            domain: value.domain,
+        }
     }
 }
 
@@ -130,29 +136,6 @@ fn add_user_action(data: &mut Data, action: connect_api::UserAction) {
             connect_api::Req::UserAction(connect_api::UserActionReq { action }),
         );
     }
-}
-
-fn add_session(data: &mut Data, session: connect_api::Session) {
-    let wallet_data = match data.wallet_data.as_mut() {
-        Some(wallet_data) => wallet_data,
-        None => return,
-    };
-
-    let session_id = session.session_id.clone();
-
-    wallet_data
-        .wallet_connect
-        .sessions
-        .insert(session_id.clone(), session);
-}
-
-fn remove_session(data: &mut Data, session_id: &String) {
-    let wallet_data = match data.wallet_data.as_mut() {
-        Some(wallet_data) => wallet_data,
-        None => return,
-    };
-
-    wallet_data.wallet_connect.sessions.remove(session_id);
 }
 
 fn get_signer_request_details(
@@ -395,29 +378,14 @@ pub fn handle_msg(data: &mut Data, event: ws_client::Event) {
                                 );
                             }
 
-                            let old_session_ids = wallet
-                                .wallet_connect
-                                .sessions
-                                .keys()
-                                .cloned()
-                                .collect::<BTreeSet<_>>();
-
-                            let new_session_ids = sessions
-                                .iter()
-                                .map(|req| req.session_id.clone())
-                                .collect::<BTreeSet<_>>();
-
-                            for session_id in old_session_ids.difference(&new_session_ids) {
-                                remove_session(data, session_id);
-                            }
-
-                            for session in sessions {
-                                add_session(data, session);
-                            }
-
                             for sign_request in sign_requests {
                                 add_sign_request(data, sign_request);
                             }
+
+                            data.ui
+                                .send(proto::from::Msg::SessionList(proto::from::SessionList {
+                                    sessions: sessions.into_iter().map(Into::into).collect(),
+                                }));
                         }
 
                         connect_api::Resp::UserAction(connect_api::UserActionResp {}) => {
@@ -431,16 +399,25 @@ pub fn handle_msg(data: &mut Data, event: ws_client::Event) {
                         }
                     },
 
-                    connect_api::From::Error { id: _, err: _ } => {
-                        // FIXME: Handle this
+                    connect_api::From::Error { id, err } => {
+                        // This should not happen
+                        log::error!("wallet connect request failed: id: {id}, {err:?}");
                     }
 
                     connect_api::From::Notif { notif } => match notif {
                         connect_api::Notif::SessionCreated(notif) => {
-                            add_session(data, notif.session);
+                            data.ui.send(proto::from::Msg::SessionAdded(
+                                proto::from::SessionAdded {
+                                    session: notif.session.into(),
+                                },
+                            ));
                         }
                         connect_api::Notif::SessionRemoved(notif) => {
-                            remove_session(data, &notif.session_id);
+                            data.ui.send(proto::from::Msg::SessionRemoved(
+                                proto::from::SessionRemoved {
+                                    session_id: notif.session_id,
+                                },
+                            ));
                         }
                         connect_api::Notif::LoginRequestCreated(notif) => {
                             add_login_request(data, notif.request);
@@ -883,4 +860,13 @@ pub fn try_sign_pset_jade(
     }
 
     Ok(pset)
+}
+
+pub fn stop_session(data: &mut Data, resp: proto::to::StopSession) {
+    add_user_action(
+        data,
+        connect_api::UserAction::StopSession {
+            session_id: resp.session_id,
+        },
+    );
 }
