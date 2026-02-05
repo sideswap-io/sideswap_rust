@@ -31,12 +31,20 @@ fn try_register_desktop_entry() -> Result<(), anyhow::Error> {
         std::fs::write(&icon_path, ICON_BYTES).context("failed to write icon")?;
     }
 
+    // Only add quotes if the path contains a space.
+    // This only works with some DEs.
+    let safe_exec_path = if exec_path.contains(' ') {
+        format!("\"{exec_path}\"")
+    } else {
+        exec_path
+    };
+
     // 5. Construct Desktop File
     let desktop_content = format!(
         "[Desktop Entry]\n\
         Name=SideSwap\n\
         Comment=Privacy-focused Liquid Network Wallet\n\
-        Exec={exec_path} %u\n\
+        Exec={safe_exec_path} %u\n\
         Icon=sideswap\n\
         Type=Application\n\
         Terminal=false\n\
