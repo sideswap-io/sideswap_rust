@@ -33,13 +33,11 @@ pub struct WalletConnect {
     wallet_key: WalletKey,
     client: WsClient,
 
-    last_ui_id: u32,
+    /// Map ui id to request_id
+    pending_login_request_ids: BTreeSet<String>,
 
     /// Map ui id to request_id
-    pending_login_request_ids: BTreeMap<u32, String>,
-
-    /// Map ui id to request_id
-    pending_sign_request_ids: BTreeMap<u32, String>,
+    pending_sign_request_ids: BTreeSet<String>,
 
     sessions: BTreeMap<String, connect_api::Session>,
 
@@ -92,9 +90,8 @@ pub fn new(data: &mut Data, descriptor: &WolletDescriptor) -> WalletConnect {
         descriptor: descriptor.clone(),
         wallet_key,
         client,
-        last_ui_id: 0,
-        pending_login_request_ids: BTreeMap::new(),
-        pending_sign_request_ids: BTreeMap::new(),
+        pending_login_request_ids: BTreeSet::new(),
+        pending_sign_request_ids: BTreeSet::new(),
         sessions: BTreeMap::new(),
         login_requests: BTreeMap::new(),
         sign_requests: BTreeMap::new(),
@@ -256,19 +253,16 @@ fn add_login_request(data: &mut Data, login_request: connect_api::LoginRequest) 
         .insert(login_request.request_id.clone(), login_request.clone());
 
     if old_sign_request.is_none() {
-        wallet_data.wallet_connect.last_ui_id += 1;
-        let ui_id = wallet_data.wallet_connect.last_ui_id;
-
         wallet_data
             .wallet_connect
             .pending_login_request_ids
-            .insert(ui_id, login_request.request_id);
+            .insert(login_request.request_id.clone());
 
         data.ui.send(proto::from::Msg::SignerRequest(
             proto::from::SignerRequest {
-                req_id: ui_id,
+                req_id: login_request.request_id,
                 origin: domain,
-                ttl_milliseconds: Some(login_request.ttl.as_millis()),
+                ttl_milliseconds: login_request.ttl.as_millis(),
                 msg: Some(proto::from::signer_request::Msg::Connect(proto::Empty {})),
             },
         ));
@@ -296,9 +290,6 @@ fn add_sign_request(data: &mut Data, sign_request: connect_api::SignRequest) {
         .insert(sign_request.request_id.clone(), sign_request.clone());
 
     if old_sign_request.is_none() {
-        wallet_data.wallet_connect.last_ui_id += 1;
-        let ui_id = wallet_data.wallet_connect.last_ui_id;
-
         let res = get_signer_request_details(data, &sign_request.pset);
 
         match res {
@@ -308,13 +299,13 @@ fn add_sign_request(data: &mut Data, sign_request: connect_api::SignRequest) {
                 wallet_data
                     .wallet_connect
                     .pending_sign_request_ids
-                    .insert(ui_id, sign_request.request_id);
+                    .insert(sign_request.request_id.clone());
 
                 data.ui.send(proto::from::Msg::SignerRequest(
                     proto::from::SignerRequest {
-                        req_id: ui_id,
+                        req_id: sign_request.request_id,
                         origin: sign_request.domain,
-                        ttl_milliseconds: Some(sign_request.ttl.as_millis()),
+                        ttl_milliseconds: sign_request.ttl.as_millis(),
                         msg: Some(proto::from::signer_request::Msg::Sign(details)),
                     },
                 ));
@@ -566,7 +557,7 @@ pub fn ui_response(data: &mut Data, resp: proto::to::SignerResponse) {
         }
     };
 
-    if let Some(request_id) = wallet_data
+    if wallet_data
         .wallet_connect
         .pending_login_request_ids
         .remove(&resp.req_id)
@@ -574,21 +565,23 @@ pub fn ui_response(data: &mut Data, resp: proto::to::SignerResponse) {
         let is_mobile = wallet_data
             .wallet_connect
             .mobile_requests
-            .contains(&request_id);
+            .contains(&resp.req_id);
 
         if resp.accept {
             let descriptor = wallet_data.wallet_connect.descriptor.to_string();
             add_user_action(
                 data,
                 connect_api::UserAction::AcceptLoginRequest {
-                    request_id,
+                    request_id: resp.req_id,
                     descriptor,
                 },
             );
         } else {
             add_user_action(
                 data,
-                connect_api::UserAction::CancelLoginRequest { request_id },
+                connect_api::UserAction::CancelLoginRequest {
+                    request_id: resp.req_id,
+                },
             );
         }
 
@@ -596,7 +589,7 @@ pub fn ui_response(data: &mut Data, resp: proto::to::SignerResponse) {
             data.ui
                 .send(proto::from::Msg::SignerReturn(proto::Empty {}));
         }
-    } else if let Some(request_id) = wallet_data
+    } else if wallet_data
         .wallet_connect
         .pending_sign_request_ids
         .remove(&resp.req_id)
@@ -604,17 +597,17 @@ pub fn ui_response(data: &mut Data, resp: proto::to::SignerResponse) {
         let is_mobile = wallet_data
             .wallet_connect
             .mobile_requests
-            .contains(&request_id);
+            .contains(&resp.req_id);
 
         if resp.accept {
-            let res = try_sign_pset(data, &request_id);
+            let res = try_sign_pset(data, &resp.req_id);
 
             match res {
                 Ok(pset) => {
                     add_user_action(
                         data,
                         connect_api::UserAction::AcceptSignRequest {
-                            request_id,
+                            request_id: resp.req_id,
                             pset: pset.to_string(),
                         },
                     );
@@ -631,7 +624,9 @@ pub fn ui_response(data: &mut Data, resp: proto::to::SignerResponse) {
         } else {
             add_user_action(
                 data,
-                connect_api::UserAction::CancelSignRequest { request_id },
+                connect_api::UserAction::CancelSignRequest {
+                    request_id: resp.req_id,
+                },
             );
 
             if is_mobile {

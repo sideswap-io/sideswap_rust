@@ -383,7 +383,7 @@ message To {
   }
 
   message SignerResponse {
-    required uint32 req_id = 1;
+    required string req_id = 1;
     required bool accept = 2;
   }
 
@@ -835,9 +835,9 @@ message From {
   }
 
   message SignerRequest {
-    required uint32 req_id = 1;
+    required string req_id = 1;
     required string origin = 2;
-    optional uint64 ttl_milliseconds = 3;
+    required uint64 ttl_milliseconds = 3;
 
     message Sign {
       repeated Balance balances = 1;
@@ -849,6 +849,10 @@ message From {
       Empty connect = 10;
       Sign sign = 11;
     }
+  }
+
+  message SignerCancel {
+    required string req_id = 1;
   }
 
   oneof msg {
@@ -937,6 +941,7 @@ message From {
     HistoryUpdated history_updated = 161;
 
     SignerRequest signer_request = 170;
+    SignerCancel signer_cancel = 172;
     Empty signer_return = 171;
   }
 }
