@@ -73,60 +73,30 @@
   },
   {
     "always_show": true,
-    "asset_id": "06d1085d6a3a1328fb8189d106c7a8afbef3d327e34504828c4cac2c74ac0802",
+    "asset_id": "02f22f8d9c76ab41661a2729e4752e2c5d1a263012141b86ea98af5472df5189",
     "contract": {
       "entity": {
-        "domain": "sswp.pegx.io"
+        "domain": "depix.info"
       },
-      "issuer_pubkey": "02f5d2a7fc78e586607845611c183bfea5c62b37e9aa7dd4900689801815d41297",
-      "name": "SSWP Series B shares",
-      "precision": 0,
-      "ticker": "SSWP",
+      "issuer_pubkey": "02262debc91cc24547e70a9cb46b77fc7180c41f544378a705fa29a732724252d8",
+      "name": "Decentralized Pix",
+      "precision": 8,
+      "ticker": "DePix",
       "version": 0
     },
-    "domain": "sswp.pegx.io",
-    "domain_agent": "pegx.io",
-    "domain_agent_link": "https://pegx.io",
+    "domain": "depix.info",
     "icon": null,
-    "icon_url": "https://api.sideswap.io/assets/icons/06d1085d6a3a1328fb8189d106c7a8afbef3d327e34504828c4cac2c74ac0802.png",
-    "instant_swaps": false,
+    "icon_url": "https://api.sideswap.io/assets/icons/02f22f8d9c76ab41661a2729e4752e2c5d1a263012141b86ea98af5472df5189.png",
+    "instant_swaps": true,
     "issuance_prevout": {
-      "txid": "ed0b1b3760da6ba0a39d858778cc44ea266ba97e4374e3a912e35718257f3d9a",
+      "txid": "9c1eab33e9ee11922d957ac620f3bf7fe90b9b8d16ea959e616259b8add8830c",
       "vout": 0
     },
-    "issuer_pubkey": "02f5d2a7fc78e586607845611c183bfea5c62b37e9aa7dd4900689801815d41297",
-    "market_type": "Amp",
-    "name": "SSWP Series B shares",
-    "precision": 0,
-    "ticker": "SSWP"
-  },
-  {
-    "always_show": true,
-    "asset_id": "aa909f1b77451e409fe95fe1d3638ad017ab3325c6d4f00301af6d582d0f2034",
-    "contract": {
-      "entity": {
-        "domain": "blockstream-mining2.stokr.io"
-      },
-      "issuer_pubkey": "0206eb0dd95be6ace6d83e5e865815d73bed9e553a1a829fe8c2de74189ee2289b",
-      "name": "BMN Series 2",
-      "precision": 4,
-      "ticker": "BMN2",
-      "version": 0
-    },
-    "domain": "blockstream-mining2.stokr.io",
-    "domain_agent": "stokr.io",
-    "domain_agent_link": "https://stokr.io",
-    "icon": null,
-    "icon_url": "https://api.sideswap.io/assets/icons/aa909f1b77451e409fe95fe1d3638ad017ab3325c6d4f00301af6d582d0f2034.png",
-    "instant_swaps": false,
-    "issuance_prevout": {
-      "txid": "b9317d00e44ab9f4ce435677b9b3f915e09d12b2be648da6bd12cd790d12658d",
-      "vout": 3
-    },
-    "issuer_pubkey": "0206eb0dd95be6ace6d83e5e865815d73bed9e553a1a829fe8c2de74189ee2289b",
-    "market_type": "Amp",
-    "name": "BMN Series 2",
-    "precision": 4,
-    "ticker": "BMN2"
+    "issuer_pubkey": "02262debc91cc24547e70a9cb46b77fc7180c41f544378a705fa29a732724252d8",
+    "market_type": "Stablecoin",
+    "name": "Decentralized Pix",
+    "payjoin": true,
+    "precision": 8,
+    "ticker": "DePix"
   }
 ]

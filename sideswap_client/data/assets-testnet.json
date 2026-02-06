@@ -73,31 +73,30 @@
   },
   {
     "always_show": true,
-    "asset_id": "1f9f9319beeded3aa3751190ec9b2d77df570c3b9e6e84a4aa321c11331e0118",
+    "asset_id": "a5de979bc31dc731fa94b3661ae19c1e20cd067642c69798cad9011094a26f60",
     "contract": {
       "entity": {
         "domain": "testnet.pegx.io"
       },
-      "issuer_pubkey": "0208a2279847c22a579de226e4867b63e2021a27eff8ce88155e65334994a3ca25",
-      "name": "SSWP Partners Series B",
-      "precision": 0,
-      "ticker": "SSWP",
+      "issuer_pubkey": "0239ca6af041ed051b25f6dd361b22ad2f7ff35f187e4c4a24c50746787d5d6069",
+      "name": "Decentralized Pix",
+      "precision": 8,
+      "ticker": "DePix",
       "version": 0
     },
     "domain": "testnet.pegx.io",
-    "domain_agent": "testnet.pegx.io",
-    "domain_agent_link": "https://testnet.pegx.io",
     "icon": null,
-    "icon_url": "https://api-testnet.sideswap.io/assets/icons/1f9f9319beeded3aa3751190ec9b2d77df570c3b9e6e84a4aa321c11331e0118.png",
-    "instant_swaps": false,
+    "icon_url": "https://api-testnet.sideswap.io/assets/icons/a5de979bc31dc731fa94b3661ae19c1e20cd067642c69798cad9011094a26f60.png",
+    "instant_swaps": true,
     "issuance_prevout": {
-      "txid": "02de321c7095e0fdbcadff4c328ef6fabe78fe7ed7dbff490a2e5b3a1f8e779f",
+      "txid": "2e13fc639aa1d558c7247c993a90889455d7278f32084e726f7e47ca956aed3f",
       "vout": 3
     },
-    "issuer_pubkey": "0208a2279847c22a579de226e4867b63e2021a27eff8ce88155e65334994a3ca25",
-    "market_type": "Amp",
-    "name": "SSWP Partners Series B",
-    "precision": 0,
-    "ticker": "SSWP"
+    "issuer_pubkey": "0239ca6af041ed051b25f6dd361b22ad2f7ff35f187e4c4a24c50746787d5d6069",
+    "market_type": "Stablecoin",
+    "name": "Decentralized Pix",
+    "payjoin": true,
+    "precision": 8,
+    "ticker": "DePix"
   }
 ]
