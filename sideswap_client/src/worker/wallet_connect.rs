@@ -33,12 +33,6 @@ pub struct WalletConnect {
     wallet_key: WalletKey,
     client: WsClient,
 
-    /// Map ui id to request_id
-    pending_login_request_ids: BTreeSet<String>,
-
-    /// Map ui id to request_id
-    pending_sign_request_ids: BTreeSet<String>,
-
     login_requests: BTreeMap<String, connect_api::LoginRequest>,
 
     sign_requests: BTreeMap<String, connect_api::SignRequest>,
@@ -88,8 +82,6 @@ pub fn new(data: &mut Data, descriptor: &WolletDescriptor) -> WalletConnect {
         descriptor: descriptor.clone(),
         wallet_key,
         client,
-        pending_login_request_ids: BTreeSet::new(),
-        pending_sign_request_ids: BTreeSet::new(),
         login_requests: BTreeMap::new(),
         sign_requests: BTreeMap::new(),
         user_actions: BTreeMap::new(),
@@ -236,11 +228,6 @@ fn add_login_request(data: &mut Data, login_request: connect_api::LoginRequest) 
         .insert(login_request.request_id.clone(), login_request.clone());
 
     if old_sign_request.is_none() {
-        wallet_data
-            .wallet_connect
-            .pending_login_request_ids
-            .insert(login_request.request_id.clone());
-
         data.ui.send(proto::from::Msg::SignerRequest(
             proto::from::SignerRequest {
                 req_id: login_request.request_id,
@@ -253,12 +240,16 @@ fn add_login_request(data: &mut Data, login_request: connect_api::LoginRequest) 
 }
 
 fn remove_login_request(data: &mut Data, request_id: &String) {
-    let wallet_data = match data.wallet_data.as_mut() {
-        Some(wallet_data) => wallet_data,
-        None => return,
-    };
+    if let Some(wallet_data) = data.wallet_data.as_mut() {
+        let value = wallet_data.wallet_connect.sign_requests.remove(request_id);
 
-    wallet_data.wallet_connect.sign_requests.remove(request_id);
+        if value.is_some() {
+            data.ui
+                .send(proto::from::Msg::SignerCancel(proto::from::SignerCancel {
+                    req_id: request_id.clone(),
+                }));
+        }
+    }
 }
 
 fn add_sign_request(data: &mut Data, sign_request: connect_api::SignRequest) {
@@ -277,13 +268,6 @@ fn add_sign_request(data: &mut Data, sign_request: connect_api::SignRequest) {
 
         match res {
             Ok(details) => {
-                let wallet_data = data.wallet_data.as_mut().expect("already checked");
-
-                wallet_data
-                    .wallet_connect
-                    .pending_sign_request_ids
-                    .insert(sign_request.request_id.clone());
-
                 data.ui.send(proto::from::Msg::SignerRequest(
                     proto::from::SignerRequest {
                         req_id: sign_request.request_id,
@@ -293,6 +277,7 @@ fn add_sign_request(data: &mut Data, sign_request: connect_api::SignRequest) {
                     },
                 ));
             }
+
             Err(err) => {
                 data.show_message(&format!(
                     "invalid sign request from {domain}: {err}",
@@ -304,12 +289,16 @@ fn add_sign_request(data: &mut Data, sign_request: connect_api::SignRequest) {
 }
 
 fn remove_sign_request(data: &mut Data, request_id: &String) {
-    let wallet_data = match data.wallet_data.as_mut() {
-        Some(wallet_data) => wallet_data,
-        None => return,
-    };
+    if let Some(wallet_data) = data.wallet_data.as_mut() {
+        let value = wallet_data.wallet_connect.sign_requests.remove(request_id);
 
-    wallet_data.wallet_connect.sign_requests.remove(request_id);
+        if value.is_some() {
+            data.ui
+                .send(proto::from::Msg::SignerCancel(proto::from::SignerCancel {
+                    req_id: request_id.clone(),
+                }));
+        }
+    }
 }
 
 fn send_request(connect: &WalletConnect, id: connect_api::ReqId, req: connect_api::Req) {
@@ -376,6 +365,24 @@ pub fn handle_msg(data: &mut Data, event: ws_client::Event) {
                                         action: action.clone(),
                                     }),
                                 );
+                            }
+
+                            let old_request_ids = wallet
+                                .wallet_connect
+                                .sign_requests
+                                .keys()
+                                .cloned()
+                                .collect::<BTreeSet<_>>();
+
+                            let new_request_ids = sign_requests
+                                .iter()
+                                .map(|sign_request| sign_request.request_id.clone())
+                                .collect::<BTreeSet<_>>();
+
+                            log::debug!("new sign request ids: {new_request_ids:?}");
+
+                            for request_id in old_request_ids.difference(&new_request_ids) {
+                                remove_sign_request(data, request_id);
                             }
 
                             for sign_request in sign_requests {
@@ -534,16 +541,16 @@ pub fn ui_response(data: &mut Data, resp: proto::to::SignerResponse) {
         }
     };
 
+    let is_mobile = wallet_data
+        .wallet_connect
+        .mobile_requests
+        .contains(&resp.req_id);
+
     if wallet_data
         .wallet_connect
-        .pending_login_request_ids
-        .remove(&resp.req_id)
+        .login_requests
+        .contains_key(&resp.req_id)
     {
-        let is_mobile = wallet_data
-            .wallet_connect
-            .mobile_requests
-            .contains(&resp.req_id);
-
         if resp.accept {
             let descriptor = wallet_data.wallet_connect.descriptor.to_string();
             add_user_action(
@@ -568,14 +575,9 @@ pub fn ui_response(data: &mut Data, resp: proto::to::SignerResponse) {
         }
     } else if wallet_data
         .wallet_connect
-        .pending_sign_request_ids
-        .remove(&resp.req_id)
+        .sign_requests
+        .contains_key(&resp.req_id)
     {
-        let is_mobile = wallet_data
-            .wallet_connect
-            .mobile_requests
-            .contains(&resp.req_id);
-
         if resp.accept {
             let res = try_sign_pset(data, &resp.req_id);
 
