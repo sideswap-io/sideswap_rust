@@ -1,5 +1,5 @@
 use std::net::SocketAddr;
-use std::sync::{Arc, mpsc};
+use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant, SystemTime};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -7,17 +7,17 @@ use std::{
 };
 
 use crate::ffi::proto::Account;
-use crate::ffi::{self, GIT_COMMIT_HASH, proto};
+use crate::ffi::{self, proto, GIT_COMMIT_HASH};
 use crate::gdk_ses::{
     self, ElectrumServer, GdkSes, JadeData, NotifCallback, TransactionList, WalletInfo, WalletNotif,
 };
-use crate::gdk_ses_amp::{GdkSesAmp, derive_amp_wo_login};
+use crate::gdk_ses_amp::{derive_amp_wo_login, GdkSesAmp};
 use crate::gdk_ses_rust::{self, GdkSesRust};
 use crate::models::AddressType;
 use crate::settings::WatchOnly;
 use crate::utils::{
-    self, TxSize, convert_tx, derive_amp_address, derive_native_address, derive_nested_address,
-    get_jade_network, get_peg_item, get_tx_size, redact_from_msg, redact_to_msg,
+    self, convert_tx, derive_amp_address, derive_native_address, derive_nested_address,
+    get_jade_network, get_peg_item, get_tx_size, redact_from_msg, redact_to_msg, TxSize,
 };
 use crate::{gdk_ses_amp, models, settings};
 
@@ -30,7 +30,7 @@ use elements::{AssetId, TxOutSecrets};
 use elements_miniscript::slip77::MasterBlindingKey;
 use log::{debug, error, info, warn};
 use lwk_wollet::Chain;
-use market_worker::{REGISTER_PATH, get_wallet_account};
+use market_worker::{get_wallet_account, REGISTER_PATH};
 use serde::{Deserialize, Serialize};
 use sideswap_amp::sw_signer::SwSigner;
 use sideswap_api::mkt::AssetPair;
@@ -39,10 +39,10 @@ use sideswap_common::event_proofs::EventProofs;
 use sideswap_common::pset_blind::get_blinding_nonces;
 use sideswap_common::recipient::Recipient;
 use sideswap_common::send_tx::pset::{
-    ConstructPsetArgs, ConstructedPset, PsetInput, PsetOutput, construct_pset,
+    construct_pset, ConstructPsetArgs, ConstructedPset, PsetInput, PsetOutput,
 };
 use sideswap_common::target_os::TargetOs;
-use sideswap_common::types::{self, Amount, peg_out_amount};
+use sideswap_common::types::{self, peg_out_amount, Amount};
 use sideswap_common::utxo_select::{self, WalletType};
 use sideswap_common::ws::next_request_id;
 use sideswap_common::{pin, ws_client};
@@ -55,7 +55,7 @@ use sideswap_types::proxy_address::ProxyAddress;
 use sideswap_types::{abort, b64, verify};
 use tokio::sync::mpsc::UnboundedSender;
 
-use sideswap_api::{self as api, MarketType, OrderId, fcm_models};
+use sideswap_api::{self as api, fcm_models, MarketType, OrderId};
 use sideswap_common::ws::manual as ws;
 
 pub struct StartParams {
@@ -222,6 +222,8 @@ pub struct WalletData {
     last_recv_address: Option<models::AddressInfo>,
     watching_txid: Option<elements::Txid>,
     wallet_connect: wallet_connect::WalletConnect,
+
+    cached_address: BTreeMap<(Account, Chain), models::AddressInfo>,
 }
 
 #[derive(Clone)]
@@ -1567,7 +1569,7 @@ impl Data {
                 let change_address = market_worker::get_address(
                     self,
                     account,
-                    market_worker::AddressType::Change,
+                    Chain::Internal,
                     market_worker::CachePolicy::Skip,
                 )?;
                 outputs.push(PsetOutput {
@@ -1983,10 +1985,12 @@ impl Data {
         };
 
         let login_id = serde_json::to_string(&login_id).expect("must not fail");
+
         let login_id = hex::encode(&derive_key(
             &login_id.as_bytes(),
             b"sideswap_client/login_id",
         ));
+
         match self.settings.login_id.as_ref() {
             Some(old_login_id) => {
                 if *old_login_id != login_id {
@@ -2000,6 +2004,7 @@ impl Data {
                 }
             }
             None => {
+                log::debug!("save new login_id: {login_id}");
                 self.settings.login_id = Some(login_id);
                 self.save_settings();
             }
@@ -2181,6 +2186,7 @@ impl Data {
             last_recv_address: None,
             watching_txid: None,
             wallet_connect,
+            cached_address: BTreeMap::new(),
         });
 
         if self.skip_wallet_sync() {
@@ -2254,6 +2260,7 @@ impl Data {
             last_recv_address,
             watching_txid,
             wallet_connect,
+            cached_address,
         } = wallet_data;
 
         let mut login_info_reg = wallet_reg.login_info().clone();
@@ -2291,6 +2298,7 @@ impl Data {
             last_recv_address,
             watching_txid,
             wallet_connect,
+            cached_address,
         });
     }
 

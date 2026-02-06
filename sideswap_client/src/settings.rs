@@ -6,8 +6,6 @@ use serde::{Deserialize, Serialize};
 use sideswap_api::{OrderId, SessionId};
 use sideswap_types::str_encoded::StrEncoded;
 
-use crate::models;
-
 #[derive(Eq, PartialEq, Serialize, Deserialize, Copy, Clone)]
 pub enum PegDir {
     In,
@@ -39,21 +37,6 @@ pub struct RegInfo {
     pub amp_user_path: Vec<u32>,
 }
 
-#[derive(Serialize, Deserialize, PartialEq, Eq)]
-pub enum AddressWallet {
-    NativeReceive,
-    NativeChange,
-    NestedReceive,
-    NestedChange,
-    Amp,
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct AddressCacheEntry {
-    pub address: models::AddressInfo,
-    pub address_wallet: AddressWallet,
-}
-
 // Everything will be deleted after importing a new wallet!
 #[derive(Serialize, Deserialize, Default)]
 pub struct Settings {
@@ -80,9 +63,6 @@ pub struct Settings {
     pub reg_info: Option<RegInfo>,
 
     pub event_proofs: Option<serde_json::Value>,
-
-    #[serde(default)]
-    pub address_cache: Vec<AddressCacheEntry>,
 
     pub min_order_amounts: Option<sideswap_api::mkt::MinOrderAmounts>,
 

@@ -54,10 +54,8 @@ use crate::{
     ffi::proto::{self, Account},
     gdk_ses::{JadeData, WalletInfo},
     models,
-    settings::{AddressCacheEntry, AddressWallet},
     utils::{
-        convert_chart_point, convert_to_swap_utxo, decode_pset, derive_amp_address,
-        derive_native_address, derive_nested_address, encode_jade_tx, encode_pset,
+        convert_chart_point, convert_to_swap_utxo, decode_pset, encode_jade_tx, encode_pset,
         get_jade_asset_info, get_jade_network, get_script_sig, get_witness, unlock_hw,
     },
     worker::{self, wallet},
@@ -1664,7 +1662,7 @@ fn try_online_order_submit(
     let change_address = get_address(
         worker,
         swap_info.change_wallet,
-        AddressType::Change,
+        Chain::Internal,
         CachePolicy::Skip,
     )?;
 
@@ -1819,7 +1817,7 @@ fn try_create_funding_tx(
     let mut outputs = Vec::<PsetOutput>::new();
     let updated_recipient = &updated_recipients[0];
     let account = get_wallet_account(wallet_type);
-    let receive_address = get_address(worker, account, AddressType::Receive, CachePolicy::Skip)?;
+    let receive_address = get_address(worker, account, Chain::External, CachePolicy::Skip)?;
     outputs.push(PsetOutput {
         address: receive_address.address.clone(),
         asset_id: updated_recipient.asset_id,
@@ -1829,7 +1827,7 @@ fn try_create_funding_tx(
     let mut change_addresses = Vec::new();
     for output in change {
         let account = get_wallet_account(output.wallet);
-        let change_address = get_address(worker, account, AddressType::Change, CachePolicy::Skip)?;
+        let change_address = get_address(worker, account, Chain::Internal, CachePolicy::Skip)?;
         outputs.push(PsetOutput {
             address: change_address.address.clone(),
             asset_id: output.asset_id,
@@ -2244,87 +2242,26 @@ pub enum CachePolicy {
     Skip,
 }
 
-#[derive(Copy, Clone, PartialEq, Eq)]
-pub enum AddressType {
-    Receive,
-    Change,
-}
-
 pub fn get_address(
     worker: &mut super::Data,
     account: Account,
-    address_type: AddressType,
+    chain: Chain,
     cache_policy: CachePolicy,
 ) -> Result<models::AddressInfo, anyhow::Error> {
-    let address_wallet = match (account, address_type) {
-        (Account::Reg, AddressType::Receive) => AddressWallet::NativeReceive,
-        (Account::Reg, AddressType::Change) => AddressWallet::NativeChange,
-        (Account::Amp, _) => AddressWallet::Amp,
-    };
+    let wallet_data = worker
+        .wallet_data
+        .as_mut()
+        .ok_or_else(|| anyhow!("no wallet_data"))?;
 
     match cache_policy {
         CachePolicy::Use => {
-            let cached_address = worker
-                .settings
-                .address_cache
-                .iter()
-                .find(|address| address.address_wallet == address_wallet);
+            let cached_address = wallet_data.cached_address.get(&(account, chain)).cloned();
             if let Some(address) = cached_address {
-                let wallet_data = worker
-                    .wallet_data
-                    .as_ref()
-                    .ok_or_else(|| anyhow!("no wallet_data"))?;
-
-                let expected_address = match address_wallet {
-                    AddressWallet::NativeReceive | AddressWallet::NativeChange => {
-                        derive_native_address(
-                            &wallet_data.xpubs.native_account,
-                            worker.env.d().network,
-                            address_type == AddressType::Change,
-                            address.address.pointer,
-                            Some(&wallet_data.xpubs.master_blinding_key),
-                        )
-                    }
-                    AddressWallet::NestedReceive | AddressWallet::NestedChange => {
-                        derive_nested_address(
-                            &wallet_data.xpubs.nested_account,
-                            worker.env.d().network,
-                            address_type == AddressType::Change,
-                            address.address.pointer,
-                            Some(&wallet_data.xpubs.master_blinding_key),
-                        )
-                    }
-                    AddressWallet::Amp => {
-                        derive_amp_address(
-                            &wallet_data.xpubs.amp_service_xpub,
-                            &wallet_data.xpubs.amp_user_xpub,
-                            worker.env.d().network,
-                            address.address.pointer,
-                            Some(&wallet_data.xpubs.master_blinding_key),
-                        )
-                        .address
-                    }
-                };
-                assert_eq!(
-                    expected_address, address.address.address,
-                    "wrong cached address"
-                );
-
-                return Ok(address.address.clone());
+                return Ok(address);
             }
         }
         CachePolicy::Skip => {}
     }
-
-    let wallet_data = worker
-        .wallet_data
-        .as_ref()
-        .ok_or_else(|| anyhow!("no wallet_data"))?;
-
-    let chain = match address_type {
-        AddressType::Receive => Chain::External,
-        AddressType::Change => Chain::Internal,
-    };
 
     let address = match account {
         Account::Reg => wallet_data.wallet_reg.get_address(chain, None)?,
@@ -2333,11 +2270,9 @@ pub fn get_address(
 
     match cache_policy {
         CachePolicy::Use => {
-            worker.settings.address_cache.push(AddressCacheEntry {
-                address: address.clone(),
-                address_wallet,
-            });
-            worker.save_settings();
+            wallet_data
+                .cached_address
+                .insert((account, chain), address.clone());
         }
         CachePolicy::Skip => {}
     }
@@ -2346,11 +2281,11 @@ pub fn get_address(
 }
 
 fn remove_cached_address(worker: &mut super::Data, address: &elements::Address) {
-    worker
-        .settings
-        .address_cache
-        .retain(|item| item.address.address != *address);
-    worker.save_settings();
+    if let Some(wallet_data) = worker.wallet_data.as_mut() {
+        wallet_data
+            .cached_address
+            .retain(|_, address_details| address_details.address != *address);
+    }
 }
 
 fn resolve_recv_address(
@@ -2401,7 +2336,7 @@ fn resolve_recv_address(
         let address_info = get_address(
             worker,
             swap_info.receive_wallet,
-            AddressType::Receive,
+            Chain::External,
             cache_policy,
         )?;
         Ok(ResolveRes::Success { address_info })
@@ -2651,7 +2586,7 @@ fn try_start_quotes(
     let change_address = get_address(
         worker,
         swap_info.change_wallet,
-        AddressType::Change,
+        Chain::Internal,
         CachePolicy::Use,
     )
     .map_err(StartQuoteError::Address)?;
