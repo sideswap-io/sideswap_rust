@@ -502,6 +502,7 @@ fn try_process_app_link(data: &mut Data, resp: &proto::to::AppLink) -> Result<()
 
     match (url.scheme(), domain, url.path()) {
         ("https", "app.sideswap.io", "/login/") | ("liquidconnect", "login", "/") => {
+            // Use UserAction because the websocket connection might be down
             add_user_action(
                 data,
                 connect_api::UserAction::LinkLoginRequest { request_id },

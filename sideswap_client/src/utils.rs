@@ -205,6 +205,13 @@ pub fn redact_to_msg(mut msg: proto::to::Msg) -> proto::to::Msg {
     msg
 }
 
+pub fn log_from_msg(msg: &proto::from::Msg) -> bool {
+    !matches!(
+        msg,
+        proto::from::Msg::PublicOrderCreated(_) | proto::from::Msg::PublicOrderRemoved(_)
+    )
+}
+
 pub fn redact_from_msg(mut msg: proto::from::Msg) -> proto::from::Msg {
     match &mut msg {
         proto::from::Msg::DecryptPin(v) => {
