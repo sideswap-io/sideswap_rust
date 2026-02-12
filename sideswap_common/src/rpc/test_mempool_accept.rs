@@ -15,8 +15,6 @@ pub enum Error {
         txid: elements::Txid,
         reason: String,
     },
-    #[error("transaction rejected with unknown reason, txid: {txid}")]
-    UnknownReason { txid: elements::Txid },
 }
 
 // Use `test_mempool_accepted` instead (to not forget to check the `allowed` value)
@@ -67,7 +65,9 @@ pub async fn test_mempool_accepted_list(
     for resp in check_acceptence.into_iter() {
         verify!(
             resp.allowed.unwrap_or_default(),
-            Error::UnknownReason { txid: resp.txid }
+            Error::Request(anyhow::anyhow!(
+                "transaction rejected but reject_reason is null"
+            ))
         );
         txids.push(resp.txid);
     }
