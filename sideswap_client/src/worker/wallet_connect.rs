@@ -77,6 +77,11 @@ pub fn new(data: &mut Data, descriptor: &WolletDescriptor) -> WalletConnect {
 
     let wallet_key = WalletKey::new(master_blinding_key.as_bytes(), data.env.d().network);
 
+    data.ui
+        .send(proto::from::Msg::SessionList(proto::from::SessionList {
+            sessions: Vec::new(),
+        }));
+
     WalletConnect {
         connected: false,
         descriptor: descriptor.clone(),

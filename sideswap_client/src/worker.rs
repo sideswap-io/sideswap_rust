@@ -1706,7 +1706,9 @@ impl Data {
         let selected_utxos = created_tx.selected_utxos.iter().collect::<Vec<_>>();
         let change_addresses = created_tx.change_addresses.iter().collect::<Vec<_>>();
 
-        // FIXME: We should not show L-BTC output to the server for review on Jade with payjoins
+        // NOTE: We show server's change output (LBTC) for review on Jade with payjoins.
+        // This can be confusing, but Jade requires all external outputs to be reviewed.
+
         let pset = if market_worker::is_jade(self) {
             market_worker::try_sign_pset_jade(
                 self,
