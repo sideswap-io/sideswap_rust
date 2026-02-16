@@ -305,15 +305,13 @@ impl Wallet {
         login: &LoginType,
         event_callback: EventCallback,
         proxy: &Option<ProxyAddress>,
+        timeout: Duration,
     ) -> Result<Wallet, Error> {
         let (command_sender, command_receiver) = tokio::sync::mpsc::unbounded_channel();
 
-        let data = tokio::time::timeout(
-            Duration::from_secs(60),
-            connect(login, event_callback, proxy),
-        )
-        .await
-        .map_err(|_err| Error::ProtocolError("connection timeout"))??;
+        let data = tokio::time::timeout(timeout, connect(login, event_callback, proxy))
+            .await
+            .map_err(|_err| Error::ProtocolError("connection timeout"))??;
 
         let wallet = Wallet {
             command_sender,

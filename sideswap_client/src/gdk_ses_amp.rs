@@ -397,6 +397,8 @@ async fn connect(
 ) -> ConnectRes {
     tokio::time::sleep(delay).await;
 
+    let connect_timeout = Duration::from_secs(30);
+
     match &login_info.wallet_info {
         gdk_ses::WalletInfo::Mnemonic(mnemonic) => {
             sideswap_amp::Wallet::connect_once(
@@ -406,6 +408,7 @@ async fn connect(
                 ))),
                 event_callback,
                 &login_info.proxy,
+                connect_timeout,
             )
             .await
         }
@@ -416,6 +419,7 @@ async fn connect(
                     &sideswap_amp::LoginType::Full(Arc::new(jade.clone())),
                     event_callback,
                     &login_info.proxy,
+                    connect_timeout,
                 )
                 .await
             } else {
@@ -429,6 +433,7 @@ async fn connect(
                     },
                     event_callback,
                     &login_info.proxy,
+                    connect_timeout,
                 )
                 .await
             }

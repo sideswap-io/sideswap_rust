@@ -1883,6 +1883,8 @@ impl Data {
 
         let _enter_guard = self.runtime.enter();
 
+        let amp_register_timeout = Duration::from_secs(15);
+
         let amp_wallet = match &login {
             LoginData::Mnemonic { mnemonic } => {
                 self.runtime.block_on(sideswap_amp::Wallet::connect_once(
@@ -1892,6 +1894,7 @@ impl Data {
                     ))),
                     event_callback,
                     self.proxy(),
+                    amp_register_timeout,
                 ))?
             }
 
@@ -1907,6 +1910,7 @@ impl Data {
                     &sideswap_amp::LoginType::Full(Arc::new(jade_data)),
                     event_callback,
                     self.proxy(),
+                    amp_register_timeout,
                 ))?
             }
         };
