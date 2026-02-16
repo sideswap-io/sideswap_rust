@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, HashSet},
     str::FromStr,
     sync::Arc,
     time::{Duration, Instant},
@@ -1748,44 +1748,64 @@ fn try_create_funding_tx(
         WalletType::Native
     };
 
-    // It's not really necessary, but we prefer to receive non-AMP change to the nested Segwit wallet
+    // Allow receiving non-AMP assets change to the native Segwit wallet
     let force_change_wallets = worker
         .assets
         .values()
         .filter_map(|asset| {
             (asset.market_type != Some(MarketType::Amp))
-                .then_some((asset.asset_id, WalletType::Nested))
+                .then_some((asset.asset_id, WalletType::Native))
         })
         .collect::<BTreeMap<_, _>>();
 
-    let utxo_select_res = utxo_select::select(utxo_select::Args {
-        policy_asset: worker.policy_asset,
-        utxos: utxos
-            .iter()
-            .map(|utxo| utxo_select::Utxo {
-                wallet: utxo.wallet_type,
-                txid: utxo.txhash,
-                vout: utxo.vout,
-                asset_id: utxo.asset_id,
-                value: utxo.satoshi,
-            })
-            .collect(),
-        recipients: vec![utxo_select::Recipient {
-            address: utxo_select::RecipientAddress::Unknown(wallet_type),
-            asset_id: *asset_id,
-            amount: target,
-        }],
-        deduct_fee,
-        force_change_wallets,
-        use_all_utxos: false,
-    })?;
+    let reserved_utxos = worker
+        .market
+        .own_orders
+        .values()
+        .flat_map(|own_order| own_order.offline_utxos.iter().flatten())
+        .collect::<HashSet<_>>();
 
+    let select_utxos = |use_all: bool| {
+        utxo_select::select(utxo_select::Args {
+            policy_asset: worker.policy_asset,
+            utxos: utxos
+                .iter()
+                .filter(|utxo| {
+                    use_all
+                        || !reserved_utxos.contains(&elements::OutPoint {
+                            txid: utxo.txhash,
+                            vout: utxo.vout,
+                        })
+                })
+                .map(|utxo| utxo_select::Utxo {
+                    wallet: utxo.wallet_type,
+                    txid: utxo.txhash,
+                    vout: utxo.vout,
+                    asset_id: utxo.asset_id,
+                    value: utxo.satoshi,
+                })
+                .collect(),
+            recipients: vec![utxo_select::Recipient {
+                address: utxo_select::RecipientAddress::Unknown(wallet_type),
+                asset_id: *asset_id,
+                amount: target,
+            }],
+            deduct_fee,
+            force_change_wallets: force_change_wallets.clone(),
+            use_all_utxos: false,
+        })
+    };
+
+    // Try only unused UTXOs first and if it fails the try all UTXOs instead.
     let utxo_select::Res {
         inputs,
         updated_recipients,
         change,
         network_fee,
-    } = utxo_select_res;
+    } = select_utxos(false).or_else(|err| {
+        log::debug!("not enough unused UTXOs: {err}, retry with all UTXOs...");
+        select_utxos(true)
+    })?;
 
     let selected_utxos = inputs
         .iter()

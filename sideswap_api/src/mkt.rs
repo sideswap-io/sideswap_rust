@@ -1,11 +1,11 @@
 use elements::{
+    Address, AssetId, OutPoint, Txid,
     confidential::{AssetBlindingFactor, ValueBlindingFactor},
     secp256k1_zkp::SecretKey,
-    Address, AssetId, OutPoint, Txid,
 };
 use serde::{Deserialize, Serialize};
 use sideswap_types::{
-    duration_ms::DurationMs, normal_float::NormalFloat, timestamp_ms::TimestampMs, TransactionHex,
+    TransactionHex, duration_ms::DurationMs, normal_float::NormalFloat, timestamp_ms::TimestampMs,
 };
 
 use crate::{ChartPoint, MarketType, Utxo};
@@ -165,6 +165,7 @@ pub struct OwnOrder {
     pub ttl: Option<DurationMs>,
     pub private_id: Option<Box<String>>,
     pub online: bool,
+    pub offline_utxos: Option<Vec<elements::OutPoint>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
