@@ -67,7 +67,11 @@ pub fn new(data: &mut Data, descriptor: &WolletDescriptor) -> WalletConnect {
 
     client.set_app_active(data.app_active);
 
-    let master_blinding_key = match descriptor.as_ref().key {
+    let master_blinding_key = match descriptor
+        .ct_descriptor()
+        .expect("must be a ct_descriptor")
+        .key
+    {
         elements_miniscript::confidential::Key::Slip77(master_blinding_key) => master_blinding_key,
         elements_miniscript::confidential::Key::View(_)
         | elements_miniscript::confidential::Key::Bare(_) => {

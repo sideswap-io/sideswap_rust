@@ -177,12 +177,11 @@ impl GdkSesRust {
         for account in self.accounts.iter() {
             let wallet = account.wallet.read().expect("must not fail");
 
-            let tip_height = wallet.store.cache.tip.0;
+            let tip_height = wallet.tip().height();
             let pending_tip_height = tip_height.saturating_sub(1);
             max_tip_height = std::cmp::max(tip_height, max_tip_height);
 
             let my_txids = wallet
-                .store
                 .cache
                 .heights
                 .iter()

@@ -2602,9 +2602,10 @@ checksum = "112b39cec0b298b6c1999fee3e31427f74f676e4cb9879ed1a121b43661a4154"
 
 [[package]]
 name = "lwk_common"
-version = "0.12.0"
-source = "git+https://github.com/sideswap-io/lwk.git?rev=ae2df3177f3e5343b132e77b9992698c34a5f1af#ae2df3177f3e5343b132e77b9992698c34a5f1af"
+version = "0.15.0"
+source = "git+https://github.com/sideswap-io/lwk.git?rev=a24e6af66b0bf171392f2e694da3e8ce07ade68f#a24e6af66b0bf171392f2e694da3e8ce07ade68f"
 dependencies = [
+ "aes-gcm-siv 0.11.1",
  "base64 0.21.7",
  "elements 0.25.2",
  "elements-miniscript",
@@ -2613,13 +2614,14 @@ dependencies = [
  "rand 0.8.5",
  "serde 1.0.219",
  "serde_json",
+ "tempfile",
  "thiserror 1.0.69",
 ]
 
 [[package]]
 name = "lwk_signer"
-version = "0.12.0"
-source = "git+https://github.com/sideswap-io/lwk.git?rev=ae2df3177f3e5343b132e77b9992698c34a5f1af#ae2df3177f3e5343b132e77b9992698c34a5f1af"
+version = "0.15.0"
+source = "git+https://github.com/sideswap-io/lwk.git?rev=a24e6af66b0bf171392f2e694da3e8ce07ade68f#a24e6af66b0bf171392f2e694da3e8ce07ade68f"
 dependencies = [
  "base64 0.21.7",
  "bip39",
@@ -2630,8 +2632,8 @@ dependencies = [
 
 [[package]]
 name = "lwk_wollet"
-version = "0.12.0"
-source = "git+https://github.com/sideswap-io/lwk.git?rev=ae2df3177f3e5343b132e77b9992698c34a5f1af#ae2df3177f3e5343b132e77b9992698c34a5f1af"
+version = "0.15.0"
+source = "git+https://github.com/sideswap-io/lwk.git?rev=a24e6af66b0bf171392f2e694da3e8ce07ade68f#a24e6af66b0bf171392f2e694da3e8ce07ade68f"
 dependencies = [
  "aes 0.8.4",
  "aes-gcm",
@@ -2666,7 +2668,7 @@ dependencies = [
  "sha2",
  "thiserror 1.0.69",
  "tokio",
- "tokio-tungstenite 0.24.0",
+ "tokio-tungstenite",
  "url",
  "wasm-bindgen-futures",
  "web-sys",
@@ -4197,7 +4199,7 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tokio-socks",
- "tokio-tungstenite 0.26.2",
+ "tokio-tungstenite",
  "url",
 ]
 
@@ -4292,8 +4294,8 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tokio-socks",
- "tokio-tungstenite 0.26.2",
- "tungstenite 0.26.2",
+ "tokio-tungstenite",
+ "tungstenite",
  "ureq",
  "url",
 ]
@@ -4320,7 +4322,7 @@ dependencies = [
  "sideswap_types",
  "thiserror 1.0.69",
  "tokio",
- "tokio-tungstenite 0.26.2",
+ "tokio-tungstenite",
  "vergen",
 ]
 
@@ -4368,8 +4370,8 @@ dependencies = [
  "sideswap_types",
  "thiserror 1.0.69",
  "tokio",
- "tokio-tungstenite 0.26.2",
- "tungstenite 0.26.2",
+ "tokio-tungstenite",
+ "tungstenite",
  "url",
 ]
 
@@ -4479,7 +4481,7 @@ dependencies = [
  "sqlx",
  "thiserror 1.0.69",
  "tokio",
- "tokio-tungstenite 0.26.2",
+ "tokio-tungstenite",
  "ureq",
 ]
 
@@ -4529,7 +4531,7 @@ dependencies = [
  "sideswap_types",
  "thiserror 1.0.69",
  "tokio",
- "tokio-tungstenite 0.26.2",
+ "tokio-tungstenite",
 ]
 
 [[package]]
@@ -5159,22 +5161,6 @@ dependencies = [
 
 [[package]]
 name = "tokio-tungstenite"
-version = "0.24.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "edc5f74e248dc973e0dbb7b74c7e0d6fcc301c694ff50049504004ef4d0cdcd9"
-dependencies = [
- "futures-util",
- "log",
- "rustls",
- "rustls-pki-types",
- "tokio",
- "tokio-rustls",
- "tungstenite 0.24.0",
- "webpki-roots 0.26.11",
-]
-
-[[package]]
-name = "tokio-tungstenite"
 version = "0.26.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7a9daff607c6d2bf6c16fd681ccb7eecc83e4e2cdc1ca067ffaadfca5de7f084"
@@ -5185,7 +5171,7 @@ dependencies = [
  "rustls-pki-types",
  "tokio",
  "tokio-rustls",
- "tungstenite 0.26.2",
+ "tungstenite",
  "webpki-roots 0.26.11",
 ]
 
@@ -5316,26 +5302,6 @@ name = "try-lock"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
-
-[[package]]
-name = "tungstenite"
-version = "0.24.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "18e5b8366ee7a95b16d32197d0b2604b43a0be89dc5fac9f8e96ccafbaedda8a"
-dependencies = [
- "byteorder",
- "bytes",
- "data-encoding",
- "http 1.3.1",
- "httparse",
- "log",
- "rand 0.8.5",
- "rustls",
- "rustls-pki-types",
- "sha1",
- "thiserror 1.0.69",
- "utf-8",
-]
 
 [[package]]
 name = "tungstenite"
