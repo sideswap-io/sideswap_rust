@@ -165,6 +165,10 @@ pub struct OwnOrder {
     pub ttl: Option<DurationMs>,
     pub private_id: Option<Box<String>>,
     pub online: bool,
+    pub receive_address: Address,
+    /// Set iff the order is online
+    pub change_address: Option<Address>,
+    /// Set iff the order is offline
     pub offline_utxos: Option<Vec<elements::OutPoint>>,
 }
 
