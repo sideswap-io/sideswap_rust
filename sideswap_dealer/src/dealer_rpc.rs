@@ -960,7 +960,10 @@ async fn process_internal_msg(data: &mut Data, internal: Internal) {
         Internal::ReloadUtxo => {
             let unspent = rpc::make_rpc_call(&data.params.rpc, rpc::ListUnspentCall { minconf: 0 })
                 .await
-                .expect("list_unspent failed");
+                .expect("list_unspent failed")
+                .into_iter()
+                .filter(|utxo| utxo.is_segwit_v0())
+                .collect::<Vec<_>>();
 
             let mut utxos_with_key = Vec::new();
             for unspent in unspent.iter() {

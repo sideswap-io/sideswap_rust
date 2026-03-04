@@ -191,6 +191,8 @@ pub struct UnspentItem {
     pub amountblinder: elements::confidential::ValueBlindingFactor, // 0000000000000000000000000000000000000000000000000000000000000000 for unblinded
     pub assetcommitment: Option<elements::secp256k1_zkp::Generator>, // Not present if unblinded
     pub amountcommitment: Option<elements::secp256k1_zkp::PedersenCommitment>, // Not present if unblinded
+    /// A descriptor for spending this output (only when solvable)
+    pub desc: Option<String>,
 }
 
 impl UnspentItem {
@@ -199,6 +201,15 @@ impl UnspentItem {
             txid: self.txid,
             vout: self.vout,
         }
+    }
+
+    pub fn is_segwit_v0(&self) -> bool {
+        self.script_pub_key.is_v0_p2wpkh()
+            || self.script_pub_key.is_p2sh()
+                && self
+                    .redeem_script
+                    .as_ref()
+                    .is_some_and(|redeem_script| redeem_script.is_v0_p2wpkh())
     }
 }
 
@@ -256,3 +267,6 @@ impl RpcCall for SendRawTransactionCall {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;
