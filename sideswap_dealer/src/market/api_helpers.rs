@@ -84,6 +84,8 @@ impl From<super::OwnOrder> for api::OwnOrder {
             orig_amount: value.orig_amount,
             active_amount: value.active_amount,
             price: value.price.value(),
+            receive_address: value.receive_address.to_string(),
+            change_address: value.change_address.to_string(),
         }
     }
 }

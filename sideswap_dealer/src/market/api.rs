@@ -131,6 +131,10 @@ pub struct OwnOrder {
     pub active_amount: f64,
     /// Order price (must be positive)
     pub price: f64,
+    /// Receive address
+    pub receive_address: String,
+    /// Change address
+    pub change_address: String,
 }
 
 #[derive(Debug, Serialize, Object)]

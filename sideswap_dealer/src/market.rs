@@ -1,7 +1,7 @@
 //! New market swap API (replaces both old swap API and instant swaps)
 
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, HashSet},
     path::PathBuf,
     sync::Arc,
     time::Duration,
@@ -182,6 +182,8 @@ struct OwnOrder {
     orig_amount: f64,
     active_amount: f64,
     price: NormalFloat,
+    receive_address: elements::Address,
+    change_address: elements::Address,
 }
 
 struct HistoryOrders {
@@ -573,6 +575,12 @@ struct Data {
     accepting_quotes: BTreeMap<QuoteId, AcceptingQuote>,
 
     addr_cache: BTreeMap<Chain, Address>,
+
+    /// The full list of all received addresses since the program startup
+    own_addresses: HashSet<Address>,
+
+    /// The full list of all resolved GAID addresses since the program startup
+    gaid_addresses: HashSet<Address>,
 }
 
 impl From<tokio::sync::oneshot::error::RecvError> for Error {
@@ -615,6 +623,9 @@ fn convert_own_order(order: &mkt::OwnOrder, ticker_loader: &TickerLoader) -> Opt
         orig_amount: asset_float_amount_(order.orig_amount, base_precision),
         active_amount: asset_float_amount_(order.active_amount, base_precision),
         price: order.price,
+        receive_address: order.receive_address.clone(),
+        // Only online orders are supported by the dealer
+        change_address: order.change_address.clone().expect("must be set"),
     })
 }
 
@@ -1525,6 +1536,7 @@ async fn new_address(
     chain: Chain,
     addr_cache: &mut BTreeMap<Chain, Address>,
     allow_cache: bool,
+    own_addresses: &mut HashSet<Address>,
 ) -> Result<Address, Error> {
     if allow_cache {
         if let Some(address) = addr_cache.get(&chain) {
@@ -1538,6 +1550,7 @@ async fn new_address(
     });
     let address = res_receiver.await?.map_err(Error::Wallet)?;
     addr_cache.insert(chain, address.clone());
+    own_addresses.insert(address.clone());
     Ok(address)
 }
 
@@ -1633,9 +1646,15 @@ async fn process_client_command(data: &mut Data, command: ClientCommand) {
             allow_cache,
             res_sender,
         } => {
-            let res = new_address(&data.event_sender, chain, &mut data.addr_cache, allow_cache)
-                .await
-                .map_err(Into::into);
+            let res = new_address(
+                &data.event_sender,
+                chain,
+                &mut data.addr_cache,
+                allow_cache,
+                &mut data.own_addresses,
+            )
+            .await
+            .map_err(Into::into);
             res_sender.send(res);
         }
 
@@ -2024,6 +2043,32 @@ async fn try_sync_market(data: &mut Data, key: &OrderGroupKey) -> Result<(), any
         .get_mut(key)
         .ok_or_else(|| anyhow!("can't find group {key:?}"))?;
 
+    // Drop orders with unknown addresses
+    let mut invalid_orders = BTreeSet::<OrdId>::new();
+    for (order_id, order) in market.server_orders.iter() {
+        let receive_address = &order.receive_address;
+        let change_address = order.change_address.as_ref().expect("must be set");
+
+        let valid_receive_address = data.own_addresses.contains(receive_address)
+            || data.gaid_addresses.contains(receive_address);
+        let valid_change_address = data.own_addresses.contains(change_address);
+
+        let valid_addresses = valid_receive_address && valid_change_address;
+
+        if !valid_addresses {
+            log::warn!(
+                "invalid order detected, order_id: {order_id}, receive_address: {receive_address}, valid_receive_address: {valid_receive_address}, change_address: {change_address}, valid_change_address: {valid_change_address}"
+            );
+            invalid_orders.insert(*order_id);
+        }
+    }
+
+    for order_id in invalid_orders {
+        log::warn!("drop invalid order, order_id: {order_id}");
+        make_market_request!(data.ws, CancelOrder, mkt::CancelOrderRequest { order_id })?;
+        market.server_orders.remove(&order_id);
+    }
+
     // Drop removed orders
     while market.server_orders.len() > market.dealer_orders.len() {
         let order = market.server_orders.last_key_value().expect("must exist").1;
@@ -2091,6 +2136,10 @@ async fn try_sync_market(data: &mut Data, key: &OrderGroupKey) -> Result<(), any
                 }
             )?;
 
+            // TODO: Check that the address belongs to own wallet
+
+            data.gaid_addresses.insert(resp.address.clone());
+
             resp.address
         } else {
             new_address(
@@ -2098,6 +2147,7 @@ async fn try_sync_market(data: &mut Data, key: &OrderGroupKey) -> Result<(), any
                 Chain::External,
                 &mut data.addr_cache,
                 true,
+                &mut data.own_addresses,
             )
             .await?
         };
@@ -2107,6 +2157,7 @@ async fn try_sync_market(data: &mut Data, key: &OrderGroupKey) -> Result<(), any
             Chain::Internal,
             &mut data.addr_cache,
             true,
+            &mut data.own_addresses,
         )
         .await?;
 
@@ -2225,6 +2276,8 @@ async fn run(
         received_quotes: BTreeMap::new(),
         accepting_quotes: BTreeMap::new(),
         addr_cache: BTreeMap::new(),
+        own_addresses: HashSet::new(),
+        gaid_addresses: HashSet::new(),
     };
 
     let mut interval = tokio::time::interval(Duration::from_secs(1));
