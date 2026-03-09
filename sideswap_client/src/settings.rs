@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use bitcoin::bip32::{self, Fingerprint};
 use elements_miniscript::slip77::MasterBlindingKey;
 use serde::{Deserialize, Serialize};
-use sideswap_api::{OrderId, SessionId};
+use sideswap_api::{OrderId, SessionId, connect_api::InstallId};
 use sideswap_types::str_encoded::StrEncoded;
 
 #[derive(Eq, PartialEq, Serialize, Deserialize, Copy, Clone)]
@@ -57,7 +57,7 @@ pub struct Settings {
 
     pub session_id: Option<SessionId>,
 
-    // Random key used with assets_registry to encrypt data on disk
+    /// Random key used with assets_registry to encrypt data on disk
     pub master_pub_key: Option<bip32::Xpub>,
 
     pub reg_info: Option<RegInfo>,
@@ -75,6 +75,9 @@ pub struct Settings {
     /// The previous hash of the mnemonic or jade id used for login.
     /// The old settings must be cleared when it changes.
     pub login_id: Option<String>,
+
+    /// Unique ID that is used to differentiate different app installs with the same wallet descriptor
+    pub install_id: Option<InstallId>,
 
     #[serde(default)]
     pub tx_secrets: BTreeMap<elements::Txid, Vec<elements::TxOutSecrets>>,

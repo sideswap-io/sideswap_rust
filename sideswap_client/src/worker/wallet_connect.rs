@@ -8,7 +8,8 @@ use anyhow::{Context, anyhow, bail, ensure};
 use bitcoin::bip32::{ChildNumber, DerivationPath, Fingerprint};
 use elements::{Script, pset::PartiallySignedTransaction};
 use lwk_wollet::WolletDescriptor;
-use sideswap_api::connect_api;
+use rand::{Rng, thread_rng};
+use sideswap_api::connect_api::{self, InstallId};
 use sideswap_common::{
     wallet_key::WalletKey,
     ws_client::{self, WsClient},
@@ -28,6 +29,7 @@ use crate::{
 use super::Data;
 
 pub struct WalletConnect {
+    install_id: InstallId,
     connected: bool,
     descriptor: WolletDescriptor,
     wallet_key: WalletKey,
@@ -86,7 +88,18 @@ pub fn new(data: &mut Data, descriptor: &WolletDescriptor) -> WalletConnect {
             sessions: Vec::new(),
         }));
 
+    let install_id = match data.settings.install_id {
+        Some(install_id) => install_id,
+        None => {
+            let install_id = InstallId(thread_rng().r#gen());
+            data.settings.install_id = Some(install_id);
+            data.save_settings();
+            install_id
+        }
+    };
+
     WalletConnect {
+        install_id,
         connected: false,
         descriptor: descriptor.clone(),
         wallet_key,
@@ -103,6 +116,7 @@ impl From<connect_api::Session> for proto::Session {
         proto::Session {
             session_id: value.session_id,
             domain: value.domain,
+            is_local: value.is_local,
         }
     }
 }
@@ -355,6 +369,7 @@ pub fn handle_msg(data: &mut Data, event: ws_client::Event) {
                                         .wallet_connect
                                         .wallet_key
                                         .sign_challenge(&resp.challenge),
+                                    install_id: Some(wallet.wallet_connect.install_id),
                                 }),
                             );
                         }

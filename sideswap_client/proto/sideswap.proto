@@ -233,6 +233,7 @@ message HistoryOrder {
 message Session {
   required string session_id = 1;
   required string domain = 2;
+  required bool is_local = 3;
 }
 
 message To {

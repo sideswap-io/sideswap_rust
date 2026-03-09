@@ -1,15 +1,19 @@
 use elements::{schnorr::XOnlyPublicKey, secp256k1_zkp::schnorr::Signature};
 use serde::{Deserialize, Serialize};
-use sideswap_types::duration_ms::DurationMs;
+use sideswap_types::{byte_array::ByteArray16, duration_ms::DurationMs};
 
 // Common
 
 pub type ReqId = i32;
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InstallId(pub ByteArray16);
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Session {
     pub session_id: String,
     pub domain: String,
+    pub is_local: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -70,6 +74,10 @@ pub struct ChallengeResp {
 pub struct LoginReq {
     pub public_key: XOnlyPublicKey,
     pub signature: Signature,
+    /// Unique ID of the app installation.
+    /// The value is optional because the initial app version (1.9.0) doesn't have it.
+    /// Must be set for newer app versions.
+    pub install_id: Option<InstallId>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
