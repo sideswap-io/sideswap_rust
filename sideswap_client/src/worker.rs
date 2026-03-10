@@ -2783,6 +2783,7 @@ impl Data {
     fn process_update_push_token(&mut self, req: proto::to::UpdatePushToken) {
         self.push_token = Some(req.token);
         self.update_push_token();
+        wallet_connect::register_fcm(self);
     }
 
     fn find_own_amp_address_info(

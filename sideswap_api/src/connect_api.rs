@@ -6,7 +6,7 @@ use sideswap_types::{byte_array::ByteArray16, duration_ms::DurationMs};
 
 pub type ReqId = i32;
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct InstallId(pub ByteArray16);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -94,6 +94,14 @@ pub struct UserActionReq {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct UserActionResp {}
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RegisterFcmReq {
+    pub token: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RegisterFcmResp {}
+
 // Notifications
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -150,6 +158,7 @@ pub enum Req {
     Challenge(ChallengeReq),
     Login(LoginReq),
     UserAction(UserActionReq),
+    RegisterFcm(RegisterFcmReq),
 }
 
 #[derive(Serialize, Deserialize)]
@@ -157,6 +166,7 @@ pub enum Resp {
     Challenge(ChallengeResp),
     Login(LoginResp),
     UserAction(UserActionResp),
+    RegisterFcm(RegisterFcmResp),
 }
 
 #[derive(Serialize, Deserialize)]

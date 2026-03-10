@@ -417,6 +417,8 @@ pub fn handle_msg(data: &mut Data, event: ws_client::Event) {
                                 .send(proto::from::Msg::SessionList(proto::from::SessionList {
                                     sessions: sessions.into_iter().map(Into::into).collect(),
                                 }));
+
+                            register_fcm(data);
                         }
 
                         connect_api::Resp::UserAction(connect_api::UserActionResp {}) => {
@@ -428,6 +430,8 @@ pub fn handle_msg(data: &mut Data, event: ws_client::Event) {
                                 None => log::debug!("unknown user_action id: {id}"),
                             }
                         }
+
+                        connect_api::Resp::RegisterFcm(connect_api::RegisterFcmResp {}) => {}
                     },
 
                     connect_api::From::Error { id, err } => {
@@ -481,6 +485,20 @@ pub fn handle_msg(data: &mut Data, event: ws_client::Event) {
 pub fn handle_app_state(data: &mut Data) {
     if let Some(wallet) = data.wallet_data.as_mut() {
         wallet.wallet_connect.client.set_app_active(data.app_active);
+    }
+}
+
+pub fn register_fcm(data: &mut Data) {
+    if let (Some(wallet), Some(token)) = (data.wallet_data.as_ref(), data.push_token.as_ref()) {
+        if wallet.wallet_connect.connected {
+            send_request(
+                &wallet.wallet_connect,
+                0,
+                connect_api::Req::RegisterFcm(connect_api::RegisterFcmReq {
+                    token: token.clone(),
+                }),
+            );
+        }
     }
 }
 

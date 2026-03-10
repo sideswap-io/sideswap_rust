@@ -72,7 +72,7 @@ impl WsClient {
 
     /// This should be used in mobile apps only.
     /// Automatic reconnection is disabled if the app is inactive.
-    /// A ping is sent to check the connection once the app resumes.
+    /// A ping is sent to check that the connection is up once the app resumes.
     pub fn set_app_active(&self, is_active: bool) {
         self.app_active_sender
             .send(is_active)
