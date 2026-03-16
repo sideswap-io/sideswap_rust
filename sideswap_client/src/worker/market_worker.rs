@@ -2978,6 +2978,8 @@ fn try_accept_quote(
 }
 
 pub fn accept_quote(worker: &mut super::Data, msg: proto::to::AcceptQuote) {
+    let quote_id = msg.quote_id;
+
     let res = try_accept_quote(worker, msg);
 
     let resp = match res {
@@ -2993,6 +2995,7 @@ pub fn accept_quote(worker: &mut super::Data, msg: proto::to::AcceptQuote) {
     worker
         .ui
         .send(proto::from::Msg::AcceptQuote(proto::from::AcceptQuote {
+            quote_id,
             result: Some(resp),
         }));
 }

@@ -816,6 +816,8 @@ message From {
   }
 
   message AcceptQuote {
+    required uint64 quote_id = 3;
+
     message Success {
       required string txid = 1;
     }
