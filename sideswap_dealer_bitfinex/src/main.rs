@@ -802,13 +802,18 @@ async fn process_timer(data: &mut Data) {
             .get(&ExchangeTicker::EUR)
             .cloned()
             .unwrap_or_default();
+
         let bitcoins_updated = balance_wallet_bitcoin != balance_wallet_bitcoin_old
             && balance_exchange_bitcoin != balance_exchange_bitcoin_old;
         let usdt_updated = balance_wallet_usdt != balance_wallet_usdt_old
             && balance_exchange_usdt != balance_exchange_usdt_old;
         let eur_updated = balance_wallet_eurx != balance_wallet_eurx_old
             && balance_exchange_eur != balance_exchange_eur_old;
-        if bitcoins_updated && (usdt_updated || eur_updated) {
+
+        let updated_count =
+            u32::from(bitcoins_updated) + u32::from(usdt_updated) + u32::from(eur_updated);
+
+        if updated_count >= 2 {
             let bitcoin_change = balance_wallet_bitcoin + balance_exchange_bitcoin
                 - balance_wallet_bitcoin_old
                 - balance_exchange_bitcoin_old;
@@ -820,8 +825,7 @@ async fn process_timer(data: &mut Data) {
                 - balance_exchange_eur_old;
             send_notification(
                 &format!(
-                    "swap complete, balance change: bitcoin: {:0.8}, usdt: {:0.8}, eurx: {:0.8}",
-                    bitcoin_change, usdt_change, eur_change
+                    "swap complete, balance change: bitcoin: {bitcoin_change:0.8}, usdt: {usdt_change:0.8}, eurx: {eur_change:0.8}"
                 ),
                 &data.settings.notifications.url,
             );
