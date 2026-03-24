@@ -6,9 +6,10 @@ use elements::OutPoint;
 use elements::pset::PartiallySignedTransaction;
 use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
-use sideswap_api::{Asset, *};
+use sideswap_api::{Asset, mkt::TradeDir, *};
 use sideswap_common::{
     dealer_ticker::{DealerTicker, TickerLoader},
+    exchange_pair::ExchangePair,
     make_request,
     rpc::{self, ListUnspent},
     types::Amount,
@@ -92,11 +93,10 @@ enum Internal {
 #[derive(Debug)]
 pub struct SwapSucceed {
     pub txid: elements::Txid,
-    // pub exchange_pair: ExchangePair,
-    // pub trade_dir: TradeDir,
-    pub ticker: DealerTicker,
-    pub bitcoin_amount: sideswap_common::types::Amount,
-    pub dealer_send_bitcoins: bool,
+    pub exchange_pair: ExchangePair,
+    pub trade_dir: TradeDir,
+    pub base_amount: f64,
+    pub quote_amount: f64,
 }
 
 #[derive(Clone, Debug)]
@@ -354,22 +354,42 @@ async fn process_ws_notif(data: &mut Data, msg: Notification) {
                 .instant_swaps
                 .remove(&swap.order_id)
                 .expect("order not found");
+
             if swap.status == SwapDoneStatus::Success {
-                let txid = swap.txid.unwrap();
+                let txid = swap.txid.expect("must be set");
+
                 // All reported amounts are from the client side
                 let dealer_send_bitcoins = swap.recv_asset == data.policy_asset;
-                let (asset_id, bitcoin_amount) = if swap.recv_asset == data.policy_asset {
-                    (swap.send_asset, swap.recv_amount)
-                } else {
-                    (swap.recv_asset, swap.send_amount)
-                };
+
+                let (asset_id, bitcoin_amount, asset_amount) =
+                    if swap.recv_asset == data.policy_asset {
+                        (swap.send_asset, swap.recv_amount, swap.send_amount)
+                    } else {
+                        (swap.recv_asset, swap.send_amount, swap.recv_amount)
+                    };
+
                 let bitcoin_amount = Amount::from_sat(bitcoin_amount);
-                let ticker = data.ticker_loader.ticker(&asset_id).unwrap();
+                let asset_amount = Amount::from_sat(asset_amount);
+
+                let ticker = data.ticker_loader.ticker(&asset_id).expect("must exist");
+
+                let exchange_pair = ExchangePair {
+                    base: DealerTicker::LBTC,
+                    quote: ticker,
+                };
+
+                let trade_dir = if dealer_send_bitcoins {
+                    TradeDir::Sell
+                } else {
+                    TradeDir::Buy
+                };
+
                 let instant_swap_succeed = SwapSucceed {
                     txid,
-                    dealer_send_bitcoins,
-                    bitcoin_amount,
-                    ticker,
+                    exchange_pair,
+                    trade_dir,
+                    base_amount: bitcoin_amount.to_bitcoin(),
+                    quote_amount: asset_amount.to_bitcoin(),
                 };
                 data.event_sender
                     .send(Event::Swap(instant_swap_succeed))

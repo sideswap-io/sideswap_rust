@@ -19,11 +19,11 @@ use sideswap_api::mkt::TradeDir;
 use sideswap_common::channel_helpers::UncheckedUnboundedSender;
 use sideswap_common::dealer_ticker::DealerTicker;
 use sideswap_common::dealer_ticker::TickerLoader;
+use sideswap_common::exchange_pair::ExchangePair;
 use sideswap_common::rpc;
 use sideswap_common::types::Amount;
 use sideswap_common::types::MAX_BTC_AMOUNT;
 use sideswap_common::types::btc_to_sat;
-use sideswap_common::types::sat_to_btc;
 use sideswap_common::types::timestamp_now;
 use sideswap_common::web_notif::send_many;
 use sideswap_dealer::dealer_rpc;
@@ -32,6 +32,7 @@ use sideswap_dealer::logs::GIT_COMMIT_HASH;
 use sideswap_dealer::market;
 use sideswap_dealer::utxo_data;
 use sideswap_dealer::utxo_data::UtxoData;
+use sideswap_types::asset_precision::asset_float_amount_;
 use sideswap_types::env::Env;
 use sideswap_types::network::Network;
 use sideswap_types::normal_float::NormalFloat;
@@ -43,6 +44,8 @@ use std::time::Duration;
 use std::time::Instant;
 use storage::Transfer;
 use storage::TransferState;
+use strum::IntoEnumIterator;
+use strum_macros::EnumIter;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::mpsc::unbounded_channel;
 
@@ -129,11 +132,6 @@ const INTEREST_BTC_USDT: f64 = 1.004;
 const INTEREST_BTC_EURX: f64 = 1.002;
 const INTEREST_EURX_USDT: f64 = 1.002;
 
-const MIN_HEDGE_AMOUNT: f64 = 0.0002;
-
-const BITFINEX_FEE_PROD: f64 = 0.0;
-const BITFINEX_FEE_TEST: f64 = 0.0;
-
 #[derive(Debug, Deserialize, Clone)]
 pub struct NotificationSettings {
     pub url: Option<String>,
@@ -141,8 +139,8 @@ pub struct NotificationSettings {
 
 type ExchangeBalances = BTreeMap<ExchangeTicker, f64>;
 type AllExchangeBalances = BTreeMap<String, f64>;
-type BfxPrices = BTreeMap<ExchangePair, Price>;
-type ExternalPrices = BTreeMap<ExchangePair, f64>;
+type BfxPrices = BTreeMap<BfxExchangePair, Price>;
+type ExternalPrices = BTreeMap<BfxExchangePair, f64>;
 type PendingOrders = BTreeMap<i64, Instant>;
 
 #[derive(Debug, Deserialize)]
@@ -179,62 +177,62 @@ pub struct Settings {
     external_prices: Option<external_prices::Settings>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum ExchangePair {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, EnumIter)]
+enum BfxExchangePair {
     BtcUsdt,
     BtcEur,
     EurUsdt,
 }
 
-impl std::fmt::Display for ExchangePair {
+impl std::fmt::Display for BfxExchangePair {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.name().fmt(f)
     }
 }
 
-impl ExchangePair {
-    const ALL: [ExchangePair; 3] = [
-        ExchangePair::BtcUsdt,
-        ExchangePair::BtcEur,
-        ExchangePair::EurUsdt,
-    ];
-
+impl BfxExchangePair {
     fn name(self) -> &'static str {
         match self {
-            ExchangePair::BtcUsdt => "L-BTC/USDt",
-            ExchangePair::BtcEur => "L-BTC/EURx",
-            ExchangePair::EurUsdt => "EURx/USDt",
+            BfxExchangePair::BtcUsdt => "L-BTC/USDt",
+            BfxExchangePair::BtcEur => "L-BTC/EURx",
+            BfxExchangePair::EurUsdt => "EURx/USDt",
         }
     }
 
     fn bfx_bookname(self) -> &'static str {
         match self {
-            ExchangePair::BtcUsdt => "tBTCUST",
-            ExchangePair::BtcEur => "tBTCEUR",
-            ExchangePair::EurUsdt => "tEURUST",
+            BfxExchangePair::BtcUsdt => "tBTCUST",
+            BfxExchangePair::BtcEur => "tBTCEUR",
+            BfxExchangePair::EurUsdt => "tEURUST",
         }
     }
 
-    fn dealer_ticker(self) -> Option<DealerTicker> {
+    fn base(self) -> DealerTicker {
         match self {
-            ExchangePair::BtcUsdt => Some(DealerTicker::USDT),
-            ExchangePair::BtcEur => Some(DealerTicker::EURX),
-            ExchangePair::EurUsdt => None,
+            BfxExchangePair::BtcUsdt => DealerTicker::LBTC,
+            BfxExchangePair::BtcEur => DealerTicker::LBTC,
+            BfxExchangePair::EurUsdt => DealerTicker::EURX,
         }
     }
 
-    fn find_ticker(ticker: DealerTicker) -> Option<ExchangePair> {
-        ExchangePair::ALL
-            .iter()
-            .find(|item| item.dealer_ticker() == Some(ticker))
-            .copied()
+    fn quote(self) -> DealerTicker {
+        match self {
+            BfxExchangePair::BtcUsdt => DealerTicker::USDT,
+            BfxExchangePair::BtcEur => DealerTicker::EURX,
+            BfxExchangePair::EurUsdt => DealerTicker::USDT,
+        }
     }
 
-    fn find_bookname(bookname: &str) -> Option<ExchangePair> {
-        ExchangePair::ALL
-            .iter()
-            .find(|item| item.bfx_bookname() == bookname)
-            .copied()
+    fn find_bookname(bookname: &str) -> Option<BfxExchangePair> {
+        BfxExchangePair::iter().find(|item| item.bfx_bookname() == bookname)
+    }
+
+    fn min_bfx_amount(self) -> f64 {
+        // Use https://api.bitfinex.com/v1/symbols_details
+        match self {
+            BfxExchangePair::BtcUsdt | BfxExchangePair::BtcEur => 0.00004,
+            BfxExchangePair::EurUsdt => 2.0,
+        }
     }
 }
 
@@ -248,7 +246,7 @@ enum Msg {
     BfWorker(bitfinex_worker::Response),
     Cli(cli::RequestData),
     CheckExchange,
-    External(ExchangePair, Result<f64, anyhow::Error>),
+    External(BfxExchangePair, Result<f64, anyhow::Error>),
 }
 
 #[derive(Clone, Copy)]
@@ -352,60 +350,64 @@ pub async fn start_webserver(status_port: u16, status: HealthStatus) {
     axum::serve(listener, app).await.expect("must not fail");
 }
 
-fn hedge_order(data: &mut Data, swap: SwapSucceed) {
+fn hedge_order(
+    data: &mut Data,
+    SwapSucceed {
+        txid,
+        exchange_pair,
+        trade_dir,
+        base_amount,
+        quote_amount,
+    }: SwapSucceed,
+) {
     info!(
-        "hedge swap, txid: {}, ticker: {}, send_bitcoins: {}, bitcoin_amount: {}",
-        &swap.txid,
-        swap.ticker,
-        swap.dealer_send_bitcoins,
-        swap.bitcoin_amount.to_bitcoin()
+        "hedge swap, txid: {txid}, exchange_pair: {exchange_pair}, base_amount: {base_amount}, quote_amount: {quote_amount}",
     );
+
     data.balancing_blocked = Instant::now();
-    let bf_fee = if data.settings.env.d().mainnet {
-        BITFINEX_FEE_PROD
-    } else {
-        BITFINEX_FEE_TEST
-    };
-    let signed_bitcoin_amount = if swap.dealer_send_bitcoins {
-        Amount::from_bitcoin(swap.bitcoin_amount.to_bitcoin() / (1.0 - bf_fee)).to_bitcoin()
-    } else {
-        -swap.bitcoin_amount.to_bitcoin()
+
+    let signed_base_amount = match trade_dir {
+        TradeDir::Sell => base_amount,
+        TradeDir::Buy => -base_amount,
     };
 
-    if swap.bitcoin_amount.to_bitcoin() >= MIN_HEDGE_AMOUNT {
+    let bfx_exchange_pair = BfxExchangePair::iter()
+        .find(|bfx_exchange_pair| {
+            exchange_pair.base == bfx_exchange_pair.base()
+                && exchange_pair.quote == bfx_exchange_pair.quote()
+        })
+        .unwrap_or_else(|| panic!("unknown exchange pair: {exchange_pair}"));
+
+    let min_amount = bfx_exchange_pair.min_bfx_amount();
+
+    if base_amount >= min_amount {
         data.profit_reports = Some(ProfitsReport {
             wallet_balances: data.wallet_balances.clone(),
             exchange_balances: data.exchange_balances.clone(),
             created_at: Instant::now(),
         });
         let cid = timestamp_now();
-        let bookname = ExchangePair::find_ticker(swap.ticker)
-            .expect("bookname must be know")
-            .bfx_bookname();
-        info!(
-            "swap succeed, txid: {}, send order request, amount: {}, bookname: {}, cid: {}",
-            swap.txid, signed_bitcoin_amount, bookname, cid
-        );
+        let bookname = bfx_exchange_pair.bfx_bookname();
         data.bf_sender
             .send(bitfinex_worker::Request::OrderSubmit(
                 bitfinex_worker::OrderSubmit {
                     market_type: bitfinex_worker::MarketType::ExchangeMarket,
                     symbol: bookname.to_owned(),
                     cid,
-                    amount: signed_bitcoin_amount,
+                    amount: signed_base_amount,
                 },
             ))
             .unwrap();
         data.pending_orders.insert(cid, Instant::now());
     } else {
         debug!(
-            "skip hedging as amount is too low: {}",
-            signed_bitcoin_amount
+            "skip hedging as amount is too low: {signed_base_amount} {base}",
+            base = exchange_pair.base
         );
     }
 }
 
-fn get_bfx_price(data: &Data, exchange_pair: ExchangePair) -> Option<Price> {
+fn get_bfx_price(data: &Data, exchange_pair: BfxExchangePair) -> Option<Price> {
     // How much difference can we tolerate
     const MAX_DIFF: f64 = 0.015;
 
@@ -508,15 +510,12 @@ async fn process_dealer_event(data: &mut Data, event: Event) {
 }
 
 fn submit_dealer_prices(data: &mut Data) {
-    for ticker in [DealerTicker::USDT, DealerTicker::EURX] {
-        let exchange_pair = ExchangePair::find_ticker(ticker).expect("must exist");
+    for exchange_pair in [BfxExchangePair::BtcUsdt, BfxExchangePair::BtcEur] {
         let price = get_bfx_price(data, exchange_pair).map(|bfx_price| {
-            let submit_interest = if ticker == DealerTicker::USDT {
-                INTEREST_BTC_USDT
-            } else if ticker == DealerTicker::EURX {
-                INTEREST_BTC_EURX
-            } else {
-                panic!("unexpected asset");
+            let submit_interest = match exchange_pair {
+                BfxExchangePair::BtcUsdt => INTEREST_BTC_USDT,
+                BfxExchangePair::BtcEur => INTEREST_BTC_EURX,
+                BfxExchangePair::EurUsdt => INTEREST_EURX_USDT,
             };
 
             let base_price = PricePair {
@@ -527,13 +526,13 @@ fn submit_dealer_prices(data: &mut Data) {
 
             let exchange_btc_amount =
                 get_exchange_balance(&data.exchange_balances, &ExchangeTicker::BTC);
-            let exchange_asset_currency = match ticker {
+            let exchange_asset_currency = match exchange_pair.quote() {
                 DealerTicker::USDT => &ExchangeTicker::USDt,
                 DealerTicker::EURX => &ExchangeTicker::EUR,
                 _ => panic!(),
             };
             // Show that the dealer will buy any amount of EURx as needed
-            let exchange_asset_amount = if ticker == DealerTicker::EURX {
+            let exchange_asset_amount = if exchange_pair.quote() == DealerTicker::EURX {
                 10.0 * bfx_price.ask
             } else {
                 get_exchange_balance(&data.exchange_balances, exchange_asset_currency)
@@ -548,7 +547,10 @@ fn submit_dealer_prices(data: &mut Data) {
         });
 
         data.dealer_command_sender
-            .send(Command::Price(UpdatePrice { ticker, price }))
+            .send(Command::Price(UpdatePrice {
+                ticker: exchange_pair.quote(),
+                price,
+            }))
             .unwrap();
     }
 }
@@ -558,23 +560,23 @@ fn submit_market_prices(data: &mut Data) {
 
     let mut orders = Vec::new();
 
-    for &exchange_pair in ExchangePair::ALL.iter() {
+    for exchange_pair in BfxExchangePair::iter() {
         let (asset_pair, interest) = match exchange_pair {
-            ExchangePair::BtcUsdt => (
+            BfxExchangePair::BtcUsdt => (
                 AssetPair {
                     base: data.policy_asset,
                     quote: assets.USDt,
                 },
                 INTEREST_BTC_USDT,
             ),
-            ExchangePair::BtcEur => (
+            BfxExchangePair::BtcEur => (
                 AssetPair {
                     base: data.policy_asset,
                     quote: assets.EURx,
                 },
                 INTEREST_BTC_EURX,
             ),
-            ExchangePair::EurUsdt => (
+            BfxExchangePair::EurUsdt => (
                 AssetPair {
                     base: assets.EURx,
                     quote: assets.USDt,
@@ -596,7 +598,7 @@ fn submit_market_prices(data: &mut Data) {
         let submit_price = apply_interest(&base_price, interest);
 
         let (base_amount_buy, base_amount_sell) = match exchange_pair {
-            ExchangePair::BtcUsdt => {
+            BfxExchangePair::BtcUsdt => {
                 let btc_amount =
                     get_exchange_balance(&data.exchange_balances, &ExchangeTicker::BTC);
                 let usdt_amount =
@@ -604,7 +606,7 @@ fn submit_market_prices(data: &mut Data) {
                 (btc_amount, usdt_amount / submit_price.ask)
             }
             // Show that the dealer will buy or sell any amount of EURx as needed
-            ExchangePair::EurUsdt | ExchangePair::BtcEur => (MAX_BTC_AMOUNT, MAX_BTC_AMOUNT),
+            BfxExchangePair::EurUsdt | BfxExchangePair::BtcEur => (MAX_BTC_AMOUNT, MAX_BTC_AMOUNT),
         };
 
         orders.push(market::AutomaticOrder {
@@ -680,7 +682,7 @@ async fn process_timer(data: &mut Data) {
     let status = [
         (!data.bfx_connected).then_some("BfxOffline"),
         (!data.server_connected).then_some("ServerOffline"),
-        (data.bfx_prices.len() != ExchangePair::ALL.len()).then_some("PriceExpired"),
+        (data.bfx_prices.len() != BfxExchangePair::iter().len()).then_some("PriceExpired"),
         (balance_wallet_bitcoin < MIN_BALANCE_BITCOIN).then_some("WalletBitcoinLow"),
         (balance_exchange_bitcoin < MIN_BALANCE_BITCOIN).then_some("ExchangeBitcoinLow"),
         (balance_wallet_usdt < MIN_BALANCE_USDT).then_some("WalletTetherLow"),
@@ -700,7 +702,7 @@ async fn process_timer(data: &mut Data) {
         Some(status.join(","))
     };
 
-    let usdt_price = data.bfx_prices.get(&ExchangePair::BtcUsdt).cloned();
+    let usdt_price = data.bfx_prices.get(&BfxExchangePair::BtcUsdt).cloned();
     if data.storage.balancing.is_none()
         && data.settings.env.d().mainnet
         && now.duration_since(data.balancing_blocked) > std::time::Duration::from_secs(60)
@@ -952,7 +954,7 @@ async fn process_bf_event(data: &mut Data, event: bfx_ws_api::Event) {
             let price = Price { bid, ask };
             // debug!("updated price, bid: {}, ask: {}", price.bid, price.ask);
             let exchange_pair =
-                ExchangePair::find_bookname(&symbol).expect("book ticker must be known");
+                BfxExchangePair::find_bookname(&symbol).expect("book ticker must be known");
             let old_bfx_price = data.bfx_prices.insert(exchange_pair, price);
             if old_bfx_price.is_none() {
                 info!("received price");
@@ -1079,55 +1081,34 @@ fn process_market_event(data: &mut Data, event: market::Event) {
             price,
             txid,
         } => {
-            let usdt_asset = data.network.d().known_assets.USDt;
-            let eurx_asset = data.network.d().known_assets.EURx;
-            let exchange_pair = if base == data.policy_asset && quote == usdt_asset {
-                ExchangePair::BtcUsdt
-            } else if base == data.policy_asset && quote == eurx_asset {
-                ExchangePair::BtcEur
-            } else if base == eurx_asset && quote == usdt_asset {
-                ExchangePair::EurUsdt
-            } else {
-                panic!("unknown asset pair: base: {base}, quote: {quote}");
-            };
-            let base_amount_float = sat_to_btc(base_amount);
-            let quote_amount_float = sat_to_btc(quote_amount);
+            let base_ticker = data.ticker_loader.ticker(&base).expect("must be known");
+            let quote_ticker = data.ticker_loader.ticker(&quote).expect("must be known");
+
+            let base_amount =
+                asset_float_amount_(base_amount, data.ticker_loader.precision(base_ticker));
+            let quote_amount =
+                asset_float_amount_(quote_amount, data.ticker_loader.precision(quote_ticker));
 
             send_notification(
                 &format!(
-                    "market swap, {exchange_pair}, base amount: {base_amount_float}, quote amount: {quote_amount_float}, price: {price}, txid: {txid}",
+                    "market swap, base_ticker: {base_ticker}, quote_ticker: {quote_ticker}, base amount: {base_amount}, quote amount: {quote_amount}, price: {price}, txid: {txid}",
                 ),
                 &data.settings.notifications.url,
             );
 
-            match exchange_pair {
-                ExchangePair::BtcUsdt | ExchangePair::BtcEur => {
-                    info!("start hedging for {exchange_pair}");
-
-                    let bitcoin_amount =
-                        sideswap_common::types::Amount::from_bitcoin(base_amount_float);
-
-                    let dealer_send_bitcoins = match trade_dir {
-                        TradeDir::Sell => true,
-                        TradeDir::Buy => false,
-                    };
-
-                    let ticker = exchange_pair.dealer_ticker().expect("must be set");
-
-                    hedge_order(
-                        data,
-                        SwapSucceed {
-                            txid,
-                            ticker,
-                            bitcoin_amount,
-                            dealer_send_bitcoins,
-                        },
-                    );
-                }
-                ExchangePair::EurUsdt => {
-                    info!("skip hedging for {exchange_pair}");
-                }
-            }
+            hedge_order(
+                data,
+                SwapSucceed {
+                    txid,
+                    exchange_pair: ExchangePair {
+                        base: base_ticker,
+                        quote: quote_ticker,
+                    },
+                    trade_dir,
+                    base_amount,
+                    quote_amount,
+                },
+            );
         }
 
         market::Event::BroadcastTx { tx } => {

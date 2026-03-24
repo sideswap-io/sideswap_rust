@@ -5,10 +5,11 @@ use futures::prelude::*;
 use serde::{Deserialize, Serialize};
 use sideswap_common::channel_helpers::UncheckedUnboundedSender;
 use sideswap_types::retry_delay::RetryDelay;
+use strum::IntoEnumIterator;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio_tungstenite::connect_async;
 
-use crate::{BfSettings, ExchangePair, bitfinex_api::new_nonce};
+use crate::{BfSettings, BfxExchangePair, bitfinex_api::new_nonce};
 
 #[derive(Debug, PartialEq, Deserialize)]
 pub enum WalletType {
@@ -610,7 +611,7 @@ pub async fn connect(settings: &BfSettings) -> Result<Conn, anyhow::Error> {
     let conf_req = serde_json::to_string(&conf_req).expect("must not fail");
     conn.send(tungstenite::Message::text(conf_req)).await?;
 
-    for exchange_pair in ExchangePair::ALL {
+    for exchange_pair in BfxExchangePair::iter() {
         let sub_req = Req::Subscribe {
             channel: "book".to_owned(),
             symbol: exchange_pair.bfx_bookname().to_owned(),

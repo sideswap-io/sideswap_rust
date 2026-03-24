@@ -49,8 +49,9 @@ fn process_dealer_event(data: &mut Data, event: dealer_rpc::Event) {
     match event {
         dealer_rpc::Event::Swap(swap) => {
             log::info!(
-                "swap succeed, bitcoin_amount: {}",
-                swap.bitcoin_amount.to_bitcoin()
+                "swap succeed, base_amount: {base_amount}, quote_amount: {quote_amount}",
+                base_amount = swap.base_amount,
+                quote_amount = swap.quote_amount,
             );
         }
         dealer_rpc::Event::ServerConnected(_) => {}

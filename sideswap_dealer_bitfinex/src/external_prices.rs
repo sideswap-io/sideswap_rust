@@ -3,7 +3,7 @@ use std::time::Duration;
 use serde::Deserialize;
 use sideswap_common::{channel_helpers::UncheckedUnboundedSender, http_client::HttpClient};
 
-use crate::{ExchangePair, Msg};
+use crate::{BfxExchangePair, Msg};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Settings {
@@ -26,7 +26,7 @@ async fn current_price(client: &HttpClient, url: &str) -> Result<f64, anyhow::Er
 async fn try_load(
     client: &HttpClient,
     url: &str,
-    exchange_pair: ExchangePair,
+    exchange_pair: BfxExchangePair,
     msg_tx: &UncheckedUnboundedSender<Msg>,
 ) {
     let res = current_price(client, url).await;
@@ -36,9 +36,27 @@ async fn try_load(
 pub async fn reload(settings: Settings, msg_tx: UncheckedUnboundedSender<Msg>) {
     let client = HttpClient::new();
     loop {
-        try_load(&client, &settings.btc_usdt, ExchangePair::BtcUsdt, &msg_tx).await;
-        try_load(&client, &settings.btc_eurx, ExchangePair::BtcEur, &msg_tx).await;
-        try_load(&client, &settings.eurx_usdt, ExchangePair::EurUsdt, &msg_tx).await;
+        try_load(
+            &client,
+            &settings.btc_usdt,
+            BfxExchangePair::BtcUsdt,
+            &msg_tx,
+        )
+        .await;
+        try_load(
+            &client,
+            &settings.btc_eurx,
+            BfxExchangePair::BtcEur,
+            &msg_tx,
+        )
+        .await;
+        try_load(
+            &client,
+            &settings.eurx_usdt,
+            BfxExchangePair::EurUsdt,
+            &msg_tx,
+        )
+        .await;
         tokio::time::sleep(Duration::from_secs(30)).await;
     }
 }
