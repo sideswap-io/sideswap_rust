@@ -18,9 +18,6 @@ pub struct Peg {
     pub dir: PegDir,
 }
 
-#[derive(Serialize, Deserialize, Default)]
-pub struct SettingsPersistent {}
-
 #[derive(Serialize, Deserialize, Clone)]
 pub struct WatchOnly {
     pub master_blinding_key: StrEncoded<MasterBlindingKey>,
