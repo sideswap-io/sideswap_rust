@@ -131,8 +131,8 @@ const INTEREST_EURX_USDT: f64 = 1.002;
 
 const MIN_HEDGE_AMOUNT: f64 = 0.0002;
 
-const BITFINEX_FEE_PROD: f64 = 0.0017;
-const BITFINEX_FEE_TEST: f64 = 0.002;
+const BITFINEX_FEE_PROD: f64 = 0.0;
+const BITFINEX_FEE_TEST: f64 = 0.0;
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct NotificationSettings {
