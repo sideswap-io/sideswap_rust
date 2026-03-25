@@ -943,6 +943,7 @@ pub struct SwapDoneNotification {
     pub recv_amount: i64,
     pub network_fee: Option<i64>,
     pub price: f64,
+    pub server_fee: Option<i64>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
