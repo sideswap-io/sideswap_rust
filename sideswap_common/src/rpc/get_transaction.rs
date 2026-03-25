@@ -23,6 +23,9 @@ pub struct GetTransactionResp {
 
     /// Raw data for transaction
     pub hex: String,
+
+    /// The block hash
+    pub blockhash: Option<elements::BlockHash>,
 }
 
 impl RpcCall for GetTransactionCall {
