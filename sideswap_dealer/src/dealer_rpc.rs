@@ -361,11 +361,22 @@ async fn process_ws_notif(data: &mut Data, msg: Notification) {
                 // All reported amounts are from the client side
                 let dealer_send_bitcoins = swap.recv_asset == data.policy_asset;
 
+                let total_fee =
+                    swap.network_fee.unwrap_or_default() + swap.server_fee.unwrap_or_default();
+
                 let (asset_id, bitcoin_amount, asset_amount) =
                     if swap.recv_asset == data.policy_asset {
-                        (swap.send_asset, swap.recv_amount, swap.send_amount)
+                        (
+                            swap.send_asset,
+                            swap.recv_amount + total_fee,
+                            swap.send_amount,
+                        )
                     } else {
-                        (swap.recv_asset, swap.send_amount, swap.recv_amount)
+                        (
+                            swap.recv_asset,
+                            swap.send_amount - total_fee,
+                            swap.recv_amount,
+                        )
                     };
 
                 let bitcoin_amount = Amount::from_sat(bitcoin_amount);
