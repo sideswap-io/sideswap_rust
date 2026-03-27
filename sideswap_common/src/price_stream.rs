@@ -15,11 +15,11 @@ use crate::{
     types::MAX_BTC_AMOUNT,
 };
 
-mod binance;
-mod bitfinex;
-mod bitpreco;
-mod fixed;
-mod sideswap;
+pub mod binance;
+pub mod bitfinex;
+pub mod bitpreco;
+pub mod fixed;
+pub mod sideswap;
 
 #[derive(Debug, Copy, Clone, Deserialize)]
 pub enum PriceSource {
