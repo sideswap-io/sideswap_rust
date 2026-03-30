@@ -6,8 +6,14 @@ use sideswap_types::{asset_precision::AssetPrecision, network::Network};
 
 use crate::gdk_registry_cache::GdkRegistryCache;
 
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct DealerTicker([u8; 8]);
+
+impl std::fmt::Debug for DealerTicker {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
 
 impl DealerTicker {
     const MAX_LEN: usize = std::mem::size_of::<DealerTicker>();
