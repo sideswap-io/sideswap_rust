@@ -135,6 +135,8 @@ impl TickerLoader {
                 "aa909f1b77451e409fe95fe1d3638ad017ab3325c6d4f00301af6d582d0f2034", // BMN2
                 "e8305bb5c1794b256a858a01e5d8af7a5817d257fbfbc2c9d49620f13ff401a9", // CMSTR
                 "8ef0ffd46f831d510a4f2e5e7a5451dd643846f09ea3a904235ff4ea728c1217", // CMTPL
+                "9ba1964c065b2c80d4512ec43871a3598202e0e452aeb33ed19a2c9e0517557e", // CALCPB
+                "78692bbebfb2de40ba3e56f123bac442889b0f4382e6e6b5335ed9a98a11ff31", // CH100
                 "52d77159096eed69c73862a30b0d4012b88cedf92d518f98bc5fc8d34b6c27c9", // EXOeu
                 "3caca4d1e7c596d4f59db73d62e514963c098cc327cab550bd460a9927f5fdbe", // AQF
                 "bac499716a43edb4bfd43c31c9cbe06f50921c57164866ea07549ed9b5aa2da3", // BAKER
