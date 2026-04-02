@@ -132,6 +132,7 @@ impl TickerLoader {
 
         let more_assets = match network {
             Network::Liquid => [
+                // Stokr
                 "aa909f1b77451e409fe95fe1d3638ad017ab3325c6d4f00301af6d582d0f2034", // BMN2
                 "e8305bb5c1794b256a858a01e5d8af7a5817d257fbfbc2c9d49620f13ff401a9", // CMSTR
                 "8ef0ffd46f831d510a4f2e5e7a5451dd643846f09ea3a904235ff4ea728c1217", // CMTPL
@@ -141,6 +142,9 @@ impl TickerLoader {
                 "3caca4d1e7c596d4f59db73d62e514963c098cc327cab550bd460a9927f5fdbe", // AQF
                 "bac499716a43edb4bfd43c31c9cbe06f50921c57164866ea07549ed9b5aa2da3", // BAKER
                 "13fd46f84c0885b9d2cfab1b8f0200876f8a0b2933ddda963187118abecbbbf1", // BSIC1
+                "87c43113e2db0a09028a26d18b52ae45328043e236eb0a5aca701b876002b162", // SKT
+                "af840dd8662514bf9467d246ccc5db62d27730ecedeb2ac365c584ceef0736ad", // SLB
+                // Tokens
                 "7f07d961c654f5a5aef82d97541016f32d43b7da91ab730bde883a7d6dd6c9c7", // PPRGB
             ]
             .as_slice(),
