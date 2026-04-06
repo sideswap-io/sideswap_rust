@@ -1,11 +1,12 @@
 use anyhow::{anyhow, ensure};
-use elements::{pset::PartiallySignedTransaction, AssetId, TxOutSecrets, Txid};
+use elements::{AssetId, TxOutSecrets, Txid, pset::PartiallySignedTransaction};
 use rand::seq::SliceRandom;
+use serde::{Deserialize, Serialize};
 use sideswap_api::{AssetBlindingFactor, ValueBlindingFactor};
 
 use crate::pset_blind::OptBlindedOutputs;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PsetInput {
     pub txid: Txid,
     pub vout: u32,
@@ -15,13 +16,14 @@ pub struct PsetInput {
     pub tx_out_sec: TxOutSecrets,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PsetOutput {
     pub address: elements::Address,
     pub asset_id: AssetId,
     pub amount: u64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Offline {
     pub input: PsetInput,
 
@@ -32,6 +34,7 @@ pub struct Offline {
     pub output_ephemeral_sk: elements::secp256k1_zkp::SecretKey,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConstructPsetArgs {
     pub policy_asset: AssetId,
     pub offlines: Vec<Offline>,
