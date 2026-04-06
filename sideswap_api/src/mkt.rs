@@ -85,7 +85,18 @@ impl QuoteSubId {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq)]
+#[derive(
+    Serialize,
+    Deserialize,
+    Debug,
+    Copy,
+    Clone,
+    Ord,
+    PartialOrd,
+    Eq,
+    PartialEq,
+    strum_macros::Display,
+)]
 pub enum AssetType {
     Base,
     Quote,
@@ -100,7 +111,18 @@ impl AssetType {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq)]
+#[derive(
+    Serialize,
+    Deserialize,
+    Debug,
+    Copy,
+    Clone,
+    Ord,
+    PartialOrd,
+    Eq,
+    PartialEq,
+    strum_macros::Display,
+)]
 pub enum TradeDir {
     Sell,
     Buy,

@@ -4214,6 +4214,7 @@ dependencies = [
  "serde_json",
  "serde_with",
  "sideswap_types",
+ "strum_macros 0.28.0",
 ]
 
 [[package]]
