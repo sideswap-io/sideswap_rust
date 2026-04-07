@@ -335,10 +335,23 @@ pub struct PriceUpdateNotification {
     pub price: PricePair,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum LocalMessageDetails {
+    /// A notification from the wallet addresses monitoring
+    Wallet { txid: elements::Txid },
+
+    /// A peg notification
+    Peg {},
+
+    #[serde(other)]
+    Other,
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct LocalMessageNotification {
     pub title: String,
     pub body: String,
+    pub details: LocalMessageDetails,
 }
 
 #[derive(Serialize, Deserialize, Debug, Copy, Clone)]
