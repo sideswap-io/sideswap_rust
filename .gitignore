@@ -1,2 +1,8 @@
 /target
 /.cargo/config.toml
+/.claude/
+/.specify/
+/specs/
+/CLAUDE.md
+/package.json
+/package-lock.json

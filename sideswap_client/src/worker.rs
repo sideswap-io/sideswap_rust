@@ -201,6 +201,11 @@ struct CreatedTx {
     tx_secrets: Vec<TxOutSecrets>,
 }
 
+struct SwapNotificationMeta {
+    created_at: Instant,
+    notified_at: Option<Instant>,
+}
+
 pub struct WalletData {
     xpubs: XPubInfo,
     wallet_reg: Arc<GdkSesRust>,
@@ -222,6 +227,7 @@ pub struct WalletData {
     last_recv_address: Option<models::AddressInfo>,
     watching_txid: Option<elements::Txid>,
     wallet_connect: wallet_connect::WalletConnect,
+    swap_notifications: BTreeMap<elements::Txid, SwapNotificationMeta>,
 
     cached_address: BTreeMap<(Account, Chain), models::AddressInfo>,
 }
@@ -398,16 +404,19 @@ impl Data {
     }
 
     fn send_pending_txs(&mut self) {
-        let wallet_data = self.wallet_data.as_mut().expect("must be set");
+        let (watching_txid, pending_txs, sent_txhash) = {
+            let wallet_data = self.wallet_data.as_ref().expect("must be set");
+            (
+                wallet_data.watching_txid,
+                wallet_data.pending_txs.clone(),
+                wallet_data.sent_txhash,
+            )
+        };
 
-        let watching_txid = wallet_data.watching_txid;
+        let merged_txs = Self::merge_txs(pending_txs);
 
-        let merged_txs = Self::merge_txs(wallet_data.pending_txs.clone());
-
-        let sent_tx = wallet_data
-            .sent_txhash
-            .as_ref()
-            .and_then(|sent_txhash| merged_txs.list.iter().find(|tx| tx.txid == *sent_txhash));
+        let sent_tx = sent_txhash
+            .and_then(|sent_txhash| merged_txs.list.iter().find(|tx| tx.txid == sent_txhash));
 
         let all_asset_ids = merged_txs
             .list
@@ -416,6 +425,7 @@ impl Data {
             .flatten()
             .map(|in_out| &in_out.unblinded.asset);
         self.add_missing_assets(all_asset_ids, true);
+        self.fire_swap_notifications(&merged_txs.list);
 
         if let Some(sent_tx) = sent_tx {
             let sent_tx = convert_tx(&self.settings.tx_memos, merged_txs.tip_height, sent_tx);
@@ -2197,6 +2207,7 @@ impl Data {
             last_recv_address: None,
             watching_txid: None,
             wallet_connect,
+            swap_notifications: BTreeMap::new(),
             cached_address: BTreeMap::new(),
         });
 
@@ -2271,6 +2282,7 @@ impl Data {
             last_recv_address,
             watching_txid,
             wallet_connect,
+            swap_notifications,
             cached_address,
         } = wallet_data;
 
@@ -2309,6 +2321,7 @@ impl Data {
             last_recv_address,
             watching_txid,
             wallet_connect,
+            swap_notifications,
             cached_address,
         });
     }
@@ -2873,13 +2886,116 @@ impl Data {
         });
     }
 
+    fn register_swap_notification_candidate(&mut self, txid: elements::Txid) {
+        let wallet_data = match self.wallet_data.as_mut() {
+            Some(wallet_data) => wallet_data,
+            None => return,
+        };
+        wallet_data
+            .swap_notifications
+            .entry(txid)
+            .or_insert_with(|| SwapNotificationMeta {
+                created_at: Instant::now(),
+                notified_at: None,
+            });
+    }
+
+    fn cleanup_swap_notification_state(&mut self) {
+        let wallet_data = match self.wallet_data.as_mut() {
+            Some(wallet_data) => wallet_data,
+            None => return,
+        };
+        let now = Instant::now();
+        let ttl = Duration::from_secs(24 * 60 * 60);
+        wallet_data
+            .swap_notifications
+            .retain(|_, meta| now.duration_since(meta.created_at) <= ttl);
+    }
+
+    fn try_take_swap_notification_message(
+        &mut self,
+        tx: &models::Transaction,
+    ) -> Option<(String, String)> {
+        let txid = tx.txid;
+        {
+            let wallet_data = self.wallet_data.as_ref()?;
+            let entry = wallet_data.swap_notifications.get(&txid)?;
+            if entry.notified_at.is_some() {
+                return None;
+            }
+        }
+
+        let mut balances = BTreeMap::<AssetId, i64>::new();
+        for input in tx.inputs.iter() {
+            *balances.entry(input.unblinded.asset).or_default() -= input.unblinded.value as i64;
+        }
+        for output in tx.outputs.iter() {
+            *balances.entry(output.unblinded.asset).or_default() += output.unblinded.value as i64;
+        }
+        let (asset_id, mut amount) = balances
+            .into_iter()
+            .filter(|(_, amount)| *amount < 0)
+            .map(|(asset_id, amount)| (asset_id, (-amount) as u64))
+            .max_by_key(|(_, amount)| *amount)?;
+        if asset_id == self.policy_asset && tx.network_fee <= amount {
+            amount -= tx.network_fee;
+        }
+        let asset = self.assets.get(&asset_id)?;
+        let amount = sideswap_types::asset_precision::asset_float_amount_(amount, asset.precision);
+
+        if let Some(entry) = self
+            .wallet_data
+            .as_mut()
+            .and_then(|wd| wd.swap_notifications.get_mut(&txid))
+        {
+            entry.notified_at = Some(Instant::now());
+        }
+        Some((
+            "Outgoing Transaction".to_owned(),
+            format!("Sent: {}  {}", asset.ticker.0, amount),
+        ))
+    }
+
+    fn fire_swap_notifications(&mut self, txs: &[models::Transaction]) {
+        self.cleanup_swap_notification_state();
+        for tx in txs {
+            if let Some((title, body)) = self.try_take_swap_notification_message(tx) {
+                self.ui
+                    .send(proto::from::Msg::LocalMessage(proto::from::LocalMessage {
+                        title,
+                        body,
+                    }));
+            }
+        }
+    }
+
+    fn process_swap_done(&mut self, notif: api::SwapDoneNotification) {
+        if notif.status != api::SwapDoneStatus::Success {
+            return;
+        }
+        let txid = match notif.txid {
+            Some(txid) => txid,
+            None => return,
+        };
+        self.register_swap_notification_candidate(txid);
+    }
+
     fn process_local_message(&mut self, msg: api::LocalMessageNotification) {
         self.start_fast_sync();
+        let api::LocalMessageNotification {
+            title,
+            body,
+            details,
+        } = msg;
+        if let api::LocalMessageDetails::Wallet { txid } = details {
+            self.register_swap_notification_candidate(txid);
+            return;
+        }
 
         self.ui
             .send(proto::from::Msg::LocalMessage(proto::from::LocalMessage {
-                title: msg.title,
-                body: msg.body,
+                title,
+                body,
             }));
     }
 
@@ -3206,7 +3322,7 @@ impl Data {
             api::Notification::UpdatePrices(_) => {}
             api::Notification::UpdatePriceStream(_) => {}
             api::Notification::BlindedSwapClient(_) => {}
-            api::Notification::SwapDone(_) => {}
+            api::Notification::SwapDone(notif) => self.process_swap_done(notif),
             api::Notification::LocalMessage(msg) => self.process_local_message(msg),
             api::Notification::NewAsset(_) => {}
             api::Notification::MarketDataUpdate(_) => {}
@@ -3992,5 +4108,46 @@ pub fn start_processing(
             warn!("ui stopped, exit");
             break;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn swap_notification_no_duplicate_after_reregister() {
+        let txid = elements::Txid::from_str(
+            "0000000000000000000000000000000000000000000000000000000000000000",
+        )
+        .unwrap();
+        let mut map: BTreeMap<elements::Txid, SwapNotificationMeta> = BTreeMap::new();
+
+        // First registration
+        map.entry(txid).or_insert_with(|| SwapNotificationMeta {
+            created_at: Instant::now(),
+            notified_at: None,
+        });
+        assert!(
+            map.get(&txid).unwrap().notified_at.is_none(),
+            "fresh entry must have notified_at = None"
+        );
+
+        // Simulate notification fired
+        map.get_mut(&txid).unwrap().notified_at = Some(Instant::now());
+        assert!(
+            map.get(&txid).unwrap().notified_at.is_some(),
+            "entry must record notified_at after notification fires"
+        );
+
+        // Re-registration must not overwrite notified_at
+        map.entry(txid).or_insert_with(|| SwapNotificationMeta {
+            created_at: Instant::now(),
+            notified_at: None,
+        });
+        assert!(
+            map.get(&txid).unwrap().notified_at.is_some(),
+            "re-registration must not reset notified_at — dedupe guard would be bypassed"
+        );
     }
 }
