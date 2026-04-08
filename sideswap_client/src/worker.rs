@@ -228,6 +228,12 @@ pub struct WalletData {
     watching_txid: Option<elements::Txid>,
     wallet_connect: wallet_connect::WalletConnect,
     swap_notifications: BTreeMap<elements::Txid, SwapNotificationMeta>,
+    /// Dedup map for A4 incoming notifications. Key = txid, value = first-seen Instant (TTL anchor).
+    /// Presence means notification already fired. Evicted after 24 h.
+    incoming_notified: BTreeMap<elements::Txid, Instant>,
+    /// Backend Wallet LocalMessage store. Suppressed on arrival; forwarded after fire cycle
+    /// if neither A3 nor A4 handled the txid. Value = (title, body, received_at).
+    pending_wallet_notifications: BTreeMap<elements::Txid, (String, String, Instant)>,
 
     cached_address: BTreeMap<(Account, Chain), models::AddressInfo>,
 }
@@ -425,7 +431,7 @@ impl Data {
             .flatten()
             .map(|in_out| &in_out.unblinded.asset);
         self.add_missing_assets(all_asset_ids, true);
-        self.fire_swap_notifications(&merged_txs.list);
+        self.fire_tx_notifications(&merged_txs.list);
 
         if let Some(sent_tx) = sent_tx {
             let sent_tx = convert_tx(&self.settings.tx_memos, merged_txs.tip_height, sent_tx);
@@ -2208,6 +2214,8 @@ impl Data {
             watching_txid: None,
             wallet_connect,
             swap_notifications: BTreeMap::new(),
+            incoming_notified: BTreeMap::new(),
+            pending_wallet_notifications: BTreeMap::new(),
             cached_address: BTreeMap::new(),
         });
 
@@ -2283,6 +2291,8 @@ impl Data {
             watching_txid,
             wallet_connect,
             swap_notifications,
+            incoming_notified,
+            pending_wallet_notifications,
             cached_address,
         } = wallet_data;
 
@@ -2322,6 +2332,8 @@ impl Data {
             watching_txid,
             wallet_connect,
             swap_notifications,
+            incoming_notified,
+            pending_wallet_notifications,
             cached_address,
         });
     }
@@ -2900,7 +2912,7 @@ impl Data {
             });
     }
 
-    fn cleanup_swap_notification_state(&mut self) {
+    fn cleanup_tx_notification_state(&mut self) {
         let wallet_data = match self.wallet_data.as_mut() {
             Some(wallet_data) => wallet_data,
             None => return,
@@ -2910,6 +2922,12 @@ impl Data {
         wallet_data
             .swap_notifications
             .retain(|_, meta| now.duration_since(meta.created_at) <= ttl);
+        wallet_data
+            .incoming_notified
+            .retain(|_, created_at| now.duration_since(*created_at) <= ttl);
+        wallet_data
+            .pending_wallet_notifications
+            .retain(|_, (_, _, received_at)| now.duration_since(*received_at) <= ttl);
     }
 
     fn try_take_swap_notification_message(
@@ -2956,15 +2974,134 @@ impl Data {
         ))
     }
 
-    fn fire_swap_notifications(&mut self, txs: &[models::Transaction]) {
-        self.cleanup_swap_notification_state();
+    fn try_make_incoming_notification_message(
+        &mut self,
+        tx: &models::Transaction,
+    ) -> Option<(String, String)> {
+        let txid = tx.txid;
+        let wallet_data = self.wallet_data.as_ref()?;
+
+        // Dedup: already fired for this txid
+        if wallet_data.incoming_notified.contains_key(&txid) {
+            return None;
+        }
+
+        // A3 guard: if A3 handled this txid (swap outgoing), skip A4
+        if wallet_data
+            .swap_notifications
+            .get(&txid)
+            .map(|m| m.notified_at.is_some())
+            .unwrap_or(false)
+        {
+            return None;
+        }
+
+        // Compute per-asset net balance
+        let mut balances = BTreeMap::<AssetId, i64>::new();
+        for input in tx.inputs.iter() {
+            let v = i64::try_from(input.unblinded.value).unwrap_or(i64::MAX);
+            *balances.entry(input.unblinded.asset).or_default() = balances
+                .get(&input.unblinded.asset)
+                .copied()
+                .unwrap_or(0)
+                .saturating_sub(v);
+        }
+        for output in tx.outputs.iter() {
+            let v = i64::try_from(output.unblinded.value).unwrap_or(i64::MAX);
+            *balances.entry(output.unblinded.asset).or_default() = balances
+                .get(&output.unblinded.asset)
+                .copied()
+                .unwrap_or(0)
+                .saturating_add(v);
+        }
+
+        // Keep only positive balances
+        let mut incoming: Vec<(AssetId, u64)> = balances
+            .into_iter()
+            .filter(|(_, amount)| *amount > 0)
+            .map(|(asset_id, amount)| (asset_id, amount as u64))
+            .collect();
+
+        if incoming.is_empty() {
+            return None;
+        }
+
+        // Fee-change filter: skip if only positive asset is policy asset with amount <= network_fee
+        if incoming.len() == 1 {
+            let (asset_id, amount) = incoming[0];
+            if asset_id == self.policy_asset && amount <= tx.network_fee {
+                return None;
+            }
+        }
+
+        // Sort descending by amount
+        incoming.sort_by_key(|(_, amount)| std::cmp::Reverse(*amount));
+
+        // Build body lines — asset lookup may fail for unknown assets
+        let mut lines = Vec::new();
+        for (asset_id, amount) in &incoming {
+            if let Some(asset) = self.assets.get(asset_id) {
+                let formatted =
+                    sideswap_types::asset_precision::asset_float_amount_(*amount, asset.precision);
+                lines.push(format!("Received: {}  {}", asset.ticker.0, formatted));
+            }
+        }
+
+        if lines.is_empty() {
+            return None;
+        }
+
+        // Record in dedup map
+        self.wallet_data
+            .as_mut()?
+            .incoming_notified
+            .insert(txid, Instant::now());
+
+        Some(("Incoming Transaction".to_owned(), lines.join("\n")))
+    }
+
+    fn fire_tx_notifications(&mut self, txs: &[models::Transaction]) {
+        self.cleanup_tx_notification_state();
+
         for tx in txs {
+            let txid = tx.txid;
+            let mut handled = false;
+
+            // A3: swap outgoing — runs first so A4 can check notified_at guard
             if let Some((title, body)) = self.try_take_swap_notification_message(tx) {
                 self.ui
                     .send(proto::from::Msg::LocalMessage(proto::from::LocalMessage {
                         title,
                         body,
                     }));
+                handled = true;
+            }
+
+            // A4: incoming — only if A3 did not fire for this txid
+            if !handled {
+                if let Some((title, body)) = self.try_make_incoming_notification_message(tx) {
+                    self.ui
+                        .send(proto::from::Msg::LocalMessage(proto::from::LocalMessage {
+                            title,
+                            body,
+                        }));
+                    handled = true;
+                }
+            }
+
+            // Fallback: tx appeared in merged_txs.list but neither A3 nor A4 handled it.
+            // Forward the stored backend notification (if any) and remove from pending.
+            // If A3/A4 handled it, just remove (discard backend copy).
+            if let Some(wd) = self.wallet_data.as_mut() {
+                if let Some((title, body, _)) = wd.pending_wallet_notifications.remove(&txid) {
+                    if !handled {
+                        self.ui
+                            .send(proto::from::Msg::LocalMessage(proto::from::LocalMessage {
+                                title,
+                                body,
+                            }));
+                    }
+                }
             }
         }
     }
@@ -2989,6 +3126,15 @@ impl Data {
         } = msg;
         if let api::LocalMessageDetails::Wallet { txid } = details {
             self.register_swap_notification_candidate(txid);
+            // Store backend notification for deferred handling in fire_tx_notifications.
+            // Use or_insert to avoid overwriting an existing entry (first arrival wins).
+            if let Some(wd) = self.wallet_data.as_mut() {
+                wd.pending_wallet_notifications.entry(txid).or_insert((
+                    title,
+                    body,
+                    Instant::now(),
+                ));
+            }
             return;
         }
 
@@ -4112,42 +4258,5 @@ pub fn start_processing(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn swap_notification_no_duplicate_after_reregister() {
-        let txid = elements::Txid::from_str(
-            "0000000000000000000000000000000000000000000000000000000000000000",
-        )
-        .unwrap();
-        let mut map: BTreeMap<elements::Txid, SwapNotificationMeta> = BTreeMap::new();
-
-        // First registration
-        map.entry(txid).or_insert_with(|| SwapNotificationMeta {
-            created_at: Instant::now(),
-            notified_at: None,
-        });
-        assert!(
-            map.get(&txid).unwrap().notified_at.is_none(),
-            "fresh entry must have notified_at = None"
-        );
-
-        // Simulate notification fired
-        map.get_mut(&txid).unwrap().notified_at = Some(Instant::now());
-        assert!(
-            map.get(&txid).unwrap().notified_at.is_some(),
-            "entry must record notified_at after notification fires"
-        );
-
-        // Re-registration must not overwrite notified_at
-        map.entry(txid).or_insert_with(|| SwapNotificationMeta {
-            created_at: Instant::now(),
-            notified_at: None,
-        });
-        assert!(
-            map.get(&txid).unwrap().notified_at.is_some(),
-            "re-registration must not reset notified_at — dedupe guard would be bypassed"
-        );
-    }
-}
+#[cfg(test)]
+mod tests;
