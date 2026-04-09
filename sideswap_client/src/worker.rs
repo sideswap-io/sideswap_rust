@@ -227,12 +227,17 @@ pub struct WalletData {
     last_recv_address: Option<models::AddressInfo>,
     watching_txid: Option<elements::Txid>,
     wallet_connect: wallet_connect::WalletConnect,
+    /// Tracks txids registered as swap-notification candidates for A3.
     swap_notifications: BTreeMap<elements::Txid, SwapNotificationMeta>,
     /// Dedup map for A4 incoming notifications. Key = txid, value = first-seen Instant (TTL anchor).
     /// Presence means notification already fired. Evicted after 24 h.
     incoming_notified: BTreeMap<elements::Txid, Instant>,
+    /// Tracks txids for which an outgoing-send notification (A5) has already fired.
+    /// Prevents duplicate notifications when send_pending_txs runs multiple times.
+    /// Value = time of first notification; entries evicted after 24h TTL.
+    outgoing_notified: BTreeMap<elements::Txid, Instant>,
     /// Backend Wallet LocalMessage store. Suppressed on arrival; forwarded after fire cycle
-    /// if neither A3 nor A4 handled the txid. Value = (title, body, received_at).
+    /// if neither A3, A4, nor A5 handled the txid. Value = (title, body, received_at).
     pending_wallet_notifications: BTreeMap<elements::Txid, (String, String, Instant)>,
 
     cached_address: BTreeMap<(Account, Chain), models::AddressInfo>,
@@ -2215,6 +2220,7 @@ impl Data {
             wallet_connect,
             swap_notifications: BTreeMap::new(),
             incoming_notified: BTreeMap::new(),
+            outgoing_notified: BTreeMap::new(),
             pending_wallet_notifications: BTreeMap::new(),
             cached_address: BTreeMap::new(),
         });
@@ -2292,6 +2298,7 @@ impl Data {
             wallet_connect,
             swap_notifications,
             incoming_notified,
+            outgoing_notified,
             pending_wallet_notifications,
             cached_address,
         } = wallet_data;
@@ -2333,6 +2340,7 @@ impl Data {
             wallet_connect,
             swap_notifications,
             incoming_notified,
+            outgoing_notified,
             pending_wallet_notifications,
             cached_address,
         });
@@ -2912,6 +2920,8 @@ impl Data {
             });
     }
 
+    /// Evicts stale entries from all notification dedup maps using a 24h TTL.
+    /// Called at the start of every `fire_tx_notifications` cycle.
     fn cleanup_tx_notification_state(&mut self) {
         let wallet_data = match self.wallet_data.as_mut() {
             Some(wallet_data) => wallet_data,
@@ -2926,10 +2936,16 @@ impl Data {
             .incoming_notified
             .retain(|_, created_at| now.duration_since(*created_at) <= ttl);
         wallet_data
+            .outgoing_notified
+            .retain(|_, created_at| now.duration_since(*created_at) <= ttl);
+        wallet_data
             .pending_wallet_notifications
             .retain(|_, (_, _, received_at)| now.duration_since(*received_at) <= ttl);
     }
 
+    /// Builds an "Outgoing Transaction" notification for swap transactions (A3 tier).
+    /// Marks the swap entry as notified (sets `notified_at`) to prevent A4/A5 from re-firing.
+    /// Returns None if already notified or txid not in swap_notifications.
     fn try_take_swap_notification_message(
         &mut self,
         tx: &models::Transaction,
@@ -2970,10 +2986,16 @@ impl Data {
         }
         Some((
             "Outgoing Transaction".to_owned(),
-            format!("Sent: {}  {}", asset.ticker.0, amount),
+            {
+                let prec = asset.precision.value() as usize;
+                format!("Sent: {}  {:.prec$}", asset.ticker.0, amount, prec = prec)
+            },
         ))
     }
 
+    /// Builds an "Incoming Transaction" notification for received assets (A4 tier).
+    /// Skips if already notified (dedup), if A3 handled this txid (swap guard), or if all
+    /// received amounts are fee-change only. Returns None if no valid body lines.
     fn try_make_incoming_notification_message(
         &mut self,
         tx: &models::Transaction,
@@ -3043,7 +3065,13 @@ impl Data {
             if let Some(asset) = self.assets.get(asset_id) {
                 let formatted =
                     sideswap_types::asset_precision::asset_float_amount_(*amount, asset.precision);
-                lines.push(format!("Received: {}  {}", asset.ticker.0, formatted));
+                let prec = asset.precision.value() as usize;
+                lines.push(format!(
+                    "Received: {}  {:.prec$}",
+                    asset.ticker.0,
+                    formatted,
+                    prec = prec
+                ));
             }
         }
 
@@ -3060,6 +3088,96 @@ impl Data {
         Some(("Incoming Transaction".to_owned(), lines.join("\n")))
     }
 
+    /// Builds an "Outgoing Transaction" notification for plain send transactions (A5 tier).
+    /// Returns None if: txid was already handled by A3 (swap guard), already notified (dedup),
+    /// no negative-balance assets remain after fee subtraction, or all assets are unknown.
+    fn try_make_outgoing_notification_message(
+        &mut self,
+        tx: &models::Transaction,
+    ) -> Option<(String, String)> {
+        let txid = tx.txid;
+
+        // A3 guard: any txid registered in swap_notifications is a swap — A5 must not fire
+        {
+            let wallet_data = self.wallet_data.as_ref()?;
+            if wallet_data.swap_notifications.contains_key(&txid) {
+                return None;
+            }
+        }
+
+        // Dedup guard: already notified
+        {
+            let wallet_data = self.wallet_data.as_ref()?;
+            if wallet_data.outgoing_notified.contains_key(&txid) {
+                return None;
+            }
+        }
+
+        // Compute net balance per asset
+        let mut balances = BTreeMap::<AssetId, i64>::new();
+        for input in tx.inputs.iter() {
+            *balances.entry(input.unblinded.asset).or_default() -= input.unblinded.value as i64;
+        }
+        for output in tx.outputs.iter() {
+            *balances.entry(output.unblinded.asset).or_default() += output.unblinded.value as i64;
+        }
+
+        // Keep only negative net balances (sent by user), convert to u64
+        let mut outgoing: Vec<(AssetId, u64)> = balances
+            .into_iter()
+            .filter(|(_, amount)| *amount < 0)
+            .map(|(asset_id, amount)| (asset_id, (-amount) as u64))
+            .collect();
+
+        // Subtract network fee from L-BTC (fee is not a sent amount)
+        for (asset_id, amount) in outgoing.iter_mut() {
+            if *asset_id == self.policy_asset {
+                *amount = amount.saturating_sub(tx.network_fee);
+            }
+        }
+
+        // Remove zero-amount assets (fee-only outputs)
+        outgoing.retain(|(_, amount)| *amount > 0);
+
+        if outgoing.is_empty() {
+            return None;
+        }
+
+        // Sort descending by amount
+        outgoing.sort_by_key(|(_, amount)| std::cmp::Reverse(*amount));
+
+        // Build body lines
+        let mut lines = Vec::new();
+        for (asset_id, amount) in &outgoing {
+            if let Some(asset) = self.assets.get(asset_id) {
+                let float_amount =
+                    sideswap_types::asset_precision::asset_float_amount_(*amount, asset.precision);
+                let prec = asset.precision.value() as usize;
+                lines.push(format!(
+                    "Sent: {}  {:.prec$}",
+                    asset.ticker.0,
+                    float_amount,
+                    prec = prec
+                ));
+            }
+        }
+
+        if lines.is_empty() {
+            return None;
+        }
+
+        // Record in dedup map
+        self.wallet_data
+            .as_mut()?
+            .outgoing_notified
+            .insert(txid, Instant::now());
+
+        Some(("Outgoing Transaction".to_owned(), lines.join("\n")))
+    }
+
+    /// Dispatches local push notifications for a batch of transactions.
+    /// Runs tiers in priority order: A3 (swap outgoing) -> A4 (incoming) -> A5 (outgoing send) -> fallback.
+    /// Calls `cleanup_tx_notification_state` first to evict stale dedup entries.
     fn fire_tx_notifications(&mut self, txs: &[models::Transaction]) {
         self.cleanup_tx_notification_state();
 
@@ -3089,9 +3207,21 @@ impl Data {
                 }
             }
 
-            // Fallback: tx appeared in merged_txs.list but neither A3 nor A4 handled it.
+            // A5: outgoing send — only if neither A3 nor A4 fired for this txid
+            if !handled {
+                if let Some((title, body)) = self.try_make_outgoing_notification_message(tx) {
+                    self.ui
+                        .send(proto::from::Msg::LocalMessage(proto::from::LocalMessage {
+                            title,
+                            body,
+                        }));
+                    handled = true;
+                }
+            }
+
+            // Fallback: tx appeared in merged_txs.list but neither A3, A4, nor A5 handled it.
             // Forward the stored backend notification (if any) and remove from pending.
-            // If A3/A4 handled it, just remove (discard backend copy).
+            // If A3/A4/A5 handled it, just remove (discard backend copy).
             if let Some(wd) = self.wallet_data.as_mut() {
                 if let Some((title, body, _)) = wd.pending_wallet_notifications.remove(&txid) {
                     if !handled {
