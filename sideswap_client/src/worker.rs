@@ -3257,13 +3257,22 @@ impl Data {
         if let api::LocalMessageDetails::Wallet { txid } = details {
             self.register_swap_notification_candidate(txid);
             // Store backend notification for deferred handling in fire_tx_notifications.
-            // Use or_insert to avoid overwriting an existing entry (first arrival wins).
+            // Skip if A3/A4/A5 already fired for this txid — backend may re-send (e.g. on
+            // confirmation) and we must not let the fallback path show a duplicate generic
+            // notification. Use or_insert so the first arrival wins within a single cycle.
             if let Some(wd) = self.wallet_data.as_mut() {
-                wd.pending_wallet_notifications.entry(txid).or_insert((
-                    title,
-                    body,
-                    Instant::now(),
-                ));
+                let already_handled = wd.incoming_notified.contains_key(&txid)
+                    || wd.outgoing_notified.contains_key(&txid)
+                    || wd
+                        .swap_notifications
+                        .get(&txid)
+                        .map(|m| m.notified_at.is_some())
+                        .unwrap_or(false);
+                if !already_handled {
+                    wd.pending_wallet_notifications
+                        .entry(txid)
+                        .or_insert((title, body, Instant::now()));
+                }
             }
             return;
         }

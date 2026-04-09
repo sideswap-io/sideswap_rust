@@ -146,3 +146,138 @@ fn outgoing_fee_only_skipped() {
     outgoing.retain(|(_, amount)| *amount > 0);
     assert!(outgoing.is_empty());
 }
+
+#[test]
+fn pending_wallet_notification_skipped_when_already_notified() {
+    let title = "t".to_owned();
+    let body = "b".to_owned();
+    let now = Instant::now();
+
+    let txid_incoming = elements::Txid::from_str(
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    )
+    .unwrap();
+    let mut incoming_notified: BTreeMap<elements::Txid, Instant> = BTreeMap::new();
+    incoming_notified.insert(txid_incoming, now);
+    let outgoing_notified: BTreeMap<elements::Txid, Instant> = BTreeMap::new();
+    let swap_notifications: BTreeMap<elements::Txid, SwapNotificationMeta> = BTreeMap::new();
+    let mut pending_wallet_notifications: BTreeMap<
+        elements::Txid,
+        (String, String, Instant),
+    > = BTreeMap::new();
+    let already_handled = incoming_notified.contains_key(&txid_incoming)
+        || outgoing_notified.contains_key(&txid_incoming)
+        || swap_notifications
+            .get(&txid_incoming)
+            .map(|m| m.notified_at.is_some())
+            .unwrap_or(false);
+    assert!(already_handled);
+    if !already_handled {
+        pending_wallet_notifications
+            .entry(txid_incoming)
+            .or_insert((title.clone(), body.clone(), now));
+    }
+    assert!(pending_wallet_notifications.is_empty());
+
+    let txid_outgoing = elements::Txid::from_str(
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    )
+    .unwrap();
+    let incoming_notified: BTreeMap<elements::Txid, Instant> = BTreeMap::new();
+    let mut outgoing_notified: BTreeMap<elements::Txid, Instant> = BTreeMap::new();
+    outgoing_notified.insert(txid_outgoing, now);
+    let swap_notifications: BTreeMap<elements::Txid, SwapNotificationMeta> = BTreeMap::new();
+    let mut pending_wallet_notifications: BTreeMap<
+        elements::Txid,
+        (String, String, Instant),
+    > = BTreeMap::new();
+    let already_handled = incoming_notified.contains_key(&txid_outgoing)
+        || outgoing_notified.contains_key(&txid_outgoing)
+        || swap_notifications
+            .get(&txid_outgoing)
+            .map(|m| m.notified_at.is_some())
+            .unwrap_or(false);
+    assert!(already_handled);
+    if !already_handled {
+        pending_wallet_notifications
+            .entry(txid_outgoing)
+            .or_insert((title.clone(), body.clone(), now));
+    }
+    assert!(pending_wallet_notifications.is_empty());
+
+    let txid_swap = elements::Txid::from_str(
+        "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    )
+    .unwrap();
+    let incoming_notified: BTreeMap<elements::Txid, Instant> = BTreeMap::new();
+    let outgoing_notified: BTreeMap<elements::Txid, Instant> = BTreeMap::new();
+    let mut swap_notifications: BTreeMap<elements::Txid, SwapNotificationMeta> = BTreeMap::new();
+    swap_notifications.insert(
+        txid_swap,
+        SwapNotificationMeta {
+            created_at: now,
+            notified_at: Some(now),
+        },
+    );
+    let mut pending_wallet_notifications: BTreeMap<
+        elements::Txid,
+        (String, String, Instant),
+    > = BTreeMap::new();
+    let already_handled = incoming_notified.contains_key(&txid_swap)
+        || outgoing_notified.contains_key(&txid_swap)
+        || swap_notifications
+            .get(&txid_swap)
+            .map(|m| m.notified_at.is_some())
+            .unwrap_or(false);
+    assert!(already_handled);
+    if !already_handled {
+        pending_wallet_notifications
+            .entry(txid_swap)
+            .or_insert((title, body, now));
+    }
+    assert!(pending_wallet_notifications.is_empty());
+}
+
+#[test]
+fn pending_wallet_notification_inserted_on_first_arrival() {
+    let txid = elements::Txid::from_str(
+        "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    )
+    .unwrap();
+    let title = "Title".to_owned();
+    let body = "Body".to_owned();
+    let now = Instant::now();
+
+    let incoming_notified: BTreeMap<elements::Txid, Instant> = BTreeMap::new();
+    let outgoing_notified: BTreeMap<elements::Txid, Instant> = BTreeMap::new();
+    let mut swap_notifications: BTreeMap<elements::Txid, SwapNotificationMeta> = BTreeMap::new();
+    swap_notifications.insert(
+        txid,
+        SwapNotificationMeta {
+            created_at: now,
+            notified_at: None,
+        },
+    );
+    let mut pending_wallet_notifications: BTreeMap<
+        elements::Txid,
+        (String, String, Instant),
+    > = BTreeMap::new();
+
+    let already_handled = incoming_notified.contains_key(&txid)
+        || outgoing_notified.contains_key(&txid)
+        || swap_notifications
+            .get(&txid)
+            .map(|m| m.notified_at.is_some())
+            .unwrap_or(false);
+    assert!(!already_handled);
+    if !already_handled {
+        pending_wallet_notifications
+            .entry(txid)
+            .or_insert((title.clone(), body.clone(), now));
+    }
+    assert_eq!(pending_wallet_notifications.len(), 1);
+    assert!(pending_wallet_notifications.contains_key(&txid));
+    let (got_title, got_body, _) = pending_wallet_notifications.get(&txid).unwrap();
+    assert_eq!(got_title, &title);
+    assert_eq!(got_body, &body);
+}
