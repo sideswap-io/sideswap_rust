@@ -886,7 +886,7 @@ impl Data {
         let wallet_data = self.wallet_data.as_mut().expect("must be set");
 
         match notification {
-            WalletNotif::Transaction(_txid) => {
+            WalletNotif::NewTransactions => {
                 self.sync_wallet(account);
 
                 self.ui.send(proto::from::Msg::NewTx(proto::Empty {}));

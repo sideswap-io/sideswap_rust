@@ -604,8 +604,8 @@ async fn process_event(data: &mut Data, event: sideswap_amp::Event) {
             notif_callback(account, WalletNotif::Block);
         }
 
-        sideswap_amp::Event::NewTx { txid } => {
-            notif_callback(account, WalletNotif::Transaction(txid));
+        sideswap_amp::Event::NewTx { txid: _ } => {
+            notif_callback(account, WalletNotif::NewTransactions);
         }
     }
 }

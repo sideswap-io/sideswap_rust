@@ -61,7 +61,7 @@ pub struct LoginInfo {
 }
 
 pub enum WalletNotif {
-    Transaction(elements::Txid),
+    NewTransactions,
     Block,
     LwkSynced,
     LwkFailed { error_msg: String },

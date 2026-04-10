@@ -655,8 +655,8 @@ fn run(mut data: WorkerData, command_receiver: Receiver<Command>) {
                             (data.notif_callback)(Account::Reg, WalletNotif::Block);
                         }
 
-                        for new_txid in new_txids {
-                            (data.notif_callback)(Account::Reg, WalletNotif::Transaction(new_txid));
+                        if !new_txids.is_empty() {
+                            (data.notif_callback)(Account::Reg, WalletNotif::NewTransactions);
                         }
 
                         error_delay.reset();
