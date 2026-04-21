@@ -46,7 +46,7 @@ elements = { version = "0.25", features = ["serde"] }
 elements-miniscript = "0.4"
 flexi_logger = "0.27"
 futures = "0.3"
-git2 = { version = "0.18", default-features = false }
+git2 = { version = "0.20", default-features = false }
 hex = "0.4"
 hex-literal = "0.4.1"
 hkdf = "0.12"
