@@ -759,14 +759,14 @@ pub fn start_processing(
                 b"sideswap_client/lwk_wallet_path",
             ));
 
-            // TODO: Should we load wallets in backgroun?
+            // TODO: Should we load wallets in background?
 
             let wallet_dir = login_info.cache_dir.join("lwk").join(&cache_dir_name);
-            let wallet = match lwk_wollet::Wollet::with_fs_persist(
-                lwk_network,
-                descriptor.clone(),
-                &wallet_dir,
-            ) {
+            let wallet = match lwk_wollet::WolletBuilder::new(lwk_network, descriptor.clone())
+                .with_legacy_fs_store(&wallet_dir)
+                .expect("this should not fail")
+                .build()
+            {
                 Ok(wallet) => {
                     log::debug!("lwk wallet loading succeed, path: {wallet_dir:?}");
                     wallet
@@ -778,12 +778,11 @@ pub fn start_processing(
                     std::fs::remove_dir_all(&wallet_dir)
                         .expect("removing lwk wallet directory should not fail");
 
-                    lwk_wollet::Wollet::with_fs_persist(
-                        lwk_network,
-                        descriptor.clone(),
-                        &wallet_dir,
-                    )
-                    .expect("creating lwk wallet with a clean cache directory should not fail")
+                    lwk_wollet::WolletBuilder::new(lwk_network, descriptor.clone())
+                        .with_legacy_fs_store(&wallet_dir)
+                        .expect("this should not fail")
+                        .build()
+                        .expect("creating lwk wallet with a clean cache directory should not fail")
                 }
             };
 

@@ -450,7 +450,8 @@ impl Wallet {
             Network::Regtest => todo!(),
         };
 
-        let wallet = lwk_wollet::Wollet::without_persist(lwk_network, descriptor.clone())
+        let wallet = lwk_wollet::WolletBuilder::new(lwk_network, descriptor.clone())
+            .build()
             .expect("must not fail");
         // let mut wallet =
         //     lwk_wollet::Wollet::with_fs_persist(lwk_network, descriptor.clone(), &work_dir)
