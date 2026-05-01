@@ -144,6 +144,12 @@ impl TickerLoader {
                 "13fd46f84c0885b9d2cfab1b8f0200876f8a0b2933ddda963187118abecbbbf1", // BSIC1
                 "87c43113e2db0a09028a26d18b52ae45328043e236eb0a5aca701b876002b162", // SKT
                 "af840dd8662514bf9467d246ccc5db62d27730ecedeb2ac365c584ceef0736ad", // SLB
+                // NexBridge
+                "79b6b75e951a9c723e215cc0492f08ad6d7b95fcef1826265e8e9ea1e58cc69c", // USTBL
+                "e111e2149300048c8140e146a54d2bf46b38e171ebab97fa1f9b1ec11f5de9a4", // svTSLA
+                "830556a000b21832ef70e7c0b95efb3caca093b4e71bcfab950d04af53b9b309", // svMSTR
+                "684559fc3b6ea61c8ba12a096fe45912267c7e77b0b4e5b1c5e5923061b04335", // svNSDQ
+                "0c49a3da38769e6c35c5f20510d3d39e3c68f14ec29e8c408efa814ac8a97e4d", // USYLD
                 // Tokens
                 "7f07d961c654f5a5aef82d97541016f32d43b7da91ab730bde883a7d6dd6c9c7", // PPRGB
             ]
