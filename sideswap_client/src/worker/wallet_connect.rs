@@ -264,7 +264,7 @@ fn add_login_request(data: &mut Data, login_request: connect_api::LoginRequest) 
 
 fn remove_login_request(data: &mut Data, request_id: &String) {
     if let Some(wallet_data) = data.wallet_data.as_mut() {
-        let value = wallet_data.wallet_connect.sign_requests.remove(request_id);
+        let value = wallet_data.wallet_connect.login_requests.remove(request_id);
 
         if value.is_some() {
             data.ui
