@@ -1,16 +1,13 @@
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    str::FromStr,
-    sync::Arc,
-};
+use std::{collections::BTreeSet, str::FromStr, sync::Arc};
 
-use anyhow::{Context, anyhow, bail, ensure};
+use anyhow::{anyhow, bail, ensure};
 use bitcoin::bip32::{ChildNumber, DerivationPath, Fingerprint};
 use elements::{Script, pset::PartiallySignedTransaction};
 use lwk_wollet::WolletDescriptor;
 use rand::{Rng, thread_rng};
 use sideswap_api::connect_api::{self, InstallId};
 use sideswap_common::{
+    wallet_connect::{Effect, Input, WalletConnectCore},
     wallet_key::WalletKey,
     ws_client::{self, WsClient},
 };
@@ -28,22 +25,8 @@ use crate::{
 use super::Data;
 
 pub struct WalletConnect {
-    install_id: InstallId,
-    connected: bool,
-    descriptor: WolletDescriptor,
-    wallet_key: WalletKey,
     client: WsClient,
-
-    login_requests: BTreeMap<String, connect_api::LoginRequest>,
-
-    sign_requests: BTreeMap<String, connect_api::SignRequest>,
-
-    /// The list of user's action.
-    /// Send it to the server if the upstream connection is up or after reconnect.
-    /// The server will sort them out as needed.
-    user_actions: BTreeMap<connect_api::ReqId, connect_api::UserAction>,
-
-    mobile_requests: BTreeSet<String>,
+    connect_core: WalletConnectCore,
 }
 
 pub fn new(data: &mut Data, descriptor: &WolletDescriptor) -> WalletConnect {
@@ -91,16 +74,11 @@ pub fn new(data: &mut Data, descriptor: &WolletDescriptor) -> WalletConnect {
         }
     };
 
+    let connect_core = WalletConnectCore::new(install_id, descriptor.to_string(), wallet_key);
+
     WalletConnect {
-        install_id,
-        connected: false,
-        descriptor: descriptor.clone(),
-        wallet_key,
         client,
-        login_requests: BTreeMap::new(),
-        sign_requests: BTreeMap::new(),
-        user_actions: BTreeMap::new(),
-        mobile_requests: BTreeSet::new(),
+        connect_core,
     }
 }
 
@@ -111,38 +89,6 @@ impl From<connect_api::Session> for proto::Session {
             domain: value.domain,
             is_local: value.is_local,
         }
-    }
-}
-
-fn add_user_action(data: &mut Data, action: connect_api::UserAction) {
-    let wallet_data = match data.wallet_data.as_mut() {
-        Some(wallet_data) => wallet_data,
-        None => return,
-    };
-
-    let new_id = wallet_data
-        .wallet_connect
-        .user_actions
-        .keys()
-        .last()
-        .copied()
-        .unwrap_or_default()
-        + 1;
-
-    log::debug!("new user action, id: {new_id}");
-
-    let old_value = wallet_data
-        .wallet_connect
-        .user_actions
-        .insert(new_id, action.clone());
-    assert!(old_value.is_none());
-
-    if wallet_data.wallet_connect.connected {
-        send_request(
-            &wallet_data.wallet_connect,
-            new_id,
-            connect_api::Req::UserAction(connect_api::UserActionReq { action }),
-        );
     }
 }
 
@@ -203,8 +149,8 @@ fn try_sign_pset(
 
     let request = wallet_data
         .wallet_connect
-        .sign_requests
-        .get(request_id)
+        .connect_core
+        .get_sign_request(request_id)
         .ok_or_else(|| anyhow!("request already removed"))?;
 
     let mut pset = PartiallySignedTransaction::from_str(&request.pset)?;
@@ -231,247 +177,113 @@ fn try_sign_pset(
 }
 
 fn add_login_request(data: &mut Data, login_request: connect_api::LoginRequest) {
-    let wallet_data = match data.wallet_data.as_mut() {
-        Some(wallet_data) => wallet_data,
-        None => return,
-    };
-
     let domain = login_request.domain.clone();
 
-    let old_sign_request = wallet_data
-        .wallet_connect
-        .login_requests
-        .insert(login_request.request_id.clone(), login_request.clone());
-
-    if old_sign_request.is_none() {
-        data.ui.send(proto::from::Msg::SignerRequest(
-            proto::from::SignerRequest {
-                req_id: login_request.request_id,
-                origin: domain,
-                ttl_milliseconds: login_request.ttl.as_millis(),
-                msg: Some(proto::from::signer_request::Msg::Connect(proto::Empty {})),
-            },
-        ));
-    }
+    data.ui.send(proto::from::Msg::SignerRequest(
+        proto::from::SignerRequest {
+            req_id: login_request.request_id,
+            origin: domain,
+            ttl_milliseconds: login_request.ttl.as_millis(),
+            msg: Some(proto::from::signer_request::Msg::Connect(proto::Empty {})),
+        },
+    ));
 }
 
 fn remove_login_request(data: &mut Data, request_id: &String) {
-    if let Some(wallet_data) = data.wallet_data.as_mut() {
-        let value = wallet_data.wallet_connect.login_requests.remove(request_id);
-
-        if value.is_some() {
-            data.ui
-                .send(proto::from::Msg::SignerCancel(proto::from::SignerCancel {
-                    req_id: request_id.clone(),
-                }));
-        }
-    }
+    data.ui
+        .send(proto::from::Msg::SignerCancel(proto::from::SignerCancel {
+            req_id: request_id.clone(),
+        }));
 }
 
 fn add_sign_request(data: &mut Data, sign_request: connect_api::SignRequest) {
-    let wallet_data = match data.wallet_data.as_mut() {
-        Some(wallet_data) => wallet_data,
-        None => return,
-    };
+    let res = get_signer_request_details(data, &sign_request.pset);
 
-    let old_sign_request = wallet_data
-        .wallet_connect
-        .sign_requests
-        .insert(sign_request.request_id.clone(), sign_request.clone());
+    match res {
+        Ok(details) => {
+            data.ui.send(proto::from::Msg::SignerRequest(
+                proto::from::SignerRequest {
+                    req_id: sign_request.request_id,
+                    origin: sign_request.domain,
+                    ttl_milliseconds: sign_request.ttl.as_millis(),
+                    msg: Some(proto::from::signer_request::Msg::Sign(details)),
+                },
+            ));
+        }
 
-    if old_sign_request.is_none() {
-        let res = get_signer_request_details(data, &sign_request.pset);
-
-        match res {
-            Ok(details) => {
-                data.ui.send(proto::from::Msg::SignerRequest(
-                    proto::from::SignerRequest {
-                        req_id: sign_request.request_id,
-                        origin: sign_request.domain,
-                        ttl_milliseconds: sign_request.ttl.as_millis(),
-                        msg: Some(proto::from::signer_request::Msg::Sign(details)),
-                    },
-                ));
-            }
-
-            Err(err) => {
-                data.show_message(&format!(
-                    "invalid sign request from {domain}: {err}",
-                    domain = sign_request.domain
-                ));
-            }
+        Err(err) => {
+            data.show_message(&format!(
+                "invalid sign request from {domain}: {err}",
+                domain = sign_request.domain
+            ));
         }
     }
 }
 
 fn remove_sign_request(data: &mut Data, request_id: &String) {
-    if let Some(wallet_data) = data.wallet_data.as_mut() {
-        let value = wallet_data.wallet_connect.sign_requests.remove(request_id);
+    data.ui
+        .send(proto::from::Msg::SignerCancel(proto::from::SignerCancel {
+            req_id: request_id.clone(),
+        }));
+}
 
-        if value.is_some() {
+fn handle_core_effect(data: &mut Data, effect: Effect) {
+    let wallet_data = match data.wallet_data.as_mut() {
+        Some(wallet_data) => wallet_data,
+        None => return,
+    };
+
+    match effect {
+        Effect::Transport { command } => {
+            wallet_data.wallet_connect.client.send_command(command);
+        }
+        Effect::AddLoginRequest { request } => {
+            add_login_request(data, request);
+        }
+        Effect::RemoveLoginRequest { request_id } => {
+            remove_login_request(data, &request_id);
+        }
+        Effect::AddSignRequest { request } => {
+            add_sign_request(data, request);
+        }
+        Effect::RemoveSignRequest { request_id } => {
+            remove_sign_request(data, &request_id);
+        }
+
+        Effect::SessionList { sessions } => {
             data.ui
-                .send(proto::from::Msg::SignerCancel(proto::from::SignerCancel {
-                    req_id: request_id.clone(),
+                .send(proto::from::Msg::SessionList(proto::from::SessionList {
+                    sessions: sessions.into_iter().map(Into::into).collect(),
                 }));
+        }
+        Effect::SessionCreated { session } => {
+            data.ui
+                .send(proto::from::Msg::SessionAdded(proto::from::SessionAdded {
+                    session: session.into(),
+                }));
+        }
+        Effect::SessionRemoved { session_id } => {
+            data.ui.send(proto::from::Msg::SessionRemoved(
+                proto::from::SessionRemoved { session_id },
+            ));
+        }
+
+        Effect::MinimizeMobileApp => {
+            data.ui
+                .send(proto::from::Msg::SignerReturn(proto::Empty {}));
         }
     }
 }
 
-fn send_request(connect: &WalletConnect, id: connect_api::ReqId, req: connect_api::Req) {
-    let data = serde_json::to_string(&connect_api::To::Req { id, req }).expect("must not fail");
-
-    connect
-        .client
-        .send_command(ws_client::Command::Send { data: data.into() });
-}
-
-pub fn handle_msg(data: &mut Data, event: ws_client::Event) {
+fn handle_core_input(data: &mut Data, input: Input) {
     let wallet = match data.wallet_data.as_mut() {
         Some(wallet) => wallet,
         None => return,
     };
 
-    match event {
-        ws_client::Event::Connected => {
-            log::debug!("wallet connect server is connected");
-
-            wallet
-                .wallet_connect
-                .client
-                .send_command(ws_client::Command::ConnectAck);
-
-            send_request(
-                &wallet.wallet_connect,
-                0,
-                connect_api::Req::Challenge(connect_api::ChallengeReq {}),
-            );
-        }
-
-        ws_client::Event::Recv { text } => {
-            let res = serde_json::from_slice::<connect_api::From>(text.as_bytes());
-            match res {
-                Ok(from) => match from {
-                    connect_api::From::Resp { id, resp } => match resp {
-                        connect_api::Resp::Challenge(resp) => {
-                            send_request(
-                                &wallet.wallet_connect,
-                                0,
-                                connect_api::Req::Login(connect_api::LoginReq {
-                                    public_key: wallet.wallet_connect.wallet_key.public_key(),
-                                    signature: wallet
-                                        .wallet_connect
-                                        .wallet_key
-                                        .sign_challenge(&resp.challenge),
-                                    install_id: Some(wallet.wallet_connect.install_id),
-                                }),
-                            );
-                        }
-                        connect_api::Resp::Login(connect_api::LoginResp {
-                            sessions,
-                            sign_requests,
-                        }) => {
-                            log::debug!("login succeed");
-
-                            wallet.wallet_connect.connected = true;
-
-                            for (&req_id, action) in wallet.wallet_connect.user_actions.iter() {
-                                send_request(
-                                    &wallet.wallet_connect,
-                                    req_id,
-                                    connect_api::Req::UserAction(connect_api::UserActionReq {
-                                        action: action.clone(),
-                                    }),
-                                );
-                            }
-
-                            let old_request_ids = wallet
-                                .wallet_connect
-                                .sign_requests
-                                .keys()
-                                .cloned()
-                                .collect::<BTreeSet<_>>();
-
-                            let new_request_ids = sign_requests
-                                .iter()
-                                .map(|sign_request| sign_request.request_id.clone())
-                                .collect::<BTreeSet<_>>();
-
-                            log::debug!("new sign request ids: {new_request_ids:?}");
-
-                            for request_id in old_request_ids.difference(&new_request_ids) {
-                                remove_sign_request(data, request_id);
-                            }
-
-                            for sign_request in sign_requests {
-                                add_sign_request(data, sign_request);
-                            }
-
-                            data.ui
-                                .send(proto::from::Msg::SessionList(proto::from::SessionList {
-                                    sessions: sessions.into_iter().map(Into::into).collect(),
-                                }));
-
-                            register_fcm(data);
-                        }
-
-                        connect_api::Resp::UserAction(connect_api::UserActionResp {}) => {
-                            let old_value = wallet.wallet_connect.user_actions.remove(&id);
-                            match old_value {
-                                Some(_) => {
-                                    log::debug!("user action ack, id: {id}")
-                                }
-                                None => log::debug!("unknown user_action id: {id}"),
-                            }
-                        }
-
-                        connect_api::Resp::RegisterFcm(connect_api::RegisterFcmResp {}) => {}
-                    },
-
-                    connect_api::From::Error { id, err } => {
-                        // This should not happen
-                        log::error!("wallet connect request failed: id: {id}, {err:?}");
-                    }
-
-                    connect_api::From::Notif { notif } => match notif {
-                        connect_api::Notif::SessionCreated(notif) => {
-                            data.ui.send(proto::from::Msg::SessionAdded(
-                                proto::from::SessionAdded {
-                                    session: notif.session.into(),
-                                },
-                            ));
-                        }
-                        connect_api::Notif::SessionRemoved(notif) => {
-                            data.ui.send(proto::from::Msg::SessionRemoved(
-                                proto::from::SessionRemoved {
-                                    session_id: notif.session_id,
-                                },
-                            ));
-                        }
-                        connect_api::Notif::LoginRequestCreated(notif) => {
-                            add_login_request(data, notif.request);
-                        }
-                        connect_api::Notif::LoginRequestRemoved(notif) => {
-                            remove_login_request(data, &notif.request_id);
-                        }
-                        connect_api::Notif::SignRequestCreated(notif) => {
-                            add_sign_request(data, notif.request);
-                        }
-                        connect_api::Notif::SignRequestRemoved(notif) => {
-                            remove_sign_request(data, &notif.request_id);
-                        }
-                    },
-                },
-
-                Err(err) => {
-                    log::error!("parsing wallet connect message failed: {err}, msg: {text}");
-                }
-            }
-        }
-
-        ws_client::Event::Disconnected => {
-            log::debug!("server is disconnected");
-            wallet.wallet_connect.connected = false;
-        }
+    let effects = wallet.wallet_connect.connect_core.handle(input);
+    for effect in effects {
+        handle_core_effect(data, effect);
     }
 }
 
@@ -481,78 +293,12 @@ pub fn handle_app_state(data: &mut Data) {
     }
 }
 
-pub fn register_fcm(data: &mut Data) {
-    if let (Some(wallet), Some(token)) = (data.wallet_data.as_ref(), data.push_token.as_ref()) {
-        if wallet.wallet_connect.connected {
-            send_request(
-                &wallet.wallet_connect,
-                0,
-                connect_api::Req::RegisterFcm(connect_api::RegisterFcmReq {
-                    token: token.clone(),
-                }),
-            );
-        }
-    }
+pub fn handle_ws_event(data: &mut Data, event: ws_client::Event) {
+    handle_core_input(data, Input::Transport { event });
 }
 
-fn try_process_app_link(data: &mut Data, resp: &proto::to::AppLink) -> Result<(), anyhow::Error> {
-    let url = url::Url::parse(&resp.url)?;
-
-    let host = url.host().ok_or_else(|| anyhow!("no host"))?;
-    let domain = match host {
-        url::Host::Domain(domain) => domain,
-        url::Host::Ipv4(ipv4_addr) => bail!("ipv4 links are not supported: {ipv4_addr}"),
-        url::Host::Ipv6(ipv6_addr) => bail!("ipv6 links are not supported: {ipv6_addr}"),
-    };
-    ensure!(url.port() == None);
-
-    let params = url
-        .query_pairs()
-        .into_owned()
-        .collect::<BTreeMap<String, String>>();
-
-    let wallet_data = data
-        .wallet_data
-        .as_mut()
-        .ok_or_else(|| anyhow!("no wallet_data"))?;
-
-    let is_mobile = params
-        .get("mobile")
-        .map(|value| bool::from_str(value))
-        .transpose()
-        .context("invalid `mobile` query parameter value")?
-        .unwrap_or_default();
-
-    let request_id = params
-        .get("request_id")
-        .ok_or_else(|| anyhow!("invalid link: no request_id query parameter"))?
-        .clone();
-
-    if is_mobile {
-        wallet_data
-            .wallet_connect
-            .mobile_requests
-            .insert(request_id.clone());
-    }
-
-    match (url.scheme(), domain, url.path()) {
-        ("https", "app.sideswap.io", "/login/") | ("liquidconnect", "login", "/") => {
-            // Use UserAction because the websocket connection might be down
-            add_user_action(
-                data,
-                connect_api::UserAction::LinkLoginRequest { request_id },
-            );
-
-            Ok(())
-        }
-
-        ("https", "app.sideswap.io", "/sign/") | ("liquidconnect", "sign", "/") => {
-            // Do nothing
-
-            Ok(())
-        }
-        _ => bail!("unsupported URL: {url}", url = resp.url),
-    }
+pub fn set_fcm_token(data: &mut Data, token: String) {
+    handle_core_input(data, Input::RegisterFcmToken { token });
 }
 
 pub fn new_app_link(data: &mut Data, resp: proto::to::AppLink) {
@@ -561,10 +307,14 @@ pub fn new_app_link(data: &mut Data, resp: proto::to::AppLink) {
         return;
     }
 
-    let res = try_process_app_link(data, &resp);
-
-    if let Err(err) = res {
-        data.show_message(&format!("{err}: {url}", url = &resp.url));
+    let res = sideswap_common::wallet_connect::parse_app_link(&resp.url);
+    match res {
+        Ok(app_link) => {
+            handle_core_input(data, Input::AppLink { app_link });
+        }
+        Err(err) => {
+            data.show_message(&format!("{err}: {url}", url = &resp.url));
+        }
     }
 }
 
@@ -577,77 +327,57 @@ pub fn ui_response(data: &mut Data, resp: proto::to::SignerResponse) {
         }
     };
 
-    let is_mobile = wallet_data
-        .wallet_connect
-        .mobile_requests
-        .contains(&resp.req_id);
-
     if wallet_data
         .wallet_connect
-        .login_requests
-        .contains_key(&resp.req_id)
+        .connect_core
+        .get_login_request(&resp.req_id)
+        .is_some()
     {
         if resp.accept {
-            let descriptor = wallet_data.wallet_connect.descriptor.to_string();
-            add_user_action(
+            handle_core_input(
                 data,
-                connect_api::UserAction::AcceptLoginRequest {
+                Input::LoginAccepted {
                     request_id: resp.req_id,
-                    descriptor,
                 },
             );
         } else {
-            add_user_action(
+            handle_core_input(
                 data,
-                connect_api::UserAction::CancelLoginRequest {
+                Input::LoginRejected {
                     request_id: resp.req_id,
                 },
             );
         }
-
-        if is_mobile {
-            data.ui
-                .send(proto::from::Msg::SignerReturn(proto::Empty {}));
-        }
     } else if wallet_data
         .wallet_connect
-        .sign_requests
-        .contains_key(&resp.req_id)
+        .connect_core
+        .get_sign_request(&resp.req_id)
+        .is_some()
     {
         if resp.accept {
             let res = try_sign_pset(data, &resp.req_id);
 
             match res {
-                Ok(pset) => {
-                    add_user_action(
+                Ok(signed_pset) => {
+                    handle_core_input(
                         data,
-                        connect_api::UserAction::AcceptSignRequest {
+                        Input::SignAccepted {
                             request_id: resp.req_id,
-                            pset: pset.to_string(),
+                            signed_pset: signed_pset.to_string(),
                         },
                     );
-
-                    if is_mobile {
-                        data.ui
-                            .send(proto::from::Msg::SignerReturn(proto::Empty {}));
-                    }
                 }
                 Err(err) => {
                     data.show_message(&format!("PSET sign failed: {err}"));
                 }
             }
         } else {
-            add_user_action(
+            handle_core_input(
                 data,
-                connect_api::UserAction::CancelSignRequest {
+                Input::SignRejected {
                     request_id: resp.req_id,
                 },
             );
-
-            if is_mobile {
-                data.ui
-                    .send(proto::from::Msg::SignerReturn(proto::Empty {}));
-            }
         }
     }
 }
@@ -901,9 +631,9 @@ pub fn try_sign_pset_jade(
 }
 
 pub fn stop_session(data: &mut Data, resp: proto::to::StopSession) {
-    add_user_action(
+    handle_core_input(
         data,
-        connect_api::UserAction::StopSession {
+        Input::StopSession {
             session_id: resp.session_id,
         },
     );

@@ -2210,6 +2210,9 @@ impl Data {
         self.sync_wallet(Account::Reg);
         self.sync_wallet(Account::Amp);
 
+        // This is needed to update the FCM token in wallet_connect
+        self.update_push_token();
+
         Ok(())
     }
 
@@ -2781,9 +2784,8 @@ impl Data {
     }
 
     fn process_update_push_token(&mut self, req: proto::to::UpdatePushToken) {
-        self.push_token = Some(req.token);
+        self.push_token = Some(req.token.clone());
         self.update_push_token();
-        wallet_connect::register_fcm(self);
     }
 
     fn find_own_amp_address_info(
@@ -3414,6 +3416,10 @@ impl Data {
                 },
             );
         };
+
+        if let Some(token) = self.push_token.as_ref() {
+            wallet_connect::set_fcm_token(self, token.clone());
+        }
     }
 
     fn update_address_registrations(&mut self) {
@@ -3972,7 +3978,7 @@ pub fn start_processing(
             Message::WalletEvent(account_id, event) => data.process_wallet_event(account_id, event),
             Message::WalletNotif(account_id, msg) => data.process_wallet_notif(account_id, msg),
             Message::BackgroundMessage(msg, sender) => data.process_background_message(msg, sender),
-            Message::WalletConnect(event) => wallet_connect::handle_msg(&mut data, event),
+            Message::WalletConnect(event) => wallet_connect::handle_ws_event(&mut data, event),
             Message::Quit => {
                 warn!("quit message received, exit");
                 break;

@@ -55,6 +55,7 @@ pub enum Input {
     },
 }
 
+#[must_use]
 pub enum Effect {
     Transport { command: ws_client::Command },
 
@@ -342,6 +343,7 @@ impl WalletConnectCore {
         }
     }
 
+    #[must_use]
     pub fn handle(&mut self, input: Input) -> Vec<Effect> {
         let mut effects = Vec::new();
 
@@ -458,5 +460,13 @@ impl WalletConnectCore {
         }
 
         effects
+    }
+
+    pub fn get_login_request(&self, request_id: &str) -> Option<&connect_api::LoginRequest> {
+        self.login_requests.get(request_id)
+    }
+
+    pub fn get_sign_request(&self, request_id: &str) -> Option<&connect_api::SignRequest> {
+        self.sign_requests.get(request_id)
     }
 }
