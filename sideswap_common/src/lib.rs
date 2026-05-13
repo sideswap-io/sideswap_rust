@@ -2,6 +2,7 @@ pub mod channel_helpers;
 pub mod cipher;
 pub mod coin_select;
 pub mod dealer_ticker;
+pub mod debug_print;
 pub mod event_proofs;
 pub mod exchange_pair;
 pub mod file_cache;

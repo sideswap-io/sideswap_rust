@@ -7,6 +7,7 @@ use lwk_wollet::WolletDescriptor;
 use rand::{Rng, thread_rng};
 use sideswap_api::connect_api::{self, InstallId};
 use sideswap_common::{
+    debug_print::truncate_debug,
     wallet_connect::{Effect, Input, WalletConnectCore},
     wallet_key::WalletKey,
     ws_client::{self, WsClient},
@@ -275,23 +276,19 @@ fn handle_core_effect(data: &mut Data, effect: Effect) {
     }
 }
 
-fn truncate_debug(data: &impl std::fmt::Debug) -> String {
-    format!("{:?}", data).chars().take(256).collect()
-}
-
 fn handle_core_input(data: &mut Data, input: Input) {
     let wallet = match data.wallet_data.as_mut() {
         Some(wallet) => wallet,
         None => return,
     };
 
-    let input_debug = truncate_debug(&input);
+    let input_debug = truncate_debug(&input, 256);
     log::debug!("input: {input_debug}");
 
     let effects = wallet.wallet_connect.connect_core.handle(input);
 
     for effect in effects {
-        let effect_debug = truncate_debug(&effect);
+        let effect_debug = truncate_debug(&effect, 256);
         log::debug!("effect: {effect_debug}");
 
         handle_core_effect(data, effect);
