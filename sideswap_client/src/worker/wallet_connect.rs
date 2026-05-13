@@ -18,7 +18,6 @@ use sideswap_jade::{
     jade_mng::{self, AE_STUB_DATA},
     models::{OutputVariant, TrustedCommitment},
 };
-use sideswap_types::env::Env;
 
 use crate::{
     ffi::proto::{self, Account},
@@ -48,13 +47,7 @@ pub struct WalletConnect {
 }
 
 pub fn new(data: &mut Data, descriptor: &WolletDescriptor) -> WalletConnect {
-    let connect_server_url = match data.env {
-        Env::Prod => "wss://api.sideswap.io/wallet-connect",
-        Env::Testnet => "wss://api-testnet.sideswap.io/wallet-connect",
-        Env::LocalLiquid => "ws://127.0.0.1:51225",
-        Env::LocalTestnet => "ws://127.0.0.1:51235",
-        Env::LocalRegtest => "ws://127.0.0.1:51245",
-    };
+    let connect_server_url = sideswap_common::wallet_connect::get_connect_server_url(data.env);
 
     let msg_sender = data.msg_sender.clone();
     let event_cb = Box::new(move |event| {

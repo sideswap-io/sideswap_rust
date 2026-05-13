@@ -29,6 +29,7 @@ pub mod target_os;
 pub mod tx_type;
 pub mod types;
 pub mod utxo_select;
+pub mod wallet_connect;
 pub mod wallet_id;
 pub mod wallet_key;
 pub mod web_notif;
