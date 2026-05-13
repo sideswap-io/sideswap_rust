@@ -275,14 +275,25 @@ fn handle_core_effect(data: &mut Data, effect: Effect) {
     }
 }
 
+fn truncate_debug(data: &impl std::fmt::Debug) -> String {
+    format!("{:?}", data).chars().take(256).collect()
+}
+
 fn handle_core_input(data: &mut Data, input: Input) {
     let wallet = match data.wallet_data.as_mut() {
         Some(wallet) => wallet,
         None => return,
     };
 
+    let input_debug = truncate_debug(&input);
+    log::debug!("input: {input_debug}");
+
     let effects = wallet.wallet_connect.connect_core.handle(input);
+
     for effect in effects {
+        let effect_debug = truncate_debug(&effect);
+        log::debug!("effect: {effect_debug}");
+
         handle_core_effect(data, effect);
     }
 }

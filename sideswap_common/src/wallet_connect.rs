@@ -9,17 +9,20 @@ use sideswap_types::env::Env;
 
 use crate::{wallet_key::WalletKey, ws_client};
 
+#[derive(Debug, Clone, Copy)]
 pub enum LinkType {
     Login,
     Sign,
 }
 
+#[derive(Debug)]
 pub struct AppLink {
     pub link_type: LinkType,
     pub request_id: String,
     pub is_mobile: bool,
 }
 
+#[derive(Debug)]
 pub enum Input {
     Transport {
         event: ws_client::Event,
@@ -56,6 +59,7 @@ pub enum Input {
 }
 
 #[must_use]
+#[derive(Debug)]
 pub enum Effect {
     Transport { command: ws_client::Command },
 
