@@ -28,8 +28,8 @@ pub trait RpcCall {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct RpcRequest {
-    method: String,
-    params: serde_json::value::Value,
+    pub method: String,
+    pub params: serde_json::value::Value,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
