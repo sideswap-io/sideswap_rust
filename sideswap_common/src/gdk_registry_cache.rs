@@ -260,14 +260,13 @@ async fn load_url<R: Registry>(
     let base_url = match (source, network) {
         (Source::Blockstream, Network::Liquid) => "https://assets.blockstream.info",
         (Source::Blockstream, Network::LiquidTestnet) => "https://assets-testnet.blockstream.info",
-        (Source::Blockstream, Network::Regtest) => todo!(),
         (Source::Github, Network::Liquid) => {
             "https://github.com/Blockstream/asset_registry_db/raw/refs/heads/master"
         }
         (Source::Github, Network::LiquidTestnet) => {
             "https://github.com/Blockstream/asset_registry_testnet_db/raw/refs/heads/master"
         }
-        (Source::Github, Network::Regtest) => "",
+        (_, Network::Regtest) => anyhow::bail!("not available for regtest"),
     };
     let url = format!("{}/{}", base_url, R::file_name());
     let mut request = reqwest::Client::new()
