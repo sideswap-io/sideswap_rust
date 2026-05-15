@@ -107,7 +107,16 @@ fn get_signer_request_details(
         .default_account()
         .pset_details(&pset)?;
 
-    data.add_missing_assets(details.balance.balances.keys(), true);
+    data.add_missing_assets(
+        details.balance.balances.keys().chain(
+            details
+                .balance
+                .recipients
+                .iter()
+                .filter_map(|r| r.asset.as_ref()),
+        ),
+        true,
+    );
 
     Ok(proto::from::signer_request::Sign {
         balances: details
