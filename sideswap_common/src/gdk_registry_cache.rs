@@ -266,7 +266,7 @@ async fn load_url<R: Registry>(
         (Source::Github, Network::LiquidTestnet) => {
             "https://github.com/Blockstream/asset_registry_testnet_db/raw/refs/heads/master"
         }
-        (_, Network::Regtest) => anyhow::bail!("not available for regtest"),
+        (_, Network::Regtest) => "http://127.0.0.1:13561",
     };
     let url = format!("{}/{}", base_url, R::file_name());
     let mut request = reqwest::Client::new()
