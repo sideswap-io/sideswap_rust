@@ -93,7 +93,7 @@ uniffi = { version = "0.27" }
 ureq = { version = "2.9", features = ["json", "socks-proxy"] }
 url = "2.3"
 uuid = { version = "1.8" }
-vergen = { version = "5.1", default-features = false, features = ["build", "rustc", "git"] }
+vergen-gitcl = "9"
 
 [patch.crates-io]
 lwk_common = { git = "https://github.com/sideswap-io/lwk.git", rev = "6b517f08bd919303a6344cf248838b3c45b8f2a3" }

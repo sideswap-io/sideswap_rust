@@ -26,4 +26,4 @@ tokio-tungstenite.workspace = true
 tokio.workspace = true
 
 [build-dependencies]
-vergen.workspace = true
+vergen-gitcl.workspace = true

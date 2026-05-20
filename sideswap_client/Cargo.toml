@@ -51,6 +51,5 @@ ureq.workspace = true
 url.workspace = true
 
 [build-dependencies]
-git2.workspace = true
 prost-build.workspace = true
-vergen.workspace = true
+vergen-gitcl.workspace = true
