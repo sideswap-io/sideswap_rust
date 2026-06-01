@@ -262,6 +262,7 @@ pub struct PegRequest {
     pub recv_addr: String,
     pub send_amount: Option<i64>,
     pub peg_in: bool,
+    pub peg_in_v2: Option<bool>,
     pub device_key: Option<String>,
     pub peg_out_amounts: Option<PegOutAmounts>,
     pub fee_rate: Option<FeeRateSats>,
@@ -281,6 +282,7 @@ pub struct PegResponse {
 pub struct PegStatusRequest {
     pub order_id: OrderId,
     pub peg_in: Option<bool>,
+    pub peg_in_v2: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

@@ -1097,6 +1097,7 @@ impl Data {
                 recv_addr: req.recv_addr.clone(),
                 send_amount: None,
                 peg_in: false,
+                peg_in_v2: None,
                 device_key: Some(device_key),
                 blocks: None,
                 peg_out_amounts: Some(api::PegOutAmounts {
@@ -1150,7 +1151,10 @@ impl Data {
         }
     }
 
-    fn try_process_pegin_request(&mut self) -> Result<proto::from::PeginWaitTx, anyhow::Error> {
+    fn try_process_pegin_request(
+        &mut self,
+        req: proto::to::PegInRequest,
+    ) -> Result<proto::from::PeginWaitTx, anyhow::Error> {
         ensure!(self.ws_connected, "not connected");
 
         let device_key = self
@@ -1169,6 +1173,7 @@ impl Data {
                 recv_addr: recv_addr.to_string(),
                 send_amount: None,
                 peg_in: true,
+                peg_in_v2: req.v2,
                 device_key: Some(device_key),
                 blocks: None,
                 peg_out_amounts: None,
@@ -1192,8 +1197,8 @@ impl Data {
         Ok(msg)
     }
 
-    fn process_pegin_request(&mut self) {
-        let result = self.try_process_pegin_request();
+    fn process_pegin_request(&mut self, req: proto::to::PegInRequest) {
+        let result = self.try_process_pegin_request(req);
         match result {
             Ok(v) => {
                 self.ui.send(proto::from::Msg::PeginWaitTx(v));
@@ -3065,7 +3070,7 @@ impl Data {
             proto::to::Msg::AppState(req) => self.process_app_state(req),
             proto::to::Msg::ActivePage(req) => self.process_active_page(req),
             proto::to::Msg::PushMessage(req) => self.process_push_message(req, None),
-            proto::to::Msg::PegInRequest(_) => self.process_pegin_request(),
+            proto::to::Msg::PegInRequest(req) => self.process_pegin_request(req),
             proto::to::Msg::PegOutAmount(req) => self.process_pegout_amount(req),
             proto::to::Msg::PegOutRequest(req) => self.process_pegout_request(req),
             proto::to::Msg::PegEdit(req) => self.process_peg_edit(req),
@@ -3380,10 +3385,12 @@ impl Data {
             settings::PegDir::In => api::Request::PegStatus(api::PegStatusRequest {
                 order_id: peg.order_id,
                 peg_in: None,
+                peg_in_v2: None,
             }),
             settings::PegDir::Out => api::Request::PegStatus(api::PegStatusRequest {
                 order_id: peg.order_id,
                 peg_in: None,
+                peg_in_v2: None,
             }),
         };
         self.send_request_msg(request);

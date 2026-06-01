@@ -324,6 +324,7 @@ async fn new_peg(
             recv_addr,
             send_amount: None,
             peg_in,
+            peg_in_v2: None,
             device_key: None,
             blocks: None,
             peg_out_amounts: None,
@@ -337,6 +338,7 @@ async fn new_peg(
         sideswap_api::PegStatusRequest {
             order_id: resp.order_id,
             peg_in: None,
+            peg_in_v2: None,
         }
     )?;
 
@@ -1002,6 +1004,7 @@ fn process_ws_connected(data: &mut Data) {
             sideswap_api::PegStatusRequest {
                 order_id: *order_id,
                 peg_in: None,
+                peg_in_v2: None,
             },
         ));
     }
