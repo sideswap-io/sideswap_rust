@@ -625,6 +625,8 @@ impl Data {
         self.update_push_token();
         // self.send_subscribe_request();
         self.update_address_registrations();
+        self.ui
+            .send(proto::from::Msg::ServerConnected(proto::Empty {}));
     }
 
     fn process_ws_connected(&mut self) {
@@ -796,9 +798,6 @@ impl Data {
 
         // self.process_pending_requests();
         market_worker::ws_connected(self);
-
-        self.ui
-            .send(proto::from::Msg::ServerConnected(proto::Empty {}));
     }
 
     fn process_ws_disconnected(&mut self) {

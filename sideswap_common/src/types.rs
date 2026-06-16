@@ -125,6 +125,7 @@ pub fn timestamp_now() -> i64 {
         .as_millis() as i64
 }
 
+// TODO: Remove the unused code below
 pub const SWAP_MARKETS_MIN_BITCOIN_AMOUNT: Amount = Amount(2000);
 pub const SWAP_MARKETS_MIN_SERVER_FEE: Amount = Amount(500);
 

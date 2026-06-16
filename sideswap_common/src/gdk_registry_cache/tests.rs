@@ -1,5 +1,6 @@
 use super::*;
 
+#[ignore = "depends on external servers"]
 #[tokio::test]
 async fn basic() {
     for source in [Source::Blockstream, Source::Github] {
