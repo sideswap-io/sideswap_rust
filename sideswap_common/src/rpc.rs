@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use sideswap_types::bitcoin_amount::BtcAmount;
+use sideswap_types::bitcoin_amount::UnsignedBtcAmount;
 use std::collections::BTreeMap;
 use std::vec::Vec;
 
@@ -180,7 +180,7 @@ pub struct UnspentItem {
     pub txid: elements::Txid,
     pub vout: u32,
     pub address: elements::Address,
-    pub amount: BtcAmount,
+    pub amount: UnsignedBtcAmount,
     pub confirmations: i32,
     pub asset: sideswap_api::AssetId,
     #[serde(rename = "scriptPubKey")]

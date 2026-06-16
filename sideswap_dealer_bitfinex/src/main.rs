@@ -484,7 +484,7 @@ async fn process_dealer_event(data: &mut Data, event: Event) {
             for item in unspent.iter() {
                 let asset_amount = asset_amounts.entry(item.asset).or_default();
                 let asset_amount_confirmed = asset_amounts_confirmed.entry(item.asset).or_default();
-                let amount = item.amount.to_btc();
+                let amount = item.amount.to_btc_lossy();
                 *asset_amount += amount;
                 if item.confirmations > 0 {
                     *asset_amount_confirmed += amount;

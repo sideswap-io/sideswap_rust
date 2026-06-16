@@ -546,7 +546,7 @@ async fn process_internal_msg(data: &mut Data, internal: Internal) {
             let mut asset_amounts = BTreeMap::<AssetId, f64>::new();
             for item in unspent.iter() {
                 let asset_amount = asset_amounts.entry(item.asset).or_default();
-                *asset_amount += item.amount.to_btc();
+                *asset_amount += item.amount.to_btc_lossy();
             }
 
             let wallet_balances_new = data
@@ -575,7 +575,10 @@ async fn process_internal_msg(data: &mut Data, internal: Internal) {
                 data.utxos.entry(item.outpoint()).or_insert_with(|| {
                     debug!(
                         "add new utxo: {}/{}, asset: {}, amount: {}",
-                        &item.txid, item.vout, item.asset, item.amount
+                        &item.txid,
+                        item.vout,
+                        item.asset,
+                        item.amount.to_btc_lossy()
                     );
                     Utxo {
                         amount: item.amount.to_sat() as i64,

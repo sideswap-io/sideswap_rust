@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use sideswap_types::bitcoin_amount::BtcAmount;
+use sideswap_types::bitcoin_amount::UnsignedBtcAmount;
 
 use super::{RpcCall, RpcRequest};
 
@@ -19,7 +19,7 @@ pub struct GetTxOutValue {
     pub script_pub_key: super::ScriptPubKey,
     pub valuecommitment: Option<elements::secp256k1_zkp::PedersenCommitment>,
     pub assetcommitment: Option<elements::secp256k1_zkp::Generator>,
-    pub value: Option<BtcAmount>,
+    pub value: Option<UnsignedBtcAmount>,
     pub asset: Option<elements::AssetId>,
 }
 
