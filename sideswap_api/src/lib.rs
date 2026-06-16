@@ -280,7 +280,6 @@ pub struct PegResponse {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct PegStatusRequest {
     pub order_id: OrderId,
-    pub peg_in: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -354,7 +353,7 @@ pub struct LocalMessageNotification {
     pub details: LocalMessageDetails,
 }
 
-#[derive(Serialize, Deserialize, Debug, Copy, Clone)]
+#[derive(Serialize, Deserialize, Debug, Copy, Clone, PartialEq, Eq)]
 pub enum PegTxState {
     InsufficientAmount,
     Detected,
@@ -383,7 +382,7 @@ pub fn peg_tx_state_code(state: PegTxState) -> i32 {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct TxStatus {
     pub tx_hash: Hash32,
     pub vout: i32,

@@ -336,7 +336,6 @@ async fn new_peg(
         PegStatus,
         sideswap_api::PegStatusRequest {
             order_id: resp.order_id,
-            peg_in: None,
         }
     )?;
 
@@ -1001,7 +1000,6 @@ fn process_ws_connected(data: &mut Data) {
         data.ws.send_request(sideswap_api::Request::PegStatus(
             sideswap_api::PegStatusRequest {
                 order_id: *order_id,
-                peg_in: None,
             },
         ));
     }
