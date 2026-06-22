@@ -1547,11 +1547,23 @@ async fn process_command(data: &mut Data, command: Command) -> Result<(), Error>
 }
 
 async fn connect_ws(network: Network, proxy: &Option<ProxyAddress>) -> Result<Connection, Error> {
-    let url = match network {
-        Network::Liquid => "wss://green-liquid-mainnet.blockstream.com/v2/ws",
-        Network::LiquidTestnet => "wss://green-liquid-testnet.blockstream.com/v2/ws",
-        Network::Regtest => std::future::pending().await, // Do nothing on regtest
+    let onion = proxy
+        .as_ref()
+        .map(|proxy| proxy.to_string() == "socks5://127.0.0.1:9050")
+        .unwrap_or_default();
+
+    let url = match (network, onion) {
+        (Network::Liquid, false) => "wss://green-liquid-mainnet.blockstream.com/v2/ws",
+        (Network::Liquid, true) => {
+            "ws://liquidbtcgecscpokecnr5uwg2de55shdq7dnvlpzeju7tnefbekicqd.onion/v2/ws"
+        }
+        (Network::LiquidTestnet, false) => "wss://green-liquid-testnet.blockstream.com/v2/ws",
+        (Network::LiquidTestnet, true) => {
+            "ws://liqtestulh46kwla3mgenugrcogvjjvzr2qdto663hujwnbaewzpkoad.onion/v2/ws"
+        }
+        (Network::Regtest, _) => std::future::pending().await, // Do nothing on regtest
     };
+
     let url: url::Url = url.parse().expect("must be valid");
     let host = url.host().expect("must be set").to_string();
     let port = url.port_or_known_default().expect("must be set");
