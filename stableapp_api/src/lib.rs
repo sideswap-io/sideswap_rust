@@ -144,6 +144,7 @@ pub struct DownloadAvatarResp {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct UploadAddressesReq {
     pub addresses: Vec<elements::Address>,
+    pub descriptor_epoch: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
