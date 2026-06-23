@@ -13,7 +13,7 @@ use elements::{
 };
 use lwk_common::{Signer, singlesig_desc};
 use lwk_wollet::{
-    ElementsNetwork, WolletDescriptor,
+    WolletDescriptor,
     blocking::BlockchainBackend,
     elements_miniscript::{self, slip77::MasterBlindingKey},
     secp256k1::SECP256K1,
@@ -305,6 +305,7 @@ fn run(
                                 let pub_key = priv_key.public_key(SECP256K1);
                                 Some(sideswap_common::pset::p2shwpkh_redeem_script(&pub_key))
                             }
+                            lwk_common::Singlesig::Tr => unimplemented!(),
                         };
 
                         assert!(utxo_details.is_none());
@@ -445,8 +446,8 @@ impl Wallet {
             .expect("must not fail");
 
         let lwk_network = match network {
-            Network::Liquid => ElementsNetwork::Liquid,
-            Network::LiquidTestnet => ElementsNetwork::LiquidTestnet,
+            Network::Liquid => lwk_common::Network::Liquid,
+            Network::LiquidTestnet => lwk_common::Network::TestnetLiquid,
             Network::Regtest => todo!(),
         };
 

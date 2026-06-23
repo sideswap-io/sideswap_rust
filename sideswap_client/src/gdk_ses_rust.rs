@@ -16,8 +16,7 @@ use elements_miniscript::descriptor::checksum::desc_checksum;
 use gdk_common::{be::BEScriptConvert, electrum_client::Socks5Config};
 use lwk_common::Singlesig;
 use lwk_wollet::{
-    Chain, ElectrumClient, ElectrumOptions, ElementsNetwork, WolletDescriptor,
-    blocking::BlockchainBackend,
+    Chain, ElectrumClient, ElectrumOptions, WolletDescriptor, blocking::BlockchainBackend,
 };
 use secp256k1::SECP256K1;
 use sideswap_amp::{Signer, sw_signer::SwSigner};
@@ -80,6 +79,7 @@ pub fn full_user_path(
     let wallet_path = match singlesig {
         Singlesig::Wpkh => 84,
         Singlesig::ShWpkh => 49,
+        Singlesig::Tr => 86,
     };
 
     let coin_type = if is_mainnet { 1776 } else { 1 };
@@ -258,6 +258,7 @@ impl GdkSesRust {
         let address_type = match account.singlesig {
             Singlesig::Wpkh => AddressType::P2wpkh,
             Singlesig::ShWpkh => AddressType::P2shP2wpkh,
+            Singlesig::Tr => unimplemented!(),
         };
 
         let wildcard_index = address_res.index();
@@ -300,6 +301,7 @@ impl GdkSesRust {
                             std::cmp::max(last_unused, next_recv_address_index)
                         }
                         Singlesig::ShWpkh => wallet.address(None)?.index(),
+                        Singlesig::Tr => unimplemented!(),
                     },
                     Chain::Internal => wallet.change(None)?.index(),
                 };
@@ -307,6 +309,7 @@ impl GdkSesRust {
                 let address_type = match account.singlesig {
                     Singlesig::Wpkh => AddressType::P2wpkh,
                     Singlesig::ShWpkh => AddressType::P2shP2wpkh,
+                    Singlesig::Tr => unimplemented!(),
                 };
 
                 for wildcard_index in 0..count {
@@ -411,6 +414,7 @@ impl crate::gdk_ses::GdkSes for GdkSesRust {
                     let wallet_type = match account.singlesig {
                         Singlesig::Wpkh => WalletType::Native,
                         Singlesig::ShWpkh => WalletType::Nested,
+                        Singlesig::Tr => unimplemented!(),
                     };
 
                     let prevout_script =
@@ -462,6 +466,7 @@ pub fn singlesig_desc(
     let (prefix, path, suffix) = match script_variant {
         Singlesig::Wpkh => ("elwpkh", format!("84h/{coin_type}h/0h"), ""),
         Singlesig::ShWpkh => ("elsh(wpkh", format!("49h/{coin_type}h/0h"), ")"),
+        Singlesig::Tr => unimplemented!(),
     };
 
     // m / purpose' / coin_type' / account' / change / address_index
@@ -723,11 +728,14 @@ pub fn start_processing(
     };
 
     let lwk_network = match login_info.env.d().network {
-        Network::Liquid => ElementsNetwork::Liquid,
-        Network::LiquidTestnet => ElementsNetwork::LiquidTestnet,
-        Network::Regtest => ElementsNetwork::ElementsRegtest {
-            policy_asset: login_info.env.nd().policy_asset,
-        },
+        Network::Liquid => lwk_wollet::Network::Liquid,
+        Network::LiquidTestnet => lwk_wollet::Network::TestnetLiquid,
+        Network::Regtest => lwk_wollet::Network::CustomElements(
+            lwk_common::ElementsParamsBuilder::new()
+                .with_policy_asset(login_info.env.nd().policy_asset)
+                .build()
+                .expect("must not fail"),
+        ),
     };
 
     let accounts = [

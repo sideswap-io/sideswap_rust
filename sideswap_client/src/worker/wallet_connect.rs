@@ -144,7 +144,7 @@ fn get_signer_request_details(
                 })
             })
             .collect(),
-        network_fee: details.balance.fee,
+        network_fee: details.balance.fees_in(&data.policy_asset),
     })
 }
 

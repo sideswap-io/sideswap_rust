@@ -56,9 +56,9 @@ jni = "0.21.1"
 libc = "0.2"
 log = "0.4"
 log4rs = { version = "1.2", features = ["gzip", "toml_format"] }
-lwk_common = { version = "0.17" }
-lwk_signer = { version = "0.17", default-features = false }
-lwk_wollet = { version = "0.17" }
+lwk_common = { version = "0.18.1" }
+lwk_signer = { version = "0.18.1", default-features = false }
+lwk_wollet = { version = "0.18.1" }
 poem = "3"
 poem-openapi = { version = "5", features = ["swagger-ui"] }
 prost = "0.12"
@@ -96,6 +96,6 @@ uuid = { version = "1.8" }
 vergen-gitcl = "9"
 
 [patch.crates-io]
-lwk_common = { git = "https://github.com/sideswap-io/lwk.git", rev = "1888e132c955972e4c76752140f1c468f673e41f" }
-lwk_signer = { git = "https://github.com/sideswap-io/lwk.git", rev = "1888e132c955972e4c76752140f1c468f673e41f" }
-lwk_wollet = { git = "https://github.com/sideswap-io/lwk.git", rev = "1888e132c955972e4c76752140f1c468f673e41f" }
+lwk_common = { git = "https://github.com/sideswap-io/lwk.git", rev = "91f42a3f4f979fc19546ad1ccb2f3fa9b2bdf21b" }
+lwk_signer = { git = "https://github.com/sideswap-io/lwk.git", rev = "91f42a3f4f979fc19546ad1ccb2f3fa9b2bdf21b" }
+lwk_wollet = { git = "https://github.com/sideswap-io/lwk.git", rev = "91f42a3f4f979fc19546ad1ccb2f3fa9b2bdf21b" }
