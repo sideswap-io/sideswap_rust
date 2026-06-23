@@ -7,12 +7,18 @@ fn parse_numeric_variants() {
     let c: ProxyAddress = "127.0.0.1:9050".parse().unwrap();
     assert_eq!(a, b);
     assert_eq!(b, c);
+
+    assert_eq!(a, ProxyAddress::tor());
+    assert_eq!(b, ProxyAddress::tor());
+    assert_eq!(c, ProxyAddress::tor());
 }
 
 #[test]
 fn ipv6_and_display() {
     let p: ProxyAddress = "[::1]:9050".parse().unwrap();
     assert_eq!(p.to_string(), "socks5://[::1]:9050");
+
+    assert_ne!(p, ProxyAddress::tor());
 }
 
 #[test]

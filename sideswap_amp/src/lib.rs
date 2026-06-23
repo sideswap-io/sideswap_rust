@@ -1549,7 +1549,7 @@ async fn process_command(data: &mut Data, command: Command) -> Result<(), Error>
 async fn connect_ws(network: Network, proxy: &Option<ProxyAddress>) -> Result<Connection, Error> {
     let onion = proxy
         .as_ref()
-        .map(|proxy| proxy.to_string() == "socks5://127.0.0.1:9050")
+        .map(|proxy| *proxy == ProxyAddress::tor())
         .unwrap_or_default();
 
     let url = match (network, onion) {

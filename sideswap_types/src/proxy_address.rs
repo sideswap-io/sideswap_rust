@@ -1,5 +1,5 @@
 use std::{
-    net::{SocketAddr, ToSocketAddrs},
+    net::{Ipv4Addr, SocketAddr, SocketAddrV4, ToSocketAddrs},
     str::FromStr,
 };
 
@@ -27,6 +27,12 @@ impl ProxyAddress {
     pub fn socks5_address(&self) -> Option<&SocketAddr> {
         match self {
             ProxyAddress::Socks5 { address } => Some(address),
+        }
+    }
+
+    pub fn tor() -> Self {
+        ProxyAddress::Socks5 {
+            address: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 9050)),
         }
     }
 }
