@@ -1259,9 +1259,9 @@ dependencies = [
 
 [[package]]
 name = "elements"
-version = "0.25.2"
+version = "0.25.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "81b2569d3495bfdfce36c504fd4d78752ff4a7699f8a33e6f3ee523bddf9f6ad"
+checksum = "83c63a04238f4b7f3564fe9705921452c2900efd00982545e5c634fac9024fe2"
 dependencies = [
  "bech32 0.11.0",
  "bitcoin",
@@ -1289,7 +1289,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "571fa105690f83c7833df2109eb2e14ca0e62d633d2624ffcb166ff18a3da870"
 dependencies = [
  "bitcoin",
- "elements 0.25.2",
+ "elements 0.25.3",
  "miniscript",
  "serde 1.0.228",
 ]
@@ -1610,7 +1610,7 @@ dependencies = [
  "bip39",
  "bitcoin",
  "electrum-client",
- "elements 0.25.2",
+ "elements 0.25.3",
  "elements-miniscript",
  "libc",
  "log",
@@ -2557,7 +2557,7 @@ source = "git+https://github.com/sideswap-io/lwk.git?rev=1888e132c955972e4c76752
 dependencies = [
  "aes-gcm-siv 0.11.1",
  "base64 0.21.7",
- "elements 0.25.2",
+ "elements 0.25.3",
  "elements-miniscript",
  "getrandom 0.2.16",
  "qr_code",
@@ -2594,7 +2594,7 @@ dependencies = [
  "bitcoincore-rpc",
  "cbc",
  "electrum-client",
- "elements 0.25.2",
+ "elements 0.25.3",
  "elements 0.26.1",
  "elements-miniscript",
  "flate2",
@@ -4140,7 +4140,7 @@ dependencies = [
  "bitcoin_hashes 0.14.0",
  "bytes",
  "ciborium",
- "elements 0.25.2",
+ "elements 0.25.3",
  "elements-miniscript",
  "futures",
  "hex",
@@ -4167,7 +4167,7 @@ dependencies = [
 name = "sideswap_api"
 version = "0.1.2"
 dependencies = [
- "elements 0.25.2",
+ "elements 0.25.3",
  "hex",
  "rand 0.8.5",
  "serde 1.0.228",
@@ -4190,7 +4190,7 @@ dependencies = [
  "chrono",
  "ciborium",
  "derive_more 0.99.20",
- "elements 0.25.2",
+ "elements 0.25.3",
  "elements-miniscript",
  "flexi_logger",
  "gdk-common",
@@ -4235,7 +4235,7 @@ dependencies = [
  "blake3",
  "ciborium",
  "derive_more 0.99.20",
- "elements 0.25.2",
+ "elements 0.25.3",
  "flexi_logger",
  "futures",
  "gdk-pin-client",
@@ -4266,7 +4266,7 @@ version = "0.1.2"
 dependencies = [
  "anyhow",
  "base64 0.21.7",
- "elements 0.25.2",
+ "elements 0.25.3",
  "futures",
  "hex",
  "log",
@@ -4294,7 +4294,7 @@ dependencies = [
  "base64 0.21.7",
  "bip39",
  "config",
- "elements 0.25.2",
+ "elements 0.25.3",
  "log",
  "serde 1.0.228",
  "sideswap_amp",
@@ -4314,7 +4314,7 @@ dependencies = [
  "base64 0.21.7",
  "config",
  "crc32fast",
- "elements 0.25.2",
+ "elements 0.25.3",
  "futures",
  "hex",
  "log",
@@ -4363,7 +4363,7 @@ dependencies = [
  "base64 0.21.7",
  "bip39",
  "config",
- "elements 0.25.2",
+ "elements 0.25.3",
  "hex",
  "log",
  "lwk_common",
@@ -4386,7 +4386,7 @@ dependencies = [
  "base64 0.21.7",
  "ciborium",
  "ciborium-io",
- "elements 0.25.2",
+ "elements 0.25.3",
  "hex",
  "log",
  "serde 1.0.228",
@@ -4406,7 +4406,7 @@ dependencies = [
  "anyhow",
  "base64 0.21.7",
  "bip39",
- "elements 0.25.2",
+ "elements 0.25.3",
  "hex",
  "log",
  "lwk_common",
@@ -4428,7 +4428,7 @@ dependencies = [
  "anyhow",
  "bip39",
  "config",
- "elements 0.25.2",
+ "elements 0.25.3",
  "futures",
  "log",
  "log4rs",
@@ -4469,7 +4469,7 @@ version = "0.1.2"
 dependencies = [
  "anyhow",
  "base64 0.21.7",
- "elements 0.25.2",
+ "elements 0.25.3",
  "rand 0.8.5",
  "serde 1.0.228",
  "sideswap_common",
@@ -4484,7 +4484,7 @@ dependencies = [
  "anyhow",
  "base64 0.21.7",
  "bip39",
- "elements 0.25.2",
+ "elements 0.25.3",
  "hex",
  "log",
  "serde 1.0.228",
@@ -4501,7 +4501,7 @@ name = "sideswap_types"
 version = "0.1.2"
 dependencies = [
  "base64 0.21.7",
- "elements 0.25.2",
+ "elements 0.25.3",
  "hex",
  "hex-literal",
  "rand 0.8.5",
@@ -4798,7 +4798,7 @@ checksum = "a8f112729512f8e442d81f95a8a7ddf2b7c6b8a1a6f509a95864142b30cab2d3"
 name = "stableapp_api"
 version = "0.1.0"
 dependencies = [
- "elements 0.25.2",
+ "elements 0.25.3",
  "serde 1.0.228",
  "sideswap_api",
  "thiserror 1.0.69",
