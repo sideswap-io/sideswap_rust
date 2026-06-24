@@ -194,41 +194,44 @@ impl GdkSesRust {
                 })
                 .collect::<Vec<_>>();
 
-            for (txid, _height) in my_txids {
-                let tx = wallet
-                    .transaction(txid)?
-                    .ok_or_else(|| anyhow!("can't find transaction {txid}"))?;
+            if !my_txids.is_empty() {
+                let txouts = wallet.txos_map()?;
+                for (txid, _height) in my_txids {
+                    let tx = wallet
+                        .transaction_(txid, &txouts)?
+                        .ok_or_else(|| anyhow!("can't find transaction {txid}"))?;
 
-                let created_at = tx
-                    .timestamp
-                    .map(|timestamp| TimestampMs::from_millis(u64::from(timestamp) * 1000))
-                    .unwrap_or_else(|| TimestampMs::now());
+                    let created_at = tx
+                        .timestamp
+                        .map(|timestamp| TimestampMs::from_millis(u64::from(timestamp) * 1000))
+                        .unwrap_or_else(|| TimestampMs::now());
 
-                let entry = combined
-                    .entry(*txid)
-                    .or_insert_with(|| models::Transaction {
-                        txid: *txid,
-                        network_fee: tx.fee,
-                        vsize: tx.tx.vsize(),
-                        created_at,
-                        block_height: tx.height.unwrap_or_default(),
-                        inputs: Vec::new(),
-                        outputs: Vec::new(),
-                    });
-
-                for tx_input in tx.inputs.iter() {
-                    if let Some(input) = tx_input {
-                        entry.inputs.push(models::InputOutput {
-                            unblinded: input.unblinded,
+                    let entry = combined
+                        .entry(*txid)
+                        .or_insert_with(|| models::Transaction {
+                            txid: *txid,
+                            network_fee: tx.fee,
+                            vsize: tx.tx.vsize(),
+                            created_at,
+                            block_height: tx.height.unwrap_or_default(),
+                            inputs: Vec::new(),
+                            outputs: Vec::new(),
                         });
+
+                    for tx_input in tx.inputs.iter() {
+                        if let Some(input) = tx_input {
+                            entry.inputs.push(models::InputOutput {
+                                unblinded: input.unblinded,
+                            });
+                        }
                     }
-                }
 
-                for tx_output in tx.outputs.iter() {
-                    if let Some(output) = tx_output {
-                        entry.outputs.push(models::InputOutput {
-                            unblinded: output.unblinded,
-                        });
+                    for tx_output in tx.outputs.iter() {
+                        if let Some(output) = tx_output {
+                            entry.outputs.push(models::InputOutput {
+                                unblinded: output.unblinded,
+                            });
+                        }
                     }
                 }
             }
