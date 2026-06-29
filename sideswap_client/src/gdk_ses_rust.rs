@@ -454,103 +454,6 @@ impl crate::gdk_ses::GdkSes for GdkSesRust {
                     }
                 });
             }
-
-            let explicit_utxos = wallet.explicit_utxos()?;
-            for utxo in explicit_utxos {
-                res.entry(utxo.unblinded.asset).or_default().push({
-                    let (ext_int, index) = *wallet
-                        .cache
-                        .paths
-                        .get(&utxo.txout.script_pubkey)
-                        .ok_or_else(|| {
-                            anyhow!(
-                                "can't find explicit UTXO script, script_pubkey: {script_pubkey}",
-                                script_pubkey = utxo.txout.script_pubkey
-                            )
-                        })?;
-                    let is_internal = match ext_int {
-                        Chain::External => false,
-                        Chain::Internal => true,
-                    };
-
-                    let wildcard_index = match index {
-                        ChildNumber::Normal { index } => index,
-                        ChildNumber::Hardened { index: _ } => {
-                            anyhow::bail!("unexpected hardened derivation");
-                        }
-                    };
-
-                    let is_blinded = utxo.unblinded.asset_bf != AssetBlindingFactor::zero()
-                        && utxo.unblinded.value_bf != ValueBlindingFactor::zero();
-
-                    let asset_commitment = if utxo.unblinded.asset_bf != AssetBlindingFactor::zero()
-                    {
-                        elements::confidential::Asset::new_confidential(
-                            SECP256K1,
-                            utxo.unblinded.asset,
-                            utxo.unblinded.asset_bf,
-                        )
-                    } else {
-                        elements::confidential::Asset::Explicit(utxo.unblinded.asset)
-                    };
-
-                    let value_commitment = if utxo.unblinded.value_bf != ValueBlindingFactor::zero()
-                    {
-                        elements::confidential::Value::new_confidential_from_assetid(
-                            SECP256K1,
-                            utxo.unblinded.value,
-                            utxo.unblinded.asset,
-                            utxo.unblinded.value_bf,
-                            utxo.unblinded.asset_bf,
-                        )
-                    } else {
-                        elements::confidential::Value::Explicit(utxo.unblinded.value)
-                    };
-
-                    let public_key = public_key(&account.xpub, ext_int, wildcard_index);
-
-                    let wallet_type = match account.singlesig {
-                        Singlesig::Wpkh => WalletType::Native,
-                        Singlesig::ShWpkh => WalletType::Nested,
-                        Singlesig::Tr => unimplemented!(),
-                    };
-
-                    let prevout_script =
-                        bitcoin::Address::p2pkh(&public_key, bitcoin::Network::Regtest)
-                            .script_pubkey();
-
-                    let user_path =
-                        full_user_path(self.is_mainnet, account.singlesig, ext_int, wildcard_index);
-
-                    let block_height = wallet
-                        .cache
-                        .heights
-                        .get(&utxo.outpoint.txid)
-                        .copied()
-                        .unwrap_or_default()
-                        .unwrap_or_default();
-
-                    models::Utxo {
-                        wallet_type,
-                        block_height,
-                        txhash: utxo.outpoint.txid,
-                        vout: utxo.outpoint.vout,
-                        pointer: wildcard_index,
-                        is_internal,
-                        is_blinded,
-                        prevout_script: prevout_script.into_elements(),
-                        asset_id: utxo.unblinded.asset,
-                        satoshi: utxo.unblinded.value,
-                        asset_commitment,
-                        value_commitment,
-                        assetblinder: utxo.unblinded.asset_bf,
-                        amountblinder: utxo.unblinded.value_bf,
-                        script_pub_key: utxo.txout.script_pubkey,
-                        public_key: Some(public_key),
-                        user_path: Some(user_path.into_iter().map(u32::from).collect()),
-                    }
-                });
-            }
         }
 
         Ok(res)
@@ -872,12 +775,16 @@ pub fn start_processing(
             // TODO: Should we load wallets in background?
 
             let wallet_dir = login_info.cache_dir.join("lwk").join(&cache_dir_name);
-            let wallet = match lwk_wollet::WolletBuilder::new(lwk_network, descriptor.clone())
-                .with_legacy_fs_store(&wallet_dir)
-                .expect("this should not fail")
-                .with_allow_explicit(true)
-                .build()
-            {
+
+            let build_wallet = || {
+                lwk_wollet::WolletBuilder::new(lwk_network, descriptor.clone())
+                    .with_legacy_fs_store(&wallet_dir)
+                    .expect("this should not fail")
+                    .with_allow_explicit(true)
+                    .build()
+            };
+
+            let wallet = match build_wallet() {
                 Ok(wallet) => {
                     log::debug!("lwk wallet loading succeed, path: {wallet_dir:?}");
                     wallet
@@ -889,11 +796,7 @@ pub fn start_processing(
                     std::fs::remove_dir_all(&wallet_dir)
                         .expect("removing lwk wallet directory should not fail");
 
-                    lwk_wollet::WolletBuilder::new(lwk_network, descriptor.clone())
-                        .with_legacy_fs_store(&wallet_dir)
-                        .expect("this should not fail")
-                        .with_allow_explicit(true)
-                        .build()
+                    build_wallet()
                         .expect("creating lwk wallet with a clean cache directory should not fail")
                 }
             };
