@@ -2,10 +2,7 @@ use bitcoin::secp256k1::SecretKey;
 use elements::{
     AssetId, TxOutSecrets,
     confidential::{AssetBlindingFactor, ValueBlindingFactor},
-    pset::{
-        PartiallySignedTransaction,
-        raw::{ProprietaryKey, ProprietaryType},
-    },
+    pset::PartiallySignedTransaction,
 };
 use sideswap_types::verify;
 
@@ -25,23 +22,12 @@ pub enum Error {
     TooManyInputs { count: usize, limit: usize },
 }
 
-const PSET_IN_EXPLICIT_VALUE: ProprietaryType = 0x11; // 8 bytes
-const PSET_IN_VALUE_PROOF: ProprietaryType = 0x12; // 73 bytes
-const PSET_IN_EXPLICIT_ASSET: ProprietaryType = 0x13; // 2 bytes
-const PSET_IN_ASSET_PROOF: ProprietaryType = 0x14; // 67 bytes
-
 pub fn remove_explicit_values(pset: &mut PartiallySignedTransaction) {
     for input in pset.inputs_mut() {
-        for subtype in [
-            PSET_IN_EXPLICIT_VALUE,
-            PSET_IN_EXPLICIT_ASSET,
-            PSET_IN_VALUE_PROOF,
-            PSET_IN_ASSET_PROOF,
-        ] {
-            input
-                .proprietary
-                .remove(&ProprietaryKey::from_pset_pair(subtype, Vec::new()));
-        }
+        input.amount = None;
+        input.blind_value_proof = None;
+        input.asset = None;
+        input.blind_asset_proof = None;
     }
 }
 
@@ -99,30 +85,10 @@ fn add_input_explicit_proofs(
         asset_gen_blinded,
     )?;
 
-    input.proprietary.insert(
-        ProprietaryKey::from_pset_pair(PSET_IN_EXPLICIT_VALUE, Vec::new()),
-        elements::encode::serialize(&secret.value),
-    );
-
-    input.proprietary.insert(
-        ProprietaryKey::from_pset_pair(PSET_IN_EXPLICIT_ASSET, Vec::new()),
-        elements::encode::serialize(&secret.asset),
-    );
-
-    let mut blind_value_proof = elements::encode::serialize(&blind_value_proof);
-    blind_value_proof.remove(0);
-    let mut blind_asset_proof = elements::encode::serialize(&blind_asset_proof);
-    blind_asset_proof.remove(0);
-
-    input.proprietary.insert(
-        ProprietaryKey::from_pset_pair(PSET_IN_VALUE_PROOF, Vec::new()),
-        blind_value_proof,
-    );
-
-    input.proprietary.insert(
-        ProprietaryKey::from_pset_pair(PSET_IN_ASSET_PROOF, Vec::new()),
-        blind_asset_proof,
-    );
+    input.amount = Some(secret.value);
+    input.blind_value_proof = Some(Box::new(blind_value_proof));
+    input.asset = Some(secret.asset);
+    input.blind_asset_proof = Some(Box::new(blind_asset_proof));
 
     Ok(())
 }
