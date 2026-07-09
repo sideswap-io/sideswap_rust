@@ -336,3 +336,11 @@ pub struct ReqTxInput {
 pub struct ReqTxInputEmpty {}
 
 pub type RespTxInput = ByteBuf;
+
+#[derive(Debug, Serialize)]
+pub struct DebugSetMnemonic {
+    pub mnemonic: String,
+    pub temporary_wallet: bool,
+}
+
+pub type DebugSetMnemonicResp = bool;

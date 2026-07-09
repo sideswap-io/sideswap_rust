@@ -3919,7 +3919,7 @@ pub fn start_processing(
 
     let ui_copy = ui.clone();
     let jade_status_callback: JadeStatusCallback =
-        std::sync::Arc::new(Box::new(move |status: Option<JadeStatus>| {
+        std::sync::Arc::new(move |status: Option<JadeStatus>| {
             let status: i32 = match status {
                 None => proto::from::jade_status::Status::Idle,
                 Some(status) => match status {
@@ -3946,7 +3946,7 @@ pub fn start_processing(
             ui_copy.send(proto::from::Msg::JadeStatus(proto::from::JadeStatus {
                 status,
             }));
-        }));
+        });
 
     let settings_path = Data::data_path(env, &params.work_dir);
     let mut settings = settings::load_settings(&settings_path).unwrap_or_default();

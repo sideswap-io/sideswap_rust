@@ -28,7 +28,7 @@ pub enum JadeStatus {
     SignTx(TxType),
 }
 
-pub type JadeStatusCallback = std::sync::Arc<Box<dyn Fn(Option<JadeStatus>) + Send + Sync>>;
+pub type JadeStatusCallback = std::sync::Arc<dyn Fn(Option<JadeStatus>) + Send + Sync>;
 
 // Number of started Jade popups (only the first status is shown).
 type ActiveStatuses = Arc<Mutex<usize>>;
@@ -433,6 +433,18 @@ impl ManagedJade {
             "get_receive_address",
             std::time::Duration::from_secs(300),
             req,
+        )?;
+        Ok(resp)
+    }
+
+    pub fn debug_set_mnemonic(&self, mnemonic: &str) -> Result<bool, anyhow::Error> {
+        let resp = self.make_request::<models::DebugSetMnemonic, models::DebugSetMnemonicResp>(
+            "debug_set_mnemonic",
+            std::time::Duration::from_secs(30),
+            models::DebugSetMnemonic {
+                mnemonic: mnemonic.to_owned(),
+                temporary_wallet: false,
+            },
         )?;
         Ok(resp)
     }
