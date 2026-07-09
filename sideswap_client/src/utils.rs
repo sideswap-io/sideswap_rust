@@ -119,9 +119,9 @@ pub fn get_jade_asset_info(
 
 pub fn get_jade_network(env: Env) -> JadeNetwork {
     match env.d().network {
-        Network::Liquid => JadeNetwork::Liquid,
-        Network::LiquidTestnet => JadeNetwork::TestnetLiquid,
-        Network::Regtest => unimplemented!(),
+        Network::Liquid => JadeNetwork::LiquidMainnet,
+        Network::LiquidTestnet => JadeNetwork::LiquidTestnet,
+        Network::Regtest => JadeNetwork::LiquidRegtest,
     }
 }
 

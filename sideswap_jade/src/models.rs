@@ -62,17 +62,20 @@ pub enum JadeNetwork {
     #[serde(rename = "mainnet")]
     Mainnet,
 
-    // Bitcoin testnet
     #[serde(rename = "testnet")]
     Testnet,
 
-    // Liquid mainnet
-    #[serde(rename = "liquid")]
-    Liquid,
+    #[serde(rename = "localtest")]
+    Regtest,
 
-    // Liquid testnet
+    #[serde(rename = "liquid")]
+    LiquidMainnet,
+
     #[serde(rename = "testnet-liquid")]
-    TestnetLiquid,
+    LiquidTestnet,
+
+    #[serde(rename = "localtest-liquid")]
+    LiquidRegtest,
 }
 
 #[derive(Debug)]
