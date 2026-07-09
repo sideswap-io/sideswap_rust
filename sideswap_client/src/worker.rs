@@ -1871,13 +1871,72 @@ impl Data {
         &self.proxy_address
     }
 
+    fn get_jade_watch_only(
+        env: Env,
+        jade: &Arc<jade_mng::ManagedJade>,
+        master_blinding_key: MasterBlindingKey,
+        amp_user_path: &[u32],
+    ) -> Result<WatchOnly, anyhow::Error> {
+        let jade_data = JadeData {
+            env,
+            jade: jade.clone(),
+        };
+
+        let nested_path = env.nd().account_path_sh_wpkh;
+        let native_path = env.nd().account_path_wpkh;
+
+        let network = utils::get_jade_network(env);
+
+        let root_xpub = jade_data.resolve_xpub(network, &[])?;
+        // let password_xpub = jade_data.resolve_xpub(network, &XPUB_PATH_PASS)?;
+        let nested_xpub = jade_data.resolve_xpub(network, &nested_path)?;
+        let native_xpub = jade_data.resolve_xpub(network, &native_path)?;
+        let amp_user_xpub = jade_data.resolve_xpub(network, &amp_user_path)?;
+
+        let master_blinding_key = master_blinding_key.into();
+        let master_xpub_fingerprint = root_xpub.fingerprint();
+
+        Ok(WatchOnly {
+            master_xpub_fingerprint,
+            master_blinding_key,
+            native_xpub,
+            nested_xpub,
+            amp_user_xpub,
+        })
+    }
+
     fn try_register(&mut self, login: &LoginData) -> Result<settings::RegInfo, anyhow::Error> {
         log::debug!("try register...");
         if self.env == Env::LocalRegtest {
+            let amp_user_path = vec![2147483651, 2147483649, 1];
+
+            let watch_only = match login {
+                LoginData::Mnemonic { mnemonic: _ } => None,
+                LoginData::Jade { jade } => {
+                    let jade_data = JadeData {
+                        env: self.env,
+                        jade: jade.clone(),
+                    };
+
+                    let master_blinding_key = jade_data.master_blinding_key()?;
+
+                    let watch_only = Self::get_jade_watch_only(
+                        self.env,
+                        jade,
+                        master_blinding_key,
+                        &amp_user_path,
+                    )?;
+
+                    Some(watch_only)
+                }
+            };
+
+            let amp_service_xpub = "tpubECMbgHMZm4QymM7WtpQonF5cU5x54M54QvLFsGjEY3HWx8YPxqZ7nq3PiaQSEjeDwCwpYr4heLC8N7kP74HYGKjoycutoZ4VACJmco16btA".parse().expect("must not fail");
+
             return Ok(settings::RegInfo {
-                watch_only: None,
-                amp_service_xpub: "tpubECMbgHMZm4QymM7WtpQonF5cU5x54M54QvLFsGjEY3HWx8YPxqZ7nq3PiaQSEjeDwCwpYr4heLC8N7kP74HYGKjoycutoZ4VACJmco16btA".parse().expect("must not fail"),
-                amp_user_path: vec![2147483651, 2147483649, 1],
+                watch_only,
+                amp_service_xpub,
+                amp_user_path,
             });
         }
 
@@ -1925,38 +1984,15 @@ impl Data {
             LoginData::Mnemonic { mnemonic: _ } => None,
             LoginData::Jade { jade } => {
                 let credentials = derive_amp_wo_login(amp_wallet.master_blinding_key());
-
                 self.runtime
                     .block_on(amp_wallet.set_watch_only(credentials))?;
 
-                let jade_data = JadeData {
-                    env: self.env,
-                    jade: jade.clone(),
-                };
-
-                let nested_path = self.env.nd().account_path_sh_wpkh;
-                let native_path = self.env.nd().account_path_wpkh;
-
-                let network = utils::get_jade_network(self.env);
-
-                let root_xpub = jade_data.resolve_xpub(network, &[])?;
-                // let password_xpub = jade_data.resolve_xpub(network, &XPUB_PATH_PASS)?;
-                let nested_xpub = jade_data.resolve_xpub(network, &nested_path)?;
-                let native_xpub = jade_data.resolve_xpub(network, &native_path)?;
-
-                let amp_user_xpub = jade_data.resolve_xpub(network, &amp_user_path)?;
-
                 let master_blinding_key = (*amp_wallet.master_blinding_key()).into();
 
-                let master_xpub_fingerprint = root_xpub.fingerprint();
+                let watch_only =
+                    Self::get_jade_watch_only(self.env, jade, master_blinding_key, &amp_user_path)?;
 
-                Some(WatchOnly {
-                    master_xpub_fingerprint,
-                    master_blinding_key,
-                    native_xpub,
-                    nested_xpub,
-                    amp_user_xpub,
-                })
+                Some(watch_only)
             }
         };
 
