@@ -2003,7 +2003,10 @@ impl Data {
         })
     }
 
-    fn try_process_login_request(&mut self, req: proto::to::Login) -> Result<(), anyhow::Error> {
+    fn try_process_login_request(
+        &mut self,
+        req: proto::to::Login,
+    ) -> Result<proto::from::login::LoginInfo, anyhow::Error> {
         debug!("process login request...");
 
         let cache_dir = self.cache_path();
@@ -2216,6 +2219,9 @@ impl Data {
 
         let wallet_connect = wallet_connect::new(self, wallet_reg.default_account().descriptor());
 
+        let native_segwit_descriptor = wallet_reg.default_account().descriptor().to_string();
+        let nested_segwit_descriptor = wallet_reg.nested_segwit_account().descriptor().to_string();
+
         self.wallet_data = Some(WalletData {
             xpubs,
             wallet_reg,
@@ -2251,13 +2257,16 @@ impl Data {
         // This is needed to update the FCM token in wallet_connect
         self.update_push_token();
 
-        Ok(())
+        Ok(proto::from::login::LoginInfo {
+            native_segwit_descriptor,
+            nested_segwit_descriptor,
+        })
     }
 
     fn process_login_request(&mut self, req: proto::to::Login) {
         let res = self.try_process_login_request(req);
         let res = match res {
-            Ok(()) => proto::from::login::Result::Success(proto::Empty {}),
+            Ok(login_info) => proto::from::login::Result::Success(login_info),
             Err(err) => proto::from::login::Result::ErrorMsg(err.to_string()),
         };
         self.ui.send(proto::from::Msg::Login(proto::from::Login {

@@ -161,6 +161,10 @@ impl GdkSesRust {
         self.accounts.get(0).expect("must exist")
     }
 
+    pub fn nested_segwit_account(&self) -> &AccountData {
+        self.accounts.get(1).expect("must exist")
+    }
+
     fn get_transactions_impl(
         &self,
         opts: GetTransactionsOpt,

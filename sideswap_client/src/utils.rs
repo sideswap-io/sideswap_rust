@@ -227,6 +227,12 @@ pub fn redact_from_msg(mut msg: proto::from::Msg) -> proto::from::Msg {
         proto::from::Msg::NewAsset(v) => {
             redact_str(&mut v.icon);
         }
+        proto::from::Msg::Login(proto::from::Login {
+            result: Some(proto::from::login::Result::Success(login_info)),
+        }) => {
+            redact_str(&mut login_info.native_segwit_descriptor);
+            redact_str(&mut login_info.nested_segwit_descriptor);
+        }
         _ => {}
     }
     msg

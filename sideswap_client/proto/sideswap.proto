@@ -465,9 +465,14 @@ message To {
 
 message From {
   message Login {
+    message LoginInfo {
+      required string native_segwit_descriptor = 1;
+      required string nested_segwit_descriptor = 2;
+    }
+
     oneof result {
       string error_msg = 1;
-      Empty success = 2;
+      LoginInfo success = 2;
     }
   }
 
