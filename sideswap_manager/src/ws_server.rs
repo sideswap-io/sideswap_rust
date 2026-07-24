@@ -5,11 +5,11 @@ use serde::Deserialize;
 use tokio::{
     net::{TcpListener, TcpStream},
     sync::{
-        mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
+        mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel},
         oneshot,
     },
 };
-use tokio_tungstenite::{tungstenite::Message, WebSocketStream};
+use tokio_tungstenite::{WebSocketStream, tungstenite::Message};
 
 use crate::{error::Error, worker::Command};
 

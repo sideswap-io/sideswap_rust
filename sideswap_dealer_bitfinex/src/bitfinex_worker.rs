@@ -5,8 +5,8 @@ use log::{debug, error, info};
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::{
-    bitfinex_api::{self, movements::Movements},
     BfSettings,
+    bitfinex_api::{self, movements::Movements},
 };
 
 pub enum MarketType {
@@ -206,7 +206,11 @@ pub async fn run(
                         .await;
                     debug!("withdraw result: {res:?}");
                     if let Ok(success) = res.as_ref() {
-                        if success.withdrawal_id == 0 && success.status == "SUCCESS" && success.text == "Settlement / Transfer in progress, please try again in few seconds"  {
+                        if success.withdrawal_id == 0
+                            && success.status == "SUCCESS"
+                            && success.text
+                                == "Settlement / Transfer in progress, please try again in few seconds"
+                        {
                             retry_count += 1;
                             if retry_count < 5 {
                                 debug!("wait and retry withdraw...");

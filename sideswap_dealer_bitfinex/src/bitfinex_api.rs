@@ -103,7 +103,11 @@ impl Bitfinex {
         let resp = serde_json::from_str::<serde_json::Value>(&resp).map_err(Error::Json)?;
 
         if let Some(
-            [serde_json::Value::String(err), serde_json::Value::Number(code), serde_json::Value::String(msg)],
+            [
+                serde_json::Value::String(err),
+                serde_json::Value::Number(code),
+                serde_json::Value::String(msg),
+            ],
         ) = resp.as_array().map(|a| a.as_slice())
         {
             if err == "error" {

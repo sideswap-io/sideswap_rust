@@ -2,9 +2,9 @@ use std::{path::Path, str::FromStr};
 
 use sideswap_api::OrderId;
 use sqlx::{
+    SqlitePool,
     sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions},
     types::Text,
-    SqlitePool,
 };
 
 use crate::models::{self, MonitoredTx, Peg};

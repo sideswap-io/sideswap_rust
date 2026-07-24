@@ -140,11 +140,7 @@ pub fn naive(target: u64, coins: &[u64]) -> Option<Vec<u64>> {
         }
     }
 
-    if total < target {
-        None
-    } else {
-        Some(selected)
-    }
+    if total < target { None } else { Some(selected) }
 }
 
 pub fn no_change(target: u64, coins: &[u64]) -> Option<Vec<u64>> {

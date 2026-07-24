@@ -7,7 +7,8 @@ pub fn handle_http_request(
     let url = details
         .http_request
         .params
-        .urls.first()
+        .urls
+        .first()
         .ok_or_else(|| anyhow!("empty urls array"))?;
 
     let data = cbor_to_json(details.http_request.params.data.clone())?;

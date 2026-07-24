@@ -1,4 +1,4 @@
-use std::sync::{mpsc, Arc};
+use std::sync::{Arc, mpsc};
 
 use crate::{ffi::proto::Account, gdk_ses::GdkSes, worker};
 

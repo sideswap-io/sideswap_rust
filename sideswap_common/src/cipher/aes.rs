@@ -1,4 +1,4 @@
-use aes_gcm_siv::{aead::Aead, AeadCore, Aes256GcmSiv, KeyInit, Nonce};
+use aes_gcm_siv::{AeadCore, Aes256GcmSiv, KeyInit, Nonce, aead::Aead};
 
 use super::Cipher;
 

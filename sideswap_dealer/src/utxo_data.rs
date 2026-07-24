@@ -4,8 +4,8 @@
 use std::collections::BTreeMap;
 
 use elements::{
-    bitcoin::PrivateKey, pset::PartiallySignedTransaction, secp256k1_zkp::SECP256K1, OutPoint,
-    Script,
+    OutPoint, Script, bitcoin::PrivateKey, pset::PartiallySignedTransaction,
+    secp256k1_zkp::SECP256K1,
 };
 use sideswap_api::{Utxo, ValueBlindingFactor};
 

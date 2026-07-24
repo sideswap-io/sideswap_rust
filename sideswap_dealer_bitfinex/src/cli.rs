@@ -1,7 +1,7 @@
 use std::net::TcpListener;
 
 use serde::{Deserialize, Serialize};
-use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
+use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 
 use crate::Msg;
 

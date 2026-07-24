@@ -1,7 +1,7 @@
 use std::{marker::PhantomData, str::FromStr};
 
 use hex::FromHex;
-use serde::{de::IntoDeserializer, Deserialize};
+use serde::{Deserialize, de::IntoDeserializer};
 
 pub fn deserialize_hex<'de, D, T>(d: D) -> Result<T, D::Error>
 where
