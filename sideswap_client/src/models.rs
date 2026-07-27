@@ -1,23 +1,19 @@
 use std::collections::BTreeMap;
 
 use elements::TxOutSecrets;
-use serde::{Deserialize, Serialize};
 use sideswap_api::{AssetBlindingFactor, AssetId, ValueBlindingFactor};
 use sideswap_common::utxo_select::WalletType;
 use sideswap_types::timestamp_ms::TimestampMs;
 
-#[derive(PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Debug, Clone, Copy)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Debug, Clone, Copy)]
 pub enum AddressType {
     /// Native seg-wit (single-sig)
-    #[serde(rename = "p2wpkh")]
     P2wpkh,
 
     /// Nested seg-wit (single-sig)
-    #[serde(rename = "p2sh-p2wpkh")]
     P2shP2wpkh,
 
     /// AMP (for some reasons GDK returns "p2wsh" for AMP accounts, let's do the same)
-    #[serde(rename = "p2wsh")]
     P2wsh,
 }
 
@@ -49,7 +45,7 @@ pub struct Transaction {
     pub outputs: Vec<InputOutput>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone)]
 pub struct Utxo {
     pub wallet_type: WalletType,
     #[allow(dead_code)]
@@ -93,8 +89,7 @@ pub struct Utxo {
 
 pub type UtxoList = BTreeMap<AssetId, Vec<Utxo>>;
 
-// NOTE: Do not make incompatible changes, the data can be saved in the settings file!
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct AddressInfo {
     pub address: elements::Address,
     pub address_type: AddressType,
@@ -107,6 +102,7 @@ pub struct AddressInfo {
 
     // Normally AMP only, example: 52210305b9d4acd4c6cd5a5a9eb5e9a4dcd74a7b962eb0109cab264ea7412d6901bfa42102945512944638fe25e24962866d19ec858fdc70dd5a68ae801d54b5c36231f2e652ae
     pub prevout_script: Option<elements::Script>,
+    #[allow(dead_code)]
     pub service_xpub: Option<bitcoin::bip32::Xpub>,
     pub branch: Option<u32>, // AMP only but is not always set
 }
