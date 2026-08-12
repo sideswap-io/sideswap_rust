@@ -47,26 +47,42 @@ pub fn get_os_type() -> i32 {
 pub enum SubscribedValueType {
     PegInMinAmount,
     PegInWalletBalance,
+    PegInFixedFee,
+    PegInFeeRate,
     PegOutMinAmount,
     PegOutWalletBalance,
     PegOutNextBlockFeeRate,
+    PegOutFeeRate,
+    PegOutFixedFeeVsize,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum SubscribedValue {
     PegInMinAmount {
+        /// Minimum peg-in amount, amounts less than that are detected but not paid.
         min_amount: u64,
     },
 
     PegInWalletBalance {
         /// How much L-BTC is available in the hot Liquid Bitcoin wallet (in sats).
         /// If the peg-in amount is less than or equal to this amount, it will be paid after 2 confirmations.
-        /// If the peg-in amount is greater than this amount, it will it will be paid after 102 confirmations.
+        /// If the peg-in amount is greater than this amount, it will be paid after 3..103 confirmations.
         /// If the bitcoin transaction is not confirmed within 6 hours, the reservation will be released.
         available: u64,
     },
 
+    PegInFixedFee {
+        /// Fixed fee applied to all peg-ins
+        fixed_fee: u64,
+    },
+
+    PegInFeeRate {
+        /// payout_amount = round((bitcoin_amount - PegInFixedFee) * (1 - PegInFeeRate)).
+        fee_rate: f64,
+    },
+
     PegOutMinAmount {
+        /// Minimum peg-out amount, amounts less than that are detected but not paid.
         min_amount: u64,
     },
 
@@ -79,8 +95,17 @@ pub enum SubscribedValue {
 
     PegOutNextBlockFeeRate {
         /// The fee rate threshold for the peg-out payments (the tenth percentile of all transaction fee rates from the current block candidate).
-        /// A peg-out payment is made when the selected fee rate exceeds than this threshold.
+        /// A peg-out payment is made when the selected fee rate exceeds this threshold.
         fee_rate: FeeRateSats,
+    },
+
+    PegOutFixedFeeVsize {
+        vsize: usize,
+    },
+
+    PegOutFeeRate {
+        /// payout_amount = round(liquid_bitcoin_amount * (1 - PegOutFeeRate)) - ceil(bitcoin_network_fee_rate * PegOutFixedFeeVsize).
+        fee_rate: f64,
     },
 }
 

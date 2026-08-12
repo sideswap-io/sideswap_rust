@@ -2551,6 +2551,13 @@ impl Data {
             api::SubscribedValue::PegOutNextBlockFeeRate { fee_rate } => {
                 proto::from::subscribed_value::Result::PegOutNextBlockFeeRate(fee_rate.raw())
             }
+            sideswap_api::SubscribedValue::PegInFixedFee { .. }
+            | sideswap_api::SubscribedValue::PegInFeeRate { .. }
+            | sideswap_api::SubscribedValue::PegOutFixedFeeVsize { .. }
+            | sideswap_api::SubscribedValue::PegOutFeeRate { .. } => {
+                // Ignored values
+                return;
+            }
         };
 
         self.ui.send(proto::from::Msg::SubscribedValue(
