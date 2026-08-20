@@ -107,21 +107,25 @@ fn get_signer_request_details(
         .default_account()
         .pset_details(&pset)?;
 
-    data.add_missing_assets(
-        details.balance.balances.keys().chain(
+    let assets = details
+        .balance()
+        .balances()
+        .keys()
+        .copied()
+        .chain(
             details
-                .balance
-                .recipients
+                .balance()
+                .recipients()
                 .iter()
-                .filter_map(|r| r.asset.as_ref()),
-        ),
-        true,
-    );
+                .filter_map(|r| r.asset()),
+        )
+        .collect::<Vec<_>>();
+    data.add_missing_assets(assets.iter(), true);
 
     Ok(proto::from::signer_request::Sign {
         balances: details
-            .balance
-            .balances
+            .balance()
+            .balances()
             .iter()
             .map(|(asset_id, amount)| proto::Balance {
                 asset_id: asset_id.to_string(),
@@ -130,13 +134,13 @@ fn get_signer_request_details(
             .collect(),
 
         recipients: details
-            .balance
-            .recipients
+            .balance()
+            .recipients()
             .iter()
             .filter_map(|recipient| {
-                let address = recipient.address.as_ref()?.to_string();
-                let amount = recipient.value? as i64;
-                let asset_id = recipient.asset?.to_string();
+                let address = recipient.address().as_ref()?.to_string();
+                let amount = recipient.value()? as i64;
+                let asset_id = recipient.asset()?.to_string();
                 Some(proto::AddressAmount {
                     address,
                     amount,
@@ -144,7 +148,7 @@ fn get_signer_request_details(
                 })
             })
             .collect(),
-        network_fee: details.balance.fees_in(&data.policy_asset),
+        network_fee: details.balance().fees_in(&data.policy_asset),
     })
 }
 

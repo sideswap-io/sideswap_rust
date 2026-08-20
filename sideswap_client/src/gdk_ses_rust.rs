@@ -16,7 +16,7 @@ use elements_miniscript::descriptor::checksum::desc_checksum;
 use gdk_common::{be::BEScriptConvert, electrum_client::Socks5Config};
 use lwk_common::Singlesig;
 use lwk_wollet::{
-    Chain, ElectrumClient, ElectrumOptions, WolletDescriptor, blocking::BlockchainBackend,
+    Chain, ElectrumClient, ElectrumClientBuilder, WolletDescriptor, blocking::BlockchainBackend,
 };
 use secp256k1::SECP256K1;
 use sideswap_amp::{Signer, sw_signer::SwSigner};
@@ -562,13 +562,10 @@ fn run(mut data: WorkerData, command_receiver: Receiver<Command>) {
                 credentials: None,
             });
 
-        let res = ElectrumClient::with_options(
-            &electrum_url,
-            ElectrumOptions {
-                timeout: Some(15),
-                socks5,
-            },
-        );
+        let res = ElectrumClientBuilder::new(&electrum_url.to_string())
+            .timeout(Duration::from_secs(15))
+            .proxy(socks5)
+            .build();
 
         match res {
             Ok(electrum_client) => break electrum_client,
