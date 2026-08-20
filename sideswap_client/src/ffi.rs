@@ -88,6 +88,10 @@ pub fn sideswap_client_start_impl(
     start_params: worker::StartParams,
     dart_port: i64,
 ) -> IntPtr {
+    ureq::rustls::crypto::aws_lc_rs::default_provider()
+        .install_default()
+        .expect("must not fail");
+
     INIT_LOGGER_FLAG.call_once(|| {
         sideswap_common::log_init::init_log(&start_params.work_dir);
     });
