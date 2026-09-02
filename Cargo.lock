@@ -2613,7 +2613,7 @@ checksum = "112b39cec0b298b6c1999fee3e31427f74f676e4cb9879ed1a121b43661a4154"
 [[package]]
 name = "lwk_common"
 version = "0.19.0"
-source = "git+https://github.com/sideswap-io/lwk.git?rev=b544586f3ce13b21ad4090e77c9ceadcedba9a81#b544586f3ce13b21ad4090e77c9ceadcedba9a81"
+source = "git+https://github.com/sideswap-io/lwk.git?rev=21677ca089ca87bac228902e5697e7ec3cd7594a#21677ca089ca87bac228902e5697e7ec3cd7594a"
 dependencies = [
  "aes-gcm-siv 0.11.1",
  "base64 0.21.7",
@@ -2631,7 +2631,7 @@ dependencies = [
 [[package]]
 name = "lwk_signer"
 version = "0.19.0"
-source = "git+https://github.com/sideswap-io/lwk.git?rev=b544586f3ce13b21ad4090e77c9ceadcedba9a81#b544586f3ce13b21ad4090e77c9ceadcedba9a81"
+source = "git+https://github.com/sideswap-io/lwk.git?rev=21677ca089ca87bac228902e5697e7ec3cd7594a#21677ca089ca87bac228902e5697e7ec3cd7594a"
 dependencies = [
  "base64 0.21.7",
  "bip39",
@@ -2643,7 +2643,7 @@ dependencies = [
 [[package]]
 name = "lwk_wollet"
 version = "0.19.0"
-source = "git+https://github.com/sideswap-io/lwk.git?rev=b544586f3ce13b21ad4090e77c9ceadcedba9a81#b544586f3ce13b21ad4090e77c9ceadcedba9a81"
+source = "git+https://github.com/sideswap-io/lwk.git?rev=21677ca089ca87bac228902e5697e7ec3cd7594a#21677ca089ca87bac228902e5697e7ec3cd7594a"
 dependencies = [
  "aes 0.8.4",
  "aes-gcm",

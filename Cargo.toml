@@ -96,6 +96,6 @@ uuid = { version = "1.8" }
 vergen-gitcl = "9"
 
 [patch.crates-io]
-lwk_common = { git = "https://github.com/sideswap-io/lwk.git", rev = "b544586f3ce13b21ad4090e77c9ceadcedba9a81" }
-lwk_signer = { git = "https://github.com/sideswap-io/lwk.git", rev = "b544586f3ce13b21ad4090e77c9ceadcedba9a81" }
-lwk_wollet = { git = "https://github.com/sideswap-io/lwk.git", rev = "b544586f3ce13b21ad4090e77c9ceadcedba9a81" }
+lwk_common = { git = "https://github.com/sideswap-io/lwk.git", rev = "21677ca089ca87bac228902e5697e7ec3cd7594a" }
+lwk_signer = { git = "https://github.com/sideswap-io/lwk.git", rev = "21677ca089ca87bac228902e5697e7ec3cd7594a" }
+lwk_wollet = { git = "https://github.com/sideswap-io/lwk.git", rev = "21677ca089ca87bac228902e5697e7ec3cd7594a" }
