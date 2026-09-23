@@ -21,6 +21,13 @@ members = [
     "stableapp_api",
 ]
 
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
+overflow-checks = true
+
 [workspace.dependencies]
 aes-gcm-siv = { version = "0.11", features = ["std"] }
 allo-isolate = "0.1"
