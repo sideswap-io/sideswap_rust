@@ -129,9 +129,11 @@ const MIN_BALANCE_EURX: f64 = 20000.;
 
 const BF_RESERVE: f64 = 0.99;
 
-const INTEREST_BTC_USDT: f64 = 1.003;
-const INTEREST_BTC_EURX: f64 = 1.002;
-const INTEREST_EURX_USDT: f64 = 1.002;
+#[derive(Debug, Deserialize)]
+struct Interests {
+    bid: f64,
+    ask: f64,
+}
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct NotificationSettings {
@@ -145,6 +147,7 @@ type ExternalPrices = BTreeMap<BfxExchangePair, f64>;
 type PendingOrders = BTreeMap<i64, Instant>;
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Settings {
     env: Env,
 
@@ -178,6 +181,12 @@ pub struct Settings {
     external_prices: Option<external_prices::Settings>,
 
     gdk_registry_source: Option<gdk_registry_cache::Source>,
+
+    interest_lbtc_usdt: Interests,
+    interest_lbtc_eurx: Interests,
+    interest_eurx_usdt: Interests,
+
+    skip_exchange_balances_check: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, EnumIter)]
@@ -512,34 +521,45 @@ async fn process_dealer_event(data: &mut Data, event: Event) {
     }
 }
 
+fn apply_interests(price: &PricePair, interests: &Interests) -> PricePair {
+    PricePair {
+        bid: apply_interest_bid(price.bid, interests.bid),
+        ask: apply_interest_ask(price.ask, interests.ask),
+    }
+}
+
 fn submit_dealer_prices(data: &mut Data) {
     for exchange_pair in [BfxExchangePair::BtcUsdt, BfxExchangePair::BtcEur] {
         let price = get_bfx_price(data, exchange_pair).map(|bfx_price| {
             let submit_interest = match exchange_pair {
-                BfxExchangePair::BtcUsdt => INTEREST_BTC_USDT,
-                BfxExchangePair::BtcEur => INTEREST_BTC_EURX,
-                BfxExchangePair::EurUsdt => INTEREST_EURX_USDT,
+                BfxExchangePair::BtcUsdt => &data.settings.interest_lbtc_usdt,
+                BfxExchangePair::BtcEur => &data.settings.interest_lbtc_eurx,
+                BfxExchangePair::EurUsdt => &data.settings.interest_eurx_usdt,
             };
 
             let base_price = PricePair {
                 bid: bfx_price.bid,
                 ask: bfx_price.ask,
             };
-            let submit_price = apply_interest(&base_price, submit_interest);
+            let submit_price = apply_interests(&base_price, &submit_interest);
 
-            let exchange_btc_amount =
-                get_exchange_balance(&data.exchange_balances, &ExchangeTicker::BTC);
+            let exchange_btc_amount = if data.settings.skip_exchange_balances_check {
+                10.0
+            } else {
+                get_exchange_balance(&data.exchange_balances, &ExchangeTicker::BTC)
+            };
             let exchange_asset_currency = match exchange_pair.quote() {
                 DealerTicker::USDT => &ExchangeTicker::USDt,
                 DealerTicker::EURX => &ExchangeTicker::EUR,
                 _ => panic!(),
             };
-            // Show that the dealer will buy any amount of EURx as needed
-            let exchange_asset_amount = if exchange_pair.quote() == DealerTicker::EURX {
-                10.0 * bfx_price.ask
-            } else {
-                get_exchange_balance(&data.exchange_balances, exchange_asset_currency)
-            };
+            let exchange_asset_amount =
+                // Show that the dealer will buy any amount of EURx
+                if exchange_pair.quote() == DealerTicker::EURX || data.settings.skip_exchange_balances_check {
+                    10.0 * bfx_price.ask
+                } else {
+                    get_exchange_balance(&data.exchange_balances, exchange_asset_currency)
+                };
 
             dealer_rpc::DealerPrice {
                 submit_price,
@@ -570,21 +590,21 @@ fn submit_market_prices(data: &mut Data) {
                     base: data.policy_asset,
                     quote: assets.USDt,
                 },
-                INTEREST_BTC_USDT,
+                &data.settings.interest_lbtc_usdt,
             ),
             BfxExchangePair::BtcEur => (
                 AssetPair {
                     base: data.policy_asset,
                     quote: assets.EURx,
                 },
-                INTEREST_BTC_EURX,
+                &data.settings.interest_lbtc_eurx,
             ),
             BfxExchangePair::EurUsdt => (
                 AssetPair {
                     base: assets.EURx,
                     quote: assets.USDt,
                 },
-                INTEREST_EURX_USDT,
+                &data.settings.interest_eurx_usdt,
             ),
         };
 
@@ -598,7 +618,7 @@ fn submit_market_prices(data: &mut Data) {
             ask: bfx_price.ask,
         };
 
-        let submit_price = apply_interest(&base_price, interest);
+        let submit_price = apply_interests(&base_price, interest);
 
         let (base_amount_buy, base_amount_sell) = match exchange_pair {
             BfxExchangePair::BtcUsdt => {
@@ -607,6 +627,7 @@ fn submit_market_prices(data: &mut Data) {
                 let usdt_amount =
                     get_exchange_balance(&data.exchange_balances, &ExchangeTicker::USDt);
                 (btc_amount, usdt_amount / submit_price.ask)
+                // (MAX_BTC_AMOUNT, MAX_BTC_AMOUNT)
             }
             // Show that the dealer will buy or sell any amount of EURx as needed
             BfxExchangePair::EurUsdt | BfxExchangePair::BtcEur => (MAX_BTC_AMOUNT, MAX_BTC_AMOUNT),

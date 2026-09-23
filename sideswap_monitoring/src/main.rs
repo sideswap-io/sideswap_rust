@@ -15,6 +15,7 @@ use sideswap_types::env::Env;
 use tokio::sync::mpsc::UnboundedSender;
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Settings {
     log_settings: String,
     env: Env,

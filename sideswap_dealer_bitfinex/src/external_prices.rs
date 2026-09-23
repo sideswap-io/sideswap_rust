@@ -6,6 +6,7 @@ use sideswap_common::{channel_helpers::UncheckedUnboundedSender, http_client::Ht
 use crate::{BfxExchangePair, Msg};
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Settings {
     btc_usdt: String,
     btc_eurx: String,

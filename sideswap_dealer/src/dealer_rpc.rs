@@ -118,7 +118,7 @@ pub struct DealerPriceTimestamp {
 
 fn verify_interest(interest: f64) {
     // Limit to 10% as sanity check
-    assert!((1.0..=1.1).contains(&interest));
+    assert!((0.99..=1.1).contains(&interest));
 }
 
 pub fn apply_interest_bid(price: f64, interest: f64) -> f64 {
