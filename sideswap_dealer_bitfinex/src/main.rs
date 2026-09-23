@@ -20,6 +20,7 @@ use sideswap_common::channel_helpers::UncheckedUnboundedSender;
 use sideswap_common::dealer_ticker::DealerTicker;
 use sideswap_common::dealer_ticker::TickerLoader;
 use sideswap_common::exchange_pair::ExchangePair;
+use sideswap_common::gdk_registry_cache;
 use sideswap_common::rpc;
 use sideswap_common::types::Amount;
 use sideswap_common::types::MAX_BTC_AMOUNT;
@@ -175,6 +176,8 @@ pub struct Settings {
     notifications: NotificationSettings,
 
     external_prices: Option<external_prices::Settings>,
+
+    gdk_registry_source: Option<gdk_registry_cache::Source>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, EnumIter)]
@@ -1156,9 +1159,14 @@ async fn main() {
         .unwrap_or_else(|| settings.env.base_server_ws_url());
 
     let ticker_loader = Arc::new(
-        TickerLoader::load(&settings.work_dir, None, settings.env.d().network)
-            .await
-            .expect("must not fail"),
+        TickerLoader::load(
+            &settings.work_dir,
+            None,
+            settings.env.d().network,
+            settings.gdk_registry_source,
+        )
+        .await
+        .expect("must not fail"),
     );
 
     let params = Params {

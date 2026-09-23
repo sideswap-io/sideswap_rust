@@ -27,8 +27,8 @@ pub struct GdkAsset {
     pub precision: AssetPrecision,
     pub ticker: Option<sideswap_api::Ticker>, // Can be null for some assets
     pub entity: GdkAssetEntity,
-    pub issuance_prevout: sideswap_api::IssuancePrevout,
-    pub issuer_pubkey: String,
+    pub issuance_prevout: Option<sideswap_api::IssuancePrevout>,
+    pub issuer_pubkey: Option<String>,
     pub contract: serde_json::Value,
 }
 
@@ -69,7 +69,7 @@ pub fn get_policy_asset_short_info(policy_asset: &AssetId) -> ShortAssetInfo {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, serde::Deserialize)]
 pub enum Source {
     Blockstream,
     Github,
@@ -103,12 +103,22 @@ impl GdkRegistryCache {
     pub fn verify_asset_hash(asset_id: &AssetId, asset: &GdkAsset) {
         assert_eq!(asset.asset_id, *asset_id);
 
+        let issuance_prevout = asset
+            .issuance_prevout
+            .as_ref()
+            .unwrap_or_else(|| panic!("issuance_prevout is not set for {asset_id}"));
+
+        let issuer_pubkey = asset
+            .issuer_pubkey
+            .as_ref()
+            .unwrap_or_else(|| panic!("issuer_pubkey is not set for {asset_id}"));
+
         // Verify contract hash
         let contract = serde_json::to_string(&asset.contract).expect("must not fail");
         let contract_hash = ContractHash::from_json_contract(&contract).expect("must not fail");
         let prevout = elements::OutPoint {
-            txid: asset.issuance_prevout.txid,
-            vout: asset.issuance_prevout.vout,
+            txid: issuance_prevout.txid,
+            vout: issuance_prevout.vout,
         };
         let entropy = AssetId::generate_asset_entropy(prevout, contract_hash);
         let expected_asset_id = AssetId::from_entropy(entropy);
@@ -125,7 +135,7 @@ impl GdkRegistryCache {
         assert_eq!(contract.name, asset.name);
         assert_eq!(contract.ticker, asset.ticker);
         assert_eq!(contract.precision, asset.precision);
-        assert_eq!(contract.issuer_pubkey, asset.issuer_pubkey);
+        assert_eq!(contract.issuer_pubkey, *issuer_pubkey);
     }
 
     /// NOTE: Does not include L-BTC

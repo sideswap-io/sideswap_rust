@@ -4,7 +4,7 @@ use anyhow::anyhow;
 use elements::AssetId;
 use sideswap_types::{asset_precision::AssetPrecision, network::Network};
 
-use crate::gdk_registry_cache::GdkRegistryCache;
+use crate::gdk_registry_cache::{self, GdkRegistryCache};
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct DealerTicker([u8; 8]);
@@ -207,13 +207,10 @@ impl TickerLoader {
         work_dir: &Path,
         whitelisted_assets: Option<&WhitelistedAssets>,
         network: Network,
+        source: Option<gdk_registry_cache::Source>,
     ) -> Result<TickerLoader, anyhow::Error> {
-        let gdk_registry = GdkRegistryCache::new(
-            network,
-            work_dir,
-            crate::gdk_registry_cache::Source::Blockstream,
-        )
-        .await;
+        let source = source.unwrap_or(gdk_registry_cache::Source::Blockstream);
+        let gdk_registry = GdkRegistryCache::new(network, work_dir, source).await;
 
         let mut ticker_loader = TickerLoader::new(&gdk_registry, network);
 

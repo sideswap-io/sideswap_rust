@@ -158,6 +158,7 @@ async fn main() -> Result<(), anyhow::Error> {
             &settings.work_dir,
             settings.whitelisted_assets.as_ref(),
             settings.env.d().network,
+            None,
         )
         .await
         .expect("must not fail"),
