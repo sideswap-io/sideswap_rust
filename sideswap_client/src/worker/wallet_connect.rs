@@ -175,6 +175,22 @@ fn try_sign_pset(
             let signer = lwk_signer::SwSigner::new(&mnemonic.to_string(), data.env.d().mainnet)
                 .expect("signer creation failed");
 
+            for (i, input) in pset.inputs().iter().enumerate() {
+                // `signer_fingerprint` = master fingerprint of the signer about to be used.
+                if !input
+                    .bip32_derivation
+                    .values()
+                    .any(|(fp, _)| *fp == signer.fingerprint())
+                {
+                    continue; // not ours; we will not sign it
+                }
+                match lwk_common::input_sighash(input) {
+                    None => {}
+                    Some(t) if t == elements::EcdsaSighashType::All as u32 => {}
+                    Some(t) => bail!("input {i} declares unsupported sighash type {t:#x}"),
+                }
+            }
+
             signer.sign(&mut pset)?;
 
             pset
