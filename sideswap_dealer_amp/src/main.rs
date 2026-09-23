@@ -226,6 +226,10 @@ async fn process_timer(data: &mut Data) {
 
 #[tokio::main]
 async fn main() {
+    rustls::crypto::aws_lc_rs::default_provider()
+        .install_default()
+        .expect("must not fail");
+
     let args = std::env::args().collect::<Vec<_>>();
     assert!(
         args.len() == 2,

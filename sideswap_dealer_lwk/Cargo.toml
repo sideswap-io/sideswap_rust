@@ -20,5 +20,6 @@ log.workspace = true
 lwk_common.workspace = true
 lwk_signer.workspace = true
 lwk_wollet.workspace = true
+rustls.workspace = true
 serde.workspace = true
 tokio.workspace = true

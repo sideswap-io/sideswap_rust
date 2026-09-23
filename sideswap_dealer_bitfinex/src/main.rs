@@ -1134,6 +1134,8 @@ fn process_market_event(data: &mut Data, event: market::Event) {
 
 #[tokio::main]
 async fn main() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
     let args = std::env::args().collect::<Vec<_>>();
     assert!(
         args.len() == 2,
