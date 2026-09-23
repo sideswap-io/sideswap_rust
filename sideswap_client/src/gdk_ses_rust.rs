@@ -753,6 +753,9 @@ pub fn start_processing(
 
     let account_count = Arc::new(AtomicUsize::new(0));
 
+    // Remove the old cache directory
+    let _ = std::fs::remove_dir_all(login_info.cache_dir.join("lwk"));
+
     let accounts = accounts
         .into_iter()
         .map(|(xpub, single_sig)| {
@@ -775,7 +778,8 @@ pub fn start_processing(
 
             // TODO: Should we load wallets in background?
 
-            let wallet_dir = login_info.cache_dir.join("lwk").join(&cache_dir_name);
+            // Use the new cache directory
+            let wallet_dir = login_info.cache_dir.join("lwk0").join(&cache_dir_name);
 
             let build_wallet = || {
                 lwk_wollet::WolletBuilder::new(lwk_network, descriptor.clone())
