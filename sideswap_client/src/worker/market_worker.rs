@@ -1970,9 +1970,12 @@ fn try_offline_order_submit(
         .get(&asset_pair.quote)
         .ok_or_else(|| anyhow!("can't find quote asset"))?;
 
-    let base_amount_float = asset_float_amount_(base_amount, base_asset.precision);
+    let base_precision = base_asset.precision;
+    let quote_precision = quote_asset.precision;
+
+    let base_amount_float = asset_float_amount_(base_amount, base_precision);
     let quote_amount_float = base_amount_float * price.value();
-    let quote_amount = asset_int_amount_(quote_amount_float, quote_asset.precision);
+    let quote_amount = asset_int_amount_(quote_amount_float, quote_precision);
     ensure!(quote_amount > 0);
 
     let (send_amount, recv_amount) = match trade_dir {
@@ -2009,6 +2012,26 @@ fn try_offline_order_submit(
                 try_create_funding_tx(worker, &swap_info.send_asset, send_amount)?;
             (utxo, Some(HexEncoded::new(funding_tx)))
         }
+    };
+
+    // The funding tx deducts the network fee from the funded output when the whole
+    // L-BTC balance is sold, so the UTXO can be smaller than the requested amount.
+    let (send_amount, recv_amount) = if utxo.satoshi == send_amount {
+        (send_amount, recv_amount)
+    } else {
+        let funding_tx = funding_tx
+            .as_ref()
+            .ok_or_else(|| anyhow!("utxo.satoshi != send_amount but funding_tx is not set"))?;
+        let network_fee = funding_tx.0.fee_in(worker.policy_asset);
+
+        ensure!(
+            utxo.satoshi + network_fee == send_amount && utxo.asset_id == worker.policy_asset,
+            "unexpected funding UTXO amount: {utxo_amount}, expected: {send_amount}, utxo asset_id: {utxo_asset_id}, network_fee: {network_fee}",
+            utxo_amount = utxo.satoshi,
+            utxo_asset_id = utxo.asset_id,
+        );
+
+        (utxo.satoshi, recv_amount)
     };
 
     let output_asset_id = swap_info.recv_asset;
