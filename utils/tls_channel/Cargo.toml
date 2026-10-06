@@ -1,0 +1,16 @@
+[package]
+name = "tls_channel"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bytes.workspace = true
+futures.workspace = true
+hex-literal.workspace = true
+hex.workspace = true
+ring.workspace = true
+rustls.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["io-util"] }
+tokio-rustls.workspace = true
+tokio-util = { workspace = true, features = ["codec"] }
