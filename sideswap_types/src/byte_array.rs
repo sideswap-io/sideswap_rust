@@ -40,10 +40,22 @@ impl<const LEN: usize> serde::Serialize for ByteArray<LEN> {
 impl<'de, const LEN: usize> serde::Deserialize<'de> for ByteArray<LEN> {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         if d.is_human_readable() {
-            let s = <&str>::deserialize(d)?;
-            let mut bytes = [0u8; LEN];
-            hex::decode_to_slice(s, &mut bytes).map_err(serde::de::Error::custom)?;
-            Ok(Self(bytes))
+            // Accept owned strings too (e.g. the `config` crate never lends borrowed data)
+            struct HexVisitor<const LEN: usize>;
+
+            impl<const LEN: usize> serde::de::Visitor<'_> for HexVisitor<LEN> {
+                type Value = ByteArray<LEN>;
+
+                fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                    write!(f, "a hex string of {} bytes", LEN)
+                }
+
+                fn visit_str<E: serde::de::Error>(self, s: &str) -> Result<Self::Value, E> {
+                    s.parse().map_err(E::custom)
+                }
+            }
+
+            d.deserialize_str(HexVisitor::<LEN>)
         } else {
             use serde_bytes::Deserialize;
             Ok(Self(<[u8; LEN]>::deserialize(d)?))
