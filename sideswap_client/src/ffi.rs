@@ -297,10 +297,14 @@ fn elements_params(env: Env) -> &'static elements::AddressParams {
 }
 
 fn check_elements_address(env: Env, addr: &str) -> bool {
-    elements::Address::parse_with_params(addr, elements_params(env))
-        .ok()
-        .map(|addr| addr.is_blinded())
-        .unwrap_or(false)
+    // Both confidential and explicit (unconfidential) addresses are accepted.
+    // Requiring a blinding key here would reject the very addresses that
+    // send_tx::pset::pset_output was taught to pay: a contract whose amounts
+    // must be readable on-chain (a Simplicity covenant funding address)
+    // cannot be blinded. Privacy of a send is the recipient address's
+    // property, and so the user's choice, not something to enforce at the
+    // validation gate.
+    elements::Address::parse_with_params(addr, elements_params(env)).is_ok()
 }
 
 #[cfg(test)]

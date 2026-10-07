@@ -1,4 +1,4 @@
-use anyhow::{anyhow, ensure};
+use anyhow::ensure;
 use elements::{AssetId, TxOutSecrets, Txid, pset::PartiallySignedTransaction};
 use rand::seq::SliceRandom;
 use serde::{Deserialize, Serialize};
@@ -78,23 +78,34 @@ fn pset_output(output: PsetOutput) -> Result<elements::pset::Output, anyhow::Err
         amount,
     } = output;
 
-    let blinding_pubkey = address
-        .blinding_pubkey
-        .ok_or_else(|| anyhow!("only blinded addresses allowed"))?;
     ensure!(amount > 0);
 
+    // A confidential (blinded) recipient gets a blinded output; an
+    // unconfidential recipient gets an explicit output. `blind_pset` already
+    // treats an output with no `blinding_key` as explicit and balances the
+    // transaction against the wallet's own (always blinded) change output, so
+    // mixing the two is safe as long as at least one blinded output remains —
+    // which the change output guarantees. Unconfidential recipients are
+    // needed for contracts that must read explicit amounts on-chain (e.g. a
+    // Simplicity covenant); the amount and asset of such an output are public
+    // by construction.
     let txout = elements::TxOut {
         asset: elements::confidential::Asset::Explicit(asset_id),
         value: elements::confidential::Value::Explicit(amount),
-        nonce: elements::confidential::Nonce::Confidential(blinding_pubkey),
+        nonce: match address.blinding_pubkey {
+            Some(blinding_pubkey) => elements::confidential::Nonce::Confidential(blinding_pubkey),
+            None => elements::confidential::Nonce::Null,
+        },
         script_pubkey: address.script_pubkey(),
         witness: elements::TxOutWitness::default(),
     };
 
     let mut output = elements::pset::Output::from_txout(txout);
 
-    output.blinding_key = Some(bitcoin::PublicKey::new(blinding_pubkey));
-    output.blinder_index = Some(0);
+    if let Some(blinding_pubkey) = address.blinding_pubkey {
+        output.blinding_key = Some(bitcoin::PublicKey::new(blinding_pubkey));
+        output.blinder_index = Some(0);
+    }
 
     Ok(output)
 }
@@ -154,4 +165,52 @@ pub fn construct_pset(args: ConstructPsetArgs) -> Result<ConstructedPset, anyhow
         blinded_pset: pset,
         blinded_outputs,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tap_address(blinded: bool) -> elements::Address {
+        let secp = elements::secp256k1_zkp::Secp256k1::new();
+        let sk = elements::secp256k1_zkp::SecretKey::from_slice(&[0x11; 32]).unwrap();
+        let (xonly, _) = sk.x_only_public_key(&secp);
+        let blinder = blinded.then(|| {
+            let bsk = elements::secp256k1_zkp::SecretKey::from_slice(&[0x22; 32]).unwrap();
+            elements::secp256k1_zkp::PublicKey::from_secret_key(&secp, &bsk)
+        });
+        elements::Address::p2tr(
+            &secp,
+            xonly,
+            None,
+            blinder,
+            &elements::AddressParams::LIQUID_TESTNET,
+        )
+    }
+
+    /// An unconfidential recipient yields an explicit output with no blinding
+    /// key — `blind_pset` will then leave it unblinded and balance the tx
+    /// against the wallet's blinded change.
+    #[test]
+    fn unconfidential_recipient_makes_an_explicit_output() {
+        let addr = tap_address(false);
+        assert!(!addr.is_blinded());
+        let asset_id = AssetId::from_slice(&[0x33; 32]).unwrap();
+        let out = pset_output(PsetOutput { address: addr, asset_id, amount: 1000 }).unwrap();
+        assert!(out.blinding_key.is_none(), "explicit output must carry no blinding key");
+        assert!(out.blinder_index.is_none());
+        assert_eq!(out.amount, Some(1000));
+        assert_eq!(out.asset, Some(asset_id));
+    }
+
+    /// A confidential recipient is unchanged: blinded output, blinder index 0.
+    #[test]
+    fn confidential_recipient_stays_blinded() {
+        let addr = tap_address(true);
+        assert!(addr.is_blinded());
+        let asset_id = AssetId::from_slice(&[0x33; 32]).unwrap();
+        let out = pset_output(PsetOutput { address: addr, asset_id, amount: 1000 }).unwrap();
+        assert!(out.blinding_key.is_some(), "blinded recipient must keep its blinding key");
+        assert_eq!(out.blinder_index, Some(0));
+    }
 }
