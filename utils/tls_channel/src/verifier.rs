@@ -1,12 +1,18 @@
 //! RFC 7250 raw public key verifiers. With raw public keys the "certificate"
 //! rustls hands us is just the peer's `SubjectPublicKeyInfo` DER.
 
+use std::fmt;
+use std::sync::Arc;
+
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::crypto::{WebPkiSupportedAlgorithms, verify_tls13_signature_with_raw_key};
 use rustls::pki_types::{CertificateDer, ServerName, SubjectPublicKeyInfoDer, UnixTime};
 use rustls::server::danger::{ClientCertVerified, ClientCertVerifier};
-use rustls::{CertificateError, DigitallySignedStruct, DistinguishedName, SignatureScheme};
+use rustls::{
+    CertificateError, DigitallySignedStruct, DistinguishedName, OtherError, SignatureScheme,
+};
 
+use crate::access::IsClientValid;
 use crate::keys::PublicKey;
 
 fn tls12_not_enabled() -> rustls::Error {
@@ -77,21 +83,46 @@ impl ServerCertVerifier for ExpectedServerKey {
     }
 }
 
-/// Server side: require a well-formed Ed25519 raw public key and prove the
-/// client holds the private key. Whether that key is allowed is decided by the
-/// caller after the handshake.
-#[derive(Debug)]
-pub(crate) struct AnyClientKey {
+/// Server side: require a well-formed Ed25519 raw public key that the
+/// configured [`IsClientValid`] accepts, and prove the client holds the
+/// matching private key.
+pub(crate) struct ClientKeyVerifier {
     algorithms: WebPkiSupportedAlgorithms,
+    is_client_valid: Arc<dyn IsClientValid>,
 }
 
-impl AnyClientKey {
-    pub(crate) fn new(algorithms: WebPkiSupportedAlgorithms) -> Self {
-        Self { algorithms }
+impl ClientKeyVerifier {
+    pub(crate) fn new(
+        algorithms: WebPkiSupportedAlgorithms,
+        is_client_valid: Arc<dyn IsClientValid>,
+    ) -> Self {
+        Self {
+            algorithms,
+            is_client_valid,
+        }
     }
 }
 
-impl ClientCertVerifier for AnyClientKey {
+impl fmt::Debug for ClientKeyVerifier {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ClientKeyVerifier").finish_non_exhaustive()
+    }
+}
+
+/// Carried inside [`CertificateError::Other`] out of the handshake so that
+/// [`crate::Incoming::handshake`] can report [`crate::Error::ClientRejected`].
+#[derive(Debug)]
+pub(crate) struct ClientRejected(pub(crate) PublicKey);
+
+impl fmt::Display for ClientRejected {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "client public key {} is not allowed", self.0)
+    }
+}
+
+impl std::error::Error for ClientRejected {}
+
+impl ClientCertVerifier for ClientKeyVerifier {
     fn root_hint_subjects(&self) -> &[DistinguishedName] {
         &[]
     }
@@ -102,9 +133,12 @@ impl ClientCertVerifier for AnyClientKey {
         _intermediates: &[CertificateDer<'_>],
         _now: UnixTime,
     ) -> Result<ClientCertVerified, rustls::Error> {
-        match PublicKey::from_spki_der(end_entity.as_ref()) {
-            Some(_) => Ok(ClientCertVerified::assertion()),
-            None => Err(CertificateError::BadEncoding.into()),
+        let public_key =
+            PublicKey::from_spki_der(end_entity.as_ref()).ok_or(CertificateError::BadEncoding)?;
+        if self.is_client_valid.is_client_valid(&public_key) {
+            Ok(ClientCertVerified::assertion())
+        } else {
+            Err(CertificateError::Other(OtherError(Arc::new(ClientRejected(public_key)))).into())
         }
     }
 

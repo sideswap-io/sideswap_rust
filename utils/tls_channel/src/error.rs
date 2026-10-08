@@ -1,5 +1,7 @@
 use std::time::Duration;
 
+use crate::keys::PublicKey;
+
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("io error: {0}")]
@@ -13,6 +15,9 @@ pub enum Error {
 
     #[error("handshake failed: {0}")]
     Handshake(&'static str),
+
+    #[error("client public key {public_key} is not allowed")]
+    ClientRejected { public_key: PublicKey },
 
     #[error("packet too large, limit is {limit} bytes")]
     PacketTooLarge { limit: usize },

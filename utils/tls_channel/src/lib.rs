@@ -2,27 +2,32 @@
 //!
 //! No certificates are involved: both peers are identified by bare Ed25519
 //! public keys. The client must know the server's public key in advance. The
-//! server learns the client's public key during the handshake and returns it
-//! to the caller, who decides whether that client is allowed (by dropping the
-//! channel otherwise).
+//! server checks the client's public key during the handshake with the
+//! [`IsClientValid`] it was given; [`AllowedClients`] is a ready-made allow
+//! list.
 //!
 //! The TLS stream carries length-framed packets. Each side enforces its own
 //! [`Config::max_packet_size`] on both sent and received packets.
 //!
 //! ```no_run
 //! # async fn example() -> tls_channel::Result<()> {
-//! use tls_channel::{Config, SecretKey, Server, connect};
+//! use std::sync::Arc;
+//! use tls_channel::{AllowedClients, Config, SecretKey, Server, connect};
 //!
 //! let server_key = SecretKey::generate();
-//! let server = Server::bind(&server_key, "127.0.0.1:0", Config::default()).await?;
+//! let client_key = SecretKey::generate();
+//! let allowed = Arc::new(AllowedClients::new());
+//! allowed.add(client_key.public_key());
+//!
+//! let server = Server::bind(&server_key, "127.0.0.1:0", Config::default(), allowed).await?;
 //! let addr = server.local_addr()?;
 //!
 //! tokio::spawn(async move {
 //!     loop {
 //!         let incoming = server.accept().await?;
 //!         tokio::spawn(async move {
-//!             let (mut channel, client_key) = incoming.handshake().await?;
-//!             // Check `client_key` against the allow list here, drop `channel` if unknown.
+//!             // Fails with `Error::ClientRejected` for unknown clients.
+//!             let mut channel = incoming.handshake().await?;
 //!             let packet = channel.recv().await?;
 //!             channel.send(packet).await
 //!         });
@@ -31,7 +36,6 @@
 //!     tls_channel::Result::Ok(())
 //! });
 //!
-//! let client_key = SecretKey::generate();
 //! let mut channel = connect(&client_key, server_key.public_key(), addr, Config::default()).await?;
 //! channel.send(&b"ping"[..]).await?;
 //! assert_eq!(channel.recv().await?, &b"ping"[..]);
@@ -39,6 +43,7 @@
 //! # }
 //! ```
 
+mod access;
 mod channel;
 mod error;
 mod keys;
@@ -60,6 +65,7 @@ use rustls::{ClientConfig, ServerConfig};
 use tokio::net::{TcpListener, TcpStream, ToSocketAddrs};
 use tokio_rustls::{TlsAcceptor, TlsConnector};
 
+pub use access::{AllowedClients, IsClientValid};
 pub use channel::{Channel, ChannelReader, ChannelWriter};
 pub use error::{Error, Result};
 pub use keys::{PublicKey, SecretKey};
@@ -113,9 +119,15 @@ fn certified_key(secret_key: &SecretKey) -> Result<Arc<CertifiedKey>> {
     Ok(Arc::new(CertifiedKey::new(vec![spki], signing_key)))
 }
 
-fn server_config(secret_key: &SecretKey) -> Result<ServerConfig> {
+fn server_config(
+    secret_key: &SecretKey,
+    is_client_valid: Arc<dyn IsClientValid>,
+) -> Result<ServerConfig> {
     let provider = provider();
-    let client_verifier = verifier::AnyClientKey::new(provider.signature_verification_algorithms);
+    let client_verifier = verifier::ClientKeyVerifier::new(
+        provider.signature_verification_algorithms,
+        is_client_valid,
+    );
     let mut config = ServerConfig::builder_with_provider(Arc::new(provider))
         .with_protocol_versions(&[&rustls::version::TLS13])?
         .with_client_cert_verifier(Arc::new(client_verifier))
@@ -152,13 +164,16 @@ pub struct Server {
 }
 
 impl Server {
+    /// `is_client_valid` is consulted during every handshake, so changes to
+    /// a shared [`AllowedClients`] apply to new connections immediately.
     pub async fn bind(
         secret_key: &SecretKey,
         addr: impl ToSocketAddrs,
         config: Config,
+        is_client_valid: Arc<dyn IsClientValid>,
     ) -> Result<Self> {
         config.validate()?;
-        let acceptor = TlsAcceptor::from(Arc::new(server_config(secret_key)?));
+        let acceptor = TlsAcceptor::from(Arc::new(server_config(secret_key, is_client_valid)?));
         let listener = TcpListener::bind(addr).await?;
         Ok(Self {
             listener,
@@ -203,16 +218,19 @@ impl Incoming {
         self.peer_addr
     }
 
-    /// Runs the TLS handshake within [`Config::timeout`] and returns the
-    /// channel together with the authenticated client public key.
-    pub async fn handshake(self) -> Result<(Channel, PublicKey)> {
+    /// Runs the TLS handshake within [`Config::timeout`]. The client's key
+    /// is checked by the server's [`IsClientValid`] as part of the handshake;
+    /// a rejected client yields [`Error::ClientRejected`]. The accepted key is
+    /// available as [`Channel::peer_public_key`].
+    pub async fn handshake(self) -> Result<Channel> {
         let timeout = self.config.timeout;
         let tls = tokio::time::timeout(timeout, async {
             self.stream.set_nodelay(true)?;
             Ok::<_, Error>(self.acceptor.accept(self.stream).await?)
         })
         .await
-        .map_err(|_| Error::Timeout(timeout))??;
+        .map_err(|_| Error::Timeout(timeout))?
+        .map_err(client_rejected)?;
 
         let client_public_key = tls
             .get_ref()
@@ -222,18 +240,35 @@ impl Incoming {
             .and_then(|spki| PublicKey::from_spki_der(spki.as_ref()))
             .ok_or(Error::Handshake("client did not present a raw public key"))?;
 
-        let channel = Channel::new(
+        Ok(Channel::new(
             tls.into(),
             client_public_key,
             self.peer_addr,
             self.config.max_packet_size,
-        );
-        Ok((channel, client_public_key))
+        ))
     }
+}
+
+/// Surfaces the verifier's rejection (carried through rustls as
+/// `CertificateError::Other`) as [`Error::ClientRejected`].
+fn client_rejected(err: Error) -> Error {
+    if let Error::Tls(rustls::Error::InvalidCertificate(rustls::CertificateError::Other(other))) =
+        &err
+        && let Some(rejected) = other.0.downcast_ref::<verifier::ClientRejected>()
+    {
+        return Error::ClientRejected {
+            public_key: rejected.0,
+        };
+    }
+    err
 }
 
 /// Connects to `addr` and authenticates the server against
 /// `server_public_key`. TCP connect and TLS handshake share [`Config::timeout`].
+///
+/// In TLS 1.3 the client finishes its handshake before the server has checked
+/// the client's key, so a client the server rejects still gets a channel
+/// here; its first `recv` or `send` then fails with the server's TLS alert.
 pub async fn connect(
     secret_key: &SecretKey,
     server_public_key: PublicKey,

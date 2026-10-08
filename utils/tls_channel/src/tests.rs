@@ -1,13 +1,21 @@
+use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
 
-use crate::{Config, Error, PublicKey, SecretKey, Server, connect};
+use crate::{AllowedClients, Config, Error, PublicKey, SecretKey, Server, connect};
 
+/// Binds a server that accepts every client.
 async fn bind(server_key: &SecretKey, config: Config) -> Server {
-    Server::bind(server_key, "127.0.0.1:0", config)
+    struct AcceptAll;
+    impl crate::IsClientValid for AcceptAll {
+        fn is_client_valid(&self, _public_key: &PublicKey) -> bool {
+            true
+        }
+    }
+    Server::bind(server_key, "127.0.0.1:0", config, Arc::new(AcceptAll))
         .await
         .unwrap()
 }
@@ -29,9 +37,8 @@ async fn roundtrip_both_directions() {
 
     let server_task = tokio::spawn(async move {
         let incoming = server.accept().await.unwrap();
-        let (mut channel, peer) = incoming.handshake().await.unwrap();
-        assert_eq!(peer, client_pub);
-        assert_eq!(*channel.peer_public_key(), client_pub);
+        let mut channel = incoming.handshake().await.unwrap();
+        assert_eq!(channel.peer_public_key(), client_pub);
         assert_eq!(channel.recv().await.unwrap(), &b"hello"[..]);
         assert_eq!(channel.recv().await.unwrap(), &b""[..]);
         channel.send(&b"world"[..]).await.unwrap();
@@ -48,7 +55,7 @@ async fn roundtrip_both_directions() {
     )
     .await
     .unwrap();
-    assert_eq!(*channel.peer_public_key(), server_key.public_key());
+    assert_eq!(channel.peer_public_key(), server_key.public_key());
     channel.send(&b"hello"[..]).await.unwrap();
     channel.send(Bytes::new()).await.unwrap();
     assert_eq!(channel.recv().await.unwrap(), &b"world"[..]);
@@ -65,7 +72,7 @@ async fn split_allows_concurrent_send_and_recv() {
     let addr = server.local_addr().unwrap();
 
     let server_task = tokio::spawn(async move {
-        let (channel, _) = server.accept().await.unwrap().handshake().await.unwrap();
+        let channel = server.accept().await.unwrap().handshake().await.unwrap();
         let (mut reader, mut writer) = channel.split();
         let send = tokio::spawn(async move {
             for i in 0..100u32 {
@@ -128,29 +135,79 @@ async fn wrong_server_key_fails_handshake() {
 }
 
 #[tokio::test]
-async fn unknown_client_can_be_dropped() {
+async fn unknown_client_is_rejected_during_handshake() {
     let server_key = SecretKey::generate();
-    let allowed_client: PublicKey = SecretKey::generate().public_key();
-    let server = bind(&server_key, Config::default()).await;
-    let addr = server.local_addr().unwrap();
-
-    let server_task = tokio::spawn(async move {
-        let (channel, client_pub) = server.accept().await.unwrap().handshake().await.unwrap();
-        assert_ne!(client_pub, allowed_client);
-        drop(channel);
-    });
-
-    let mut channel = connect(
-        &SecretKey::generate(),
-        server_key.public_key(),
-        addr,
+    let allowed_key = SecretKey::generate();
+    let unknown_key = SecretKey::generate();
+    let allowed = Arc::new(AllowedClients::new());
+    assert!(allowed.add(allowed_key.public_key()));
+    assert!(!allowed.add(allowed_key.public_key()));
+    let server = Server::bind(
+        &server_key,
+        "127.0.0.1:0",
         Config::default(),
+        allowed.clone(),
     )
     .await
     .unwrap();
+    let addr = server.local_addr().unwrap();
+
+    let allowed_pub = allowed_key.public_key();
+    let unknown_pub = unknown_key.public_key();
+    let server_task = tokio::spawn(async move {
+        // Unknown client: no channel, and the server learns which key tried.
+        let err = server
+            .accept()
+            .await
+            .unwrap()
+            .handshake()
+            .await
+            .err()
+            .unwrap();
+        assert!(
+            matches!(err, Error::ClientRejected { public_key } if public_key == unknown_pub),
+            "{err:?}"
+        );
+        // Allowed client gets through.
+        let channel = server.accept().await.unwrap().handshake().await.unwrap();
+        assert_eq!(channel.peer_public_key(), allowed_pub);
+        // Removing the key takes effect for the next connection.
+        assert!(allowed.remove(&allowed_pub));
+        let err = server
+            .accept()
+            .await
+            .unwrap()
+            .handshake()
+            .await
+            .err()
+            .unwrap();
+        assert!(matches!(err, Error::ClientRejected { .. }), "{err:?}");
+    });
+
+    let server_pub = server_key.public_key();
+    // TLS 1.3 clients finish before the server verifies them, so the
+    // rejection shows up as a TLS alert on the first read.
+    let mut rejected = connect(&unknown_key, server_pub, addr, Config::default())
+        .await
+        .unwrap();
+    let err = rejected.recv().await.err().unwrap();
+    assert!(
+        matches!(
+            err,
+            Error::Tls(rustls::Error::AlertReceived(_)) | Error::Io(_)
+        ),
+        "{err:?}"
+    );
+
+    let _channel = connect(&allowed_key, server_pub, addr, Config::default())
+        .await
+        .unwrap();
+
+    let mut rejected = connect(&allowed_key, server_pub, addr, Config::default())
+        .await
+        .unwrap();
+    assert!(rejected.recv().await.is_err());
     server_task.await.unwrap();
-    let err = channel.recv().await.err().unwrap();
-    assert!(matches!(err, Error::Closed | Error::Io(_)), "{err:?}");
 }
 
 #[tokio::test]
@@ -168,7 +225,7 @@ async fn packet_size_limits_are_enforced_on_both_sides() {
     let addr = server.local_addr().unwrap();
 
     let server_task = tokio::spawn(async move {
-        let (mut channel, _) = server.accept().await.unwrap().handshake().await.unwrap();
+        let mut channel = server.accept().await.unwrap().handshake().await.unwrap();
         assert_eq!(channel.recv().await.unwrap(), &[1u8; 16][..]);
         let err = channel.recv().await.err().unwrap();
         assert!(
@@ -203,7 +260,7 @@ async fn large_packet_roundtrip() {
 
     let expected = payload.clone();
     let server_task = tokio::spawn(async move {
-        let (mut channel, _) = server.accept().await.unwrap().handshake().await.unwrap();
+        let mut channel = server.accept().await.unwrap().handshake().await.unwrap();
         let received = channel.recv().await.unwrap();
         assert!(received == expected);
         channel.send(received).await.unwrap();
@@ -271,7 +328,13 @@ async fn config_is_validated() {
         ..Config::default()
     };
     assert!(matches!(
-        Server::bind(&key, "127.0.0.1:0", too_big.clone()).await,
+        Server::bind(
+            &key,
+            "127.0.0.1:0",
+            too_big.clone(),
+            Arc::new(AllowedClients::new())
+        )
+        .await,
         Err(Error::InvalidConfig(_))
     ));
     let addr = "127.0.0.1:1".parse().unwrap();
@@ -309,7 +372,7 @@ async fn recv_is_cancel_safe() {
 
     let expected = payload.clone();
     let server_task = tokio::spawn(async move {
-        let (mut channel, _) = server.accept().await.unwrap().handshake().await.unwrap();
+        let mut channel = server.accept().await.unwrap().handshake().await.unwrap();
         // Big frame first, then a small one. Cancel `recv` repeatedly while
         // the big frame is arriving in pieces.
         let mut cancelled = 0;
@@ -346,7 +409,7 @@ async fn send_is_cancel_safe() {
 
     let expected = payload.clone();
     let server_task = tokio::spawn(async move {
-        let (mut channel, _) = server.accept().await.unwrap().handshake().await.unwrap();
+        let mut channel = server.accept().await.unwrap().handshake().await.unwrap();
         assert!(channel.recv().await.unwrap() == expected);
         assert_eq!(channel.recv().await.unwrap(), &b"after"[..]);
         assert!(matches!(channel.recv().await, Err(Error::Closed)));

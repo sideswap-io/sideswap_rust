@@ -65,8 +65,8 @@ impl Channel {
         }
     }
 
-    pub fn peer_public_key(&self) -> &PublicKey {
-        &self.reader.peer_public_key
+    pub fn peer_public_key(&self) -> PublicKey {
+        self.reader.peer_public_key
     }
 
     pub fn peer_addr(&self) -> SocketAddr {
@@ -102,8 +102,8 @@ pub struct ChannelReader {
 }
 
 impl ChannelReader {
-    pub fn peer_public_key(&self) -> &PublicKey {
-        &self.peer_public_key
+    pub fn peer_public_key(&self) -> PublicKey {
+        self.peer_public_key
     }
 
     pub fn peer_addr(&self) -> SocketAddr {
@@ -136,8 +136,8 @@ pub struct ChannelWriter {
 }
 
 impl ChannelWriter {
-    pub fn peer_public_key(&self) -> &PublicKey {
-        &self.peer_public_key
+    pub fn peer_public_key(&self) -> PublicKey {
+        self.peer_public_key
     }
 
     pub fn peer_addr(&self) -> SocketAddr {
