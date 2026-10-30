@@ -143,7 +143,11 @@ pub struct NotificationSettings {
 type ExchangeBalances = BTreeMap<ExchangeTicker, f64>;
 type AllExchangeBalances = BTreeMap<String, f64>;
 type BfxPrices = BTreeMap<BfxExchangePair, Price>;
-type ExternalPrices = BTreeMap<BfxExchangePair, f64>;
+struct ExternalPrice {
+    price: f64,
+    updated_at: Instant,
+}
+type ExternalPrices = BTreeMap<BfxExchangePair, BTreeMap<external_prices::Source, ExternalPrice>>;
 type PendingOrders = BTreeMap<i64, Instant>;
 
 #[derive(Debug, Deserialize)]
@@ -177,8 +181,6 @@ pub struct Settings {
     rpc: rpc::RpcServer,
 
     notifications: NotificationSettings,
-
-    external_prices: Option<external_prices::Settings>,
 
     gdk_registry_source: Option<gdk_registry_cache::Source>,
 
@@ -258,7 +260,11 @@ enum Msg {
     BfWorker(bitfinex_worker::Response),
     Cli(cli::RequestData),
     CheckExchange,
-    External(BfxExchangePair, Result<f64, anyhow::Error>),
+    External(
+        external_prices::Source,
+        BfxExchangePair,
+        Result<f64, anyhow::Error>,
+    ),
 }
 
 #[derive(Clone, Copy)]
@@ -293,6 +299,7 @@ struct Data {
     failed_orders_total: f64,
     bfx_prices: BfxPrices,
     external_prices: ExternalPrices,
+    rejected_pairs: BTreeSet<BfxExchangePair>,
     health_text: HealthStatus,
     storage: storage::Storage,
     balancing_blocked: Instant,
@@ -419,33 +426,71 @@ fn hedge_order(
     }
 }
 
-fn get_bfx_price(data: &Data, exchange_pair: BfxExchangePair) -> Option<Price> {
-    // How much difference can we tolerate
+// Maximum age of an external price (they are reloaded every 30 seconds)
+const EXTERNAL_PRICE_TTL: Duration = Duration::from_secs(120);
+
+fn fresh_external_prices(
+    data: &Data,
+    exchange_pair: BfxExchangePair,
+) -> Vec<(external_prices::Source, f64)> {
+    let now = Instant::now();
+    data.external_prices
+        .get(&exchange_pair)
+        .into_iter()
+        .flatten()
+        .filter(|(_, price)| now.duration_since(price.updated_at) <= EXTERNAL_PRICE_TTL)
+        .map(|(source, price)| (*source, price.price))
+        .collect()
+}
+
+/// Compare the Bitfinex mid price against the external price sources.
+/// The Bitfinex price is accepted if it agrees with at least one external source,
+/// so a single external source that is way off is ignored.
+fn bfx_price_accepted(bfx_price: Price, external: &[(external_prices::Source, f64)]) -> bool {
+    // How much difference can we tolerate (normal difference is around 0.0002)
     const MAX_DIFF: f64 = 0.015;
 
-    let bfx = data.bfx_prices.get(&exchange_pair).copied();
-    let external = data.external_prices.get(&exchange_pair).copied();
+    let mid = (bfx_price.bid + bfx_price.ask) / 2.0;
+    external.is_empty()
+        || external
+            .iter()
+            .any(|(_, external)| f64::abs((mid - external) / external) <= MAX_DIFF)
+}
 
-    match (&bfx, &external) {
-        // Compare against external price source
-        (Some(bfx_price), Some(external)) => {
-            let ask_diff = f64::abs((bfx_price.ask - external) / external);
-            let bid_diff = f64::abs((bfx_price.bid - external) / external);
-            // Normal difference is around 0.0002
-            if ask_diff <= MAX_DIFF && bid_diff <= MAX_DIFF {
-                bfx
-            } else {
-                log::warn!(
-                    "price discrepancy: bid: {}, ask: {}, external: {}",
-                    bfx_price.bid,
-                    bfx_price.ask,
-                    external
-                );
-                None
-            }
+fn get_bfx_price(data: &mut Data, exchange_pair: BfxExchangePair) -> Option<Price> {
+    let bfx_price = data.bfx_prices.get(&exchange_pair).copied()?;
+    let external = fresh_external_prices(data, exchange_pair);
+
+    let accepted = bfx_price_accepted(bfx_price, &external);
+
+    let was_rejected = data.rejected_pairs.contains(&exchange_pair);
+    if accepted == was_rejected {
+        let external_str = external
+            .iter()
+            .map(|(source, price)| format!("{source}: {price}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let details = format!(
+            "{exchange_pair}, bid: {}, ask: {}, external: {external_str}",
+            bfx_price.bid, bfx_price.ask,
+        );
+        if accepted {
+            data.rejected_pairs.remove(&exchange_pair);
+            send_notification(
+                &format!("price discrepancy resolved: {details}"),
+                &data.settings.notifications.url,
+            );
+        } else {
+            data.rejected_pairs.insert(exchange_pair);
+            warn!("price discrepancy: {details}");
+            send_notification(
+                &format!("price discrepancy, quotes stopped: {details}"),
+                &data.settings.notifications.url,
+            );
         }
-        _ => bfx,
     }
+
+    accepted.then_some(bfx_price)
 }
 
 async fn process_dealer_event(data: &mut Data, event: Event) {
@@ -579,6 +624,12 @@ fn submit_dealer_prices(data: &mut Data) {
 }
 
 fn submit_market_prices(data: &mut Data) {
+    let bfx_prices = BfxExchangePair::iter()
+        .filter_map(|exchange_pair| {
+            get_bfx_price(data, exchange_pair).map(|price| (exchange_pair, price))
+        })
+        .collect::<BTreeMap<_, _>>();
+
     let assets = &data.settings.env.nd().known_assets;
 
     let mut orders = Vec::new();
@@ -608,7 +659,7 @@ fn submit_market_prices(data: &mut Data) {
             ),
         };
 
-        let bfx_price = match get_bfx_price(data, exchange_pair) {
+        let bfx_price = match bfx_prices.get(&exchange_pair) {
             Some(price) => price,
             None => continue,
         };
@@ -703,6 +754,10 @@ async fn process_timer(data: &mut Data) {
         })
         .unwrap_or_default();
 
+    let external_sources_count = external_prices::Source::iter().len();
+    let external_prices_missing = BfxExchangePair::iter()
+        .any(|pair| fresh_external_prices(data, pair).len() != external_sources_count);
+
     let status = [
         (!data.bfx_connected).then_some("BfxOffline"),
         (!data.server_connected).then_some("ServerOffline"),
@@ -714,7 +769,8 @@ async fn process_timer(data: &mut Data) {
         (balance_wallet_eurx < MIN_BALANCE_EURX).then_some("WalletEurxLow"),
         balancing_expired.then_some("BalancingStuck"),
         (data.failed_orders_count != 0).then_some("FailedOrderSubmit"),
-        (data.external_prices.len() != 3).then_some("ExternalPrices"),
+        external_prices_missing.then_some("ExternalPrices"),
+        (!data.rejected_pairs.is_empty()).then_some("PriceDiscrepancy"),
     ]
     .iter()
     .flatten()
@@ -1067,14 +1123,24 @@ fn process_msg(data: &mut Data, msg: Msg) {
             }
         }
 
-        Msg::External(ticker, price_res) => match price_res {
+        Msg::External(source, exchange_pair, price_res) => match price_res {
             Ok(price) => {
-                data.external_prices.insert(ticker, price);
-                get_bfx_price(data, ticker);
+                data.external_prices
+                    .entry(exchange_pair)
+                    .or_default()
+                    .insert(
+                        source,
+                        ExternalPrice {
+                            price,
+                            updated_at: Instant::now(),
+                        },
+                    );
             }
             Err(err) => {
-                log::warn!("external price loading failed: {err}");
-                data.external_prices.remove(&ticker);
+                warn!("external price loading failed, {source} {exchange_pair}: {err}");
+                if let Some(prices) = data.external_prices.get_mut(&exchange_pair) {
+                    prices.remove(&source);
+                }
             }
         },
     }
@@ -1228,12 +1294,9 @@ async fn main() {
         },
     ));
 
-    if let Some(settings) = settings.external_prices.clone() {
-        tokio::spawn(external_prices::reload(
-            settings,
-            UncheckedUnboundedSender::from(msg_tx.clone()),
-        ));
-    }
+    tokio::spawn(external_prices::reload(UncheckedUnboundedSender::from(
+        msg_tx.clone(),
+    )));
 
     let term_signal = sideswap_common::signals::TermSignal::new();
 
@@ -1278,6 +1341,7 @@ async fn main() {
         failed_orders_total: 0.0,
         bfx_prices: BfxPrices::new(),
         external_prices: ExternalPrices::new(),
+        rejected_pairs: BTreeSet::new(),
         health_text,
         storage,
         balancing_blocked: Instant::now(),
@@ -1342,5 +1406,40 @@ async fn main() {
                 break;
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use external_prices::Source;
+
+    #[test]
+    fn price_check() {
+        let bfx = Price {
+            bid: 70052.0,
+            ask: 70838.0,
+        };
+        // No external sources: accept
+        assert!(bfx_price_accepted(bfx, &[]));
+        // Single source that is off (the Binance EUR premium case): reject
+        assert!(!bfx_price_accepted(bfx, &[(Source::Binance, 68997.17)]));
+        // Single source that agrees: accept
+        assert!(bfx_price_accepted(bfx, &[(Source::Kraken, 70177.0)]));
+        // Two sources, one agrees: accept, the other one is ignored
+        assert!(bfx_price_accepted(
+            bfx,
+            &[(Source::Binance, 68997.17), (Source::Kraken, 70177.0)]
+        ));
+        // Two sources that agree with each other but not with Bitfinex: reject
+        assert!(!bfx_price_accepted(
+            bfx,
+            &[(Source::Binance, 68000.0), (Source::Kraken, 68100.0)]
+        ));
+        // Two sources that disagree with each other and with Bitfinex: reject
+        assert!(!bfx_price_accepted(
+            bfx,
+            &[(Source::Binance, 68000.0), (Source::Kraken, 73000.0)]
+        ));
     }
 }
