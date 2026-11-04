@@ -4,6 +4,7 @@ pub mod gdk;
 pub mod http_rpc;
 pub mod market;
 pub mod mkt;
+pub mod peg_amounts;
 pub mod pegx;
 
 use elements::hashes::Hash;
@@ -78,6 +79,7 @@ pub enum SubscribedValue {
 
     PegInFeeRate {
         /// payout_amount = round((bitcoin_amount - PegInFixedFee) * (1 - PegInFeeRate)).
+        /// See [`peg_amounts`] for the forward and inverse formulas.
         fee_rate: f64,
     },
 
@@ -105,6 +107,7 @@ pub enum SubscribedValue {
 
     PegOutFeeRate {
         /// payout_amount = round(liquid_bitcoin_amount * (1 - PegOutFeeRate)) - ceil(bitcoin_network_fee_rate * PegOutFixedFeeVsize).
+        /// See [`peg_amounts`] for the forward and inverse formulas.
         fee_rate: f64,
     },
 }
@@ -288,8 +291,10 @@ pub struct PegRequest {
     pub send_amount: Option<i64>,
     pub peg_in: bool,
     pub device_key: Option<String>,
+    /// Deprecated
     pub peg_out_amounts: Option<PegOutAmounts>,
     pub fee_rate: Option<FeeRateSats>,
+    /// Deprecated, use fee_rate instead
     pub blocks: Option<i32>,
 }
 
