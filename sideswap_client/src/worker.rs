@@ -500,6 +500,9 @@ impl Data {
                                     &mut wallet_data.used_addresses.nested
                                         [usize::from(utxo.is_internal)]
                                 }
+                                WalletType::AMP2 => {
+                                    unimplemented!("no AMP2 wallet in the mobile client")
+                                }
                                 WalletType::AMP => &mut wallet_data.used_addresses.amp,
                             };
                             if utxo.pointer > *last_used {
@@ -1729,6 +1732,7 @@ impl Data {
 
         let need_green_signature = selected_utxos.iter().any(|utxo| match utxo.wallet_type {
             WalletType::Native | WalletType::Nested => false,
+            WalletType::AMP2 => unimplemented!("no AMP2 wallet in the mobile client"),
             WalletType::AMP => true,
         });
 

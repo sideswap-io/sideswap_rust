@@ -380,6 +380,7 @@ pub fn get_wallet_account(wallet: WalletType) -> Account {
     match wallet {
         WalletType::Native => Account::Reg,
         WalletType::Nested => Account::Reg,
+        WalletType::AMP2 => unimplemented!("no AMP2 wallet in the mobile client"),
         WalletType::AMP => Account::Amp,
     }
 }
@@ -1316,6 +1317,7 @@ pub fn try_sign_pset_jade(
                         .as_ref()
                         .ok_or_else(|| anyhow!("can't find user_path in UTXO"))?
                         .clone(),
+                    WalletType::AMP2 => unimplemented!("no AMP2 wallet in the mobile client"),
                     WalletType::AMP => worker
                         .settings
                         .reg_info
@@ -1372,6 +1374,7 @@ pub fn try_sign_pset_jade(
                             .ok_or_else(|| anyhow!("can't find public_key in UTXO"))?;
                         vec![signature, public_key.serialize()]
                     }
+                    WalletType::AMP2 => unimplemented!("no AMP2 wallet in the mobile client"),
                     WalletType::AMP => {
                         vec![
                             vec![],
@@ -1887,6 +1890,7 @@ fn try_create_funding_tx(
 
     let need_green_signature = selected_utxos.iter().any(|utxo| match utxo.wallet_type {
         WalletType::Native | WalletType::Nested => false,
+        WalletType::AMP2 => unimplemented!("no AMP2 wallet in the mobile client"),
         WalletType::AMP => true,
     });
     let pset = if need_green_signature {
@@ -2173,6 +2177,7 @@ fn try_offline_order_submit(
                 .as_ref()
                 .ok_or_else(|| anyhow!("can't find user_path in UTXO"))?
                 .clone(),
+            WalletType::AMP2 => unimplemented!("no AMP2 wallet in the mobile client"),
             WalletType::AMP => worker
                 .settings
                 .reg_info
@@ -2216,6 +2221,7 @@ fn try_offline_order_submit(
                     .ok_or_else(|| anyhow!("can't find public_key in UTXO"))?;
                 vec![signature, public_key.serialize()]
             }
+            WalletType::AMP2 => unimplemented!("no AMP2 wallet in the mobile client"),
             WalletType::AMP => {
                 vec![
                     vec![],
@@ -3137,6 +3143,7 @@ fn derive_priv_key(xprivs: &Xprivs, utxo: &models::Utxo) -> SecretKey {
                 .expect("must not fail")
                 .private_key
         }
+        WalletType::AMP2 => unimplemented!("no AMP2 wallet in the mobile client"),
         WalletType::AMP => {
             xprivs
                 .amp_xpriv

@@ -131,6 +131,7 @@ pub fn get_redeem_script(utxo: &models::Utxo) -> Option<elements::Script> {
         WalletType::Nested => Some(sideswap_common::pset::p2shwpkh_redeem_script(
             utxo.public_key.as_ref().expect("must be set"),
         )),
+        WalletType::AMP2 => unimplemented!("no AMP2 wallet in the mobile client"),
         WalletType::AMP => Some(
             elements::script::Builder::new()
                 .push_int(0)
@@ -170,6 +171,7 @@ pub fn get_witness(
             let pub_key = priv_key.public_key(SECP256K1);
             vec![signature, pub_key.serialize().to_vec()]
         }
+        WalletType::AMP2 => unimplemented!("no AMP2 wallet in the mobile client"),
         WalletType::AMP => {
             vec![
                 vec![],

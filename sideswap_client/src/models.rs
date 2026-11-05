@@ -22,6 +22,7 @@ impl From<WalletType> for AddressType {
         match value {
             WalletType::Native => AddressType::P2wpkh,
             WalletType::Nested => AddressType::P2shP2wpkh,
+            WalletType::AMP2 => unimplemented!("no AMP2 wallet in the mobile client"),
             WalletType::AMP => AddressType::P2wsh,
         }
     }

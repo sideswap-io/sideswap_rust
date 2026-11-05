@@ -26,11 +26,20 @@ pub fn weight_to_fee(weight: usize, fee_rate: f64) -> u64 {
     vsize_to_fee(weight_to_vsize(weight), fee_rate)
 }
 
-// Must be sorted in order of priority
+/// The kind of the wallet (account) a UTXO or an output belongs to.
+///
+/// The variants must be sorted by priority, from the cheapest input to the most expensive one:
+/// when an asset is held in several wallets, [`change_wallets`] sends its change to the first
+/// one, and the inputs are tried in this order too (see the `Ord` derive of [`Utxo`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub enum WalletType {
+    /// Native SegWit single-sig, P2WPKH
     Native,
+    /// Nested SegWit single-sig, P2SH-P2WPKH
     Nested,
+    /// AMP2: native SegWit 2-of-2 multisig with the AMP2 server, P2WSH
+    AMP2,
+    /// AMP0 (Green): nested SegWit 2-of-2 multisig with the Green server, P2SH-P2WSH
     AMP,
 }
 
@@ -57,11 +66,15 @@ pub struct Recipient {
 }
 
 impl WalletType {
-    /// Without grinding (because Jade does not allow grinding with Anti-Exfil enabled)
+    /// The weight of a signed input, with a maximal (72-byte) user signature: the user signature
+    /// is not grinded because Jade does not allow grinding with Anti-Exfil enabled.
+    /// The Green server grinds its AMP0 signature (71 bytes), the AMP2 server is not assumed to.
+    /// The `weights` test derives these numbers from serialized transactions.
     pub fn input_weight(self) -> usize {
         match self {
             WalletType::Native => 275,
             WalletType::Nested => 367,
+            WalletType::AMP2 => 387,
             WalletType::AMP => 526,
         }
     }
@@ -70,6 +83,7 @@ impl WalletType {
         match self {
             WalletType::Native => 22,
             WalletType::Nested | WalletType::AMP => 23,
+            WalletType::AMP2 => 34,
         }
     }
 
@@ -127,12 +141,13 @@ pub enum Error {
 fn change_wallets(utxos: &[Utxo], force_change_wallets: ChangeWallets) -> ChangeWallets {
     let mut wallets = ChangeWallets::new();
 
-    // This will keep AMP assets change in the AMP wallet.
+    // This will keep AMP assets change in the AMP wallet (AMP0 or AMP2) they came from.
     // AMP only will keep all the change in the AMP wallet.
     for utxo in utxos {
         let wallet = wallets.entry(utxo.asset_id).or_insert(utxo.wallet);
         // For example, if we have USDt in both Nested and AMP wallets,
         // this will redirect USDt change to the Nested wallet
+        // (and to the AMP2 wallet if it's in both AMP0 and AMP2 wallets).
         *wallet = std::cmp::min(*wallet, utxo.wallet);
     }
 
