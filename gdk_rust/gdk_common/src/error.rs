@@ -43,6 +43,12 @@ pub enum Error {
     ElementsEncodingError(#[from] elements::encode::Error),
 
     #[error(transparent)]
+    ElementsHexFixedError(#[from] elements::hex::DecodeFixedLengthBytesError),
+
+    #[error(transparent)]
+    ElementsHexVariableError(#[from] elements::hex::DecodeVariableLengthBytesError),
+
+    #[error(transparent)]
     FromSliceError(#[from] std::array::TryFromSliceError),
 
     #[error("Invalid input")]

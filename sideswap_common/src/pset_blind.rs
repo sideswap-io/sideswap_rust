@@ -67,11 +67,11 @@ fn add_input_explicit_proofs(
         .into_asset_gen(elements::secp256k1_zkp::global::SECP256K1)
         .ok_or(Error::InvalidInput("no asset_gen"))?;
 
-    let blind_asset_proof = elements::secp256k1_zkp::SurjectionProof::new(
+    let blind_asset_proof = elements::SurjectionProof::new(
         elements::secp256k1_zkp::global::SECP256K1,
         &mut rng,
-        secret.asset.into_tag(),
-        secret.asset_bf.into_inner(),
+        secret.asset,
+        secret.asset_bf,
         &[(
             asset_gen_unblinded,
             secret.asset.into_tag(),
@@ -79,7 +79,7 @@ fn add_input_explicit_proofs(
         )],
     )?;
 
-    let blind_value_proof = elements::secp256k1_zkp::RangeProof::new(
+    let blind_value_proof = elements::RangeProof::new(
         elements::secp256k1_zkp::global::SECP256K1,
         secret.value,
         input
@@ -109,10 +109,8 @@ fn add_input_explicit_proofs(
         elements::encode::serialize(&secret.asset),
     );
 
-    let mut blind_value_proof = elements::encode::serialize(&blind_value_proof);
-    blind_value_proof.remove(0);
-    let mut blind_asset_proof = elements::encode::serialize(&blind_asset_proof);
-    blind_asset_proof.remove(0);
+    let blind_value_proof = blind_value_proof.to_vec();
+    let blind_asset_proof = blind_asset_proof.to_vec();
 
     input.proprietary.insert(
         ProprietaryKey::from_pset_pair(PSET_IN_VALUE_PROOF, Vec::new()),
@@ -271,7 +269,7 @@ pub fn blind_pset(
             message[..32].copy_from_slice(asset_id.into_tag().as_ref());
             message[32..].copy_from_slice(out_abf.into_inner().as_ref());
 
-            let rangeproof = elements::secp256k1_zkp::RangeProof::new(
+            let rangeproof = elements::RangeProof::new(
                 secp,
                 1,
                 value_commitment,
@@ -285,16 +283,11 @@ pub fn blind_pset(
                 out_asset_commitment,
             )?;
 
-            let surjection_proof = elements::secp256k1_zkp::SurjectionProof::new(
-                secp,
-                rng,
-                asset_id.into_tag(),
-                out_abf.into_inner(),
-                &inputs,
-            )?;
+            let surjection_proof =
+                elements::SurjectionProof::new(secp, rng, asset_id, out_abf, &inputs)?;
 
-            output.value_rangeproof = Some(Box::new(rangeproof));
-            output.asset_surjection_proof = Some(Box::new(surjection_proof));
+            output.value_rangeproof = Some(rangeproof);
+            output.asset_surjection_proof = Some(surjection_proof);
             output.amount_comm = Some(value_commitment);
             output.asset_comm = Some(out_asset_commitment);
             output.ecdh_pubkey = nonce.commitment().map(|pk| elements::bitcoin::PublicKey {
@@ -304,20 +297,19 @@ pub fn blind_pset(
 
             let r#gen =
                 elements::secp256k1_zkp::Generator::new_unblinded(secp, asset_id.into_tag());
-            output.blind_asset_proof =
-                Some(Box::new(elements::secp256k1_zkp::SurjectionProof::new(
-                    secp,
-                    rng,
+            output.blind_asset_proof = Some(elements::SurjectionProof::new(
+                secp,
+                rng,
+                asset_id,
+                out_abf,
+                &[(
+                    r#gen,
                     asset_id.into_tag(),
-                    out_abf.into_inner(),
-                    &[(
-                        r#gen,
-                        asset_id.into_tag(),
-                        elements::secp256k1_zkp::ZERO_TWEAK,
-                    )],
-                )?));
+                    elements::secp256k1_zkp::ZERO_TWEAK,
+                )],
+            )?);
 
-            output.blind_value_proof = Some(Box::new(elements::secp256k1_zkp::RangeProof::new(
+            output.blind_value_proof = Some(elements::RangeProof::new(
                 secp,
                 value,
                 value_commitment,
@@ -329,7 +321,7 @@ pub fn blind_pset(
                 -1,
                 0,
                 out_asset_commitment,
-            )?));
+            )?);
 
             exp_out_secrets.push((value, out_abf, out_vbf));
         } else {

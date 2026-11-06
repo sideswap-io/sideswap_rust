@@ -1,8 +1,5 @@
-use std::str::FromStr;
-
 use crate::error::Error;
 use crate::NetworkId;
-use elements::hex::ToHex;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq, Serialize, Deserialize)]
@@ -14,17 +11,15 @@ pub enum BEScript {
 impl BEScript {
     pub fn to_hex(&self) -> String {
         match self {
-            Self::Bitcoin(script) => script.to_hex(),
-            Self::Elements(script) => script.to_hex(),
+            Self::Bitcoin(script) => script.to_hex_string(),
+            Self::Elements(script) => format!("{script:x}"),
         }
     }
 
     pub fn from_hex(s: &str, network: NetworkId) -> Result<Self, Error> {
         Ok(match network {
             NetworkId::Bitcoin(_) => bitcoin::ScriptBuf::from_hex(s)?.into(),
-            NetworkId::Elements(_) => elements::Script::from_str(s)
-                .map_err(|e| Error::Generic(format!("hex decoding error {e}")))?
-                .into(),
+            NetworkId::Elements(_) => elements::Script::from_hex_no_prefix(s)?.into(),
         })
     }
 

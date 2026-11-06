@@ -172,8 +172,11 @@ fn try_sign_pset(
     let pset = match &wallet_data.wallet_reg.login_info().wallet_info {
         WalletInfo::Mnemonic(mnemonic) => {
             use lwk_common::Signer;
-            let signer = lwk_signer::SwSigner::new(&mnemonic.to_string(), data.env.d().mainnet)
-                .expect("signer creation failed");
+            let signer = lwk_signer::SwSigner::new_with_network(
+                &mnemonic.to_string(),
+                crate::gdk_ses_rust::lwk_network(data.env),
+            )
+            .expect("signer creation failed");
 
             for (i, input) in pset.inputs().iter().enumerate() {
                 // `signer_fingerprint` = master fingerprint of the signer about to be used.
@@ -498,7 +501,7 @@ pub fn try_sign_pset_jade(
                         .blind_asset_proof
                         .as_ref()
                         .ok_or_else(|| anyhow!("no blind_asset_proof in output {index}"))?
-                        .serialize()
+                        .to_vec()
                         .into(),
                 ),
                 value_blind_proof: Some(
@@ -506,7 +509,7 @@ pub fn try_sign_pset_jade(
                         .blind_value_proof
                         .as_ref()
                         .ok_or_else(|| anyhow!("no blind_value_proof in output {index}"))?
-                        .serialize()
+                        .to_vec()
                         .into(),
                 ),
             })

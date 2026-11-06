@@ -113,7 +113,8 @@ pub fn get_swap_amount(
             .as_ref()
             .split_at_checked(32)
             .ok_or(Error::Protocol("message split error"))?;
-        let asset = AssetId::from_slice(asset)
+        let asset = <[u8; 32]>::try_from(asset)
+            .map(AssetId::from_byte_array)
             .map_err(|_| Error::Protocol("invalid asset_id in message"))?;
         let asset_bf = AssetBlindingFactor::from_slice(&asset_bf[..32])
             .map_err(|_| Error::Protocol("invalid asset_bf in message"))?;

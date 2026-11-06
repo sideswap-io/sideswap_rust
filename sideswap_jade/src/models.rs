@@ -17,7 +17,7 @@ pub struct AssetId([u8; 32]);
 
 impl From<elements::AssetId> for AssetId {
     fn from(value: elements::AssetId) -> Self {
-        let mut arr: [u8; 32] = value.into_inner().0;
+        let mut arr: [u8; 32] = value.to_byte_array();
         arr.reverse();
         Self(arr)
     }

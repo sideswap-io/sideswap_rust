@@ -1093,14 +1093,15 @@ pub fn try_sign_pset_software(
 
                     pset_input.final_script_sig = get_script_sig(utxo);
 
-                    pset_input.final_script_witness = Some(get_witness(
-                        &mut sighash_cache,
-                        utxo,
-                        input_index,
-                        elements::EcdsaSighashType::All,
-                        &priv_key,
-                        bytes_to_grind,
-                    ));
+                    pset_input.final_script_witness =
+                        Some(elements::Witness::from_slice(&get_witness(
+                            &mut sighash_cache,
+                            utxo,
+                            input_index,
+                            elements::EcdsaSighashType::All,
+                            &priv_key,
+                            bytes_to_grind,
+                        )));
                 }
             }
         }
@@ -1127,17 +1128,20 @@ pub fn unblind(txout: &TxOut, shared_secret: SecretKey) -> Result<TxOutSecrets, 
         .as_ref()
         .ok_or(UnblindError::MissingRangeproof)?;
 
-    let (opening, _) = rangeproof.rewind(
-        SECP256K1,
-        commitment,
-        shared_secret,
-        txout.script_pubkey.as_bytes(),
-        additional_generator,
-    )?;
+    let (opening, _) = rangeproof
+        .rewind(
+            SECP256K1,
+            commitment,
+            shared_secret,
+            txout.script_pubkey.as_bytes(),
+            additional_generator,
+        )
+        .map_err(UnblindError::Rewind)?;
 
     let (asset, asset_bf) = opening.message.as_ref().split_at(32);
-    let asset = AssetId::from_slice(asset)?;
-    let asset_bf = AssetBlindingFactor::from_slice(&asset_bf[..32])?;
+    let asset = AssetId::from_byte_array(asset.try_into().expect("must not fail"));
+    let asset_bf =
+        AssetBlindingFactor::from_slice(&asset_bf[..32]).map_err(UnblindError::Rewind)?;
 
     let value = opening.value;
     let value_bf = opening.blinding_factor.as_ref();
@@ -1386,7 +1390,7 @@ pub fn try_sign_pset_jade(
                 };
 
                 input.final_script_sig = get_script_sig(utxo);
-                input.final_script_witness = Some(witness);
+                input.final_script_witness = Some(elements::Witness::from_slice(&witness));
             }
             None => {
                 let _signature = jade.get_signature(None)?;

@@ -1,5 +1,3 @@
-use elements::bitcoin;
-
 /// Use for const initialization only.
 /// Panics if invalid string is supplied.
 pub const fn const_asset_id(s: &str) -> elements::AssetId {
@@ -15,7 +13,7 @@ pub const fn const_asset_id(s: &str) -> elements::AssetId {
         right -= 1;
     }
 
-    elements::AssetId::from_inner(bitcoin::hashes::sha256::Midstate(data))
+    elements::AssetId::from_byte_array(data)
 }
 
 #[cfg(test)]

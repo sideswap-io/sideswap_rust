@@ -64,6 +64,42 @@ where
     d.deserialize_any(Helper)
 }
 
+fn deserialize_proof<'de, D, T>(
+    d: D,
+    parse: fn(&[u8]) -> Result<T, elements::secp256k1_zkp::Error>,
+) -> Result<T, D::Error>
+where
+    D: serde::de::Deserializer<'de>,
+{
+    let hex = String::deserialize(d)?;
+    let bytes = <Vec<u8>>::from_hex(&hex).map_err(serde::de::Error::custom)?;
+    parse(&bytes).map_err(serde::de::Error::custom)
+}
+
+/// Parses a hex-encoded surjection proof, an empty string is an empty proof.
+pub fn deserialize_surjection_proof<'de, D>(d: D) -> Result<elements::SurjectionProof, D::Error>
+where
+    D: serde::de::Deserializer<'de>,
+{
+    deserialize_proof(d, elements::SurjectionProof::from_slice)
+}
+
+/// Parses a hex-encoded range proof, an empty string is an empty proof.
+pub fn deserialize_range_proof<'de, D>(d: D) -> Result<elements::RangeProof, D::Error>
+where
+    D: serde::de::Deserializer<'de>,
+{
+    deserialize_proof(d, elements::RangeProof::from_slice)
+}
+
+pub fn empty_surjection_proof() -> elements::SurjectionProof {
+    elements::SurjectionProof::EMPTY
+}
+
+pub fn empty_range_proof() -> elements::RangeProof {
+    elements::RangeProof::EMPTY
+}
+
 pub fn deserialize_with_optional_empty_string<'de, D, T>(d: D) -> Result<Option<T>, D::Error>
 where
     D: serde::de::Deserializer<'de>,

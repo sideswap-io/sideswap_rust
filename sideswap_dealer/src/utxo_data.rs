@@ -105,7 +105,10 @@ impl UtxoData {
                         .push_slice(script.as_bytes())
                         .into_script()
                 });
-                pset_input.final_script_witness = Some(vec![input_sign, public_key.to_bytes()]);
+                pset_input.final_script_witness = Some(elements::Witness::from_slice(&[
+                    input_sign,
+                    public_key.to_bytes(),
+                ]));
             }
         }
 

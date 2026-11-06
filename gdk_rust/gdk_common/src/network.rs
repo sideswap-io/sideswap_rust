@@ -4,7 +4,7 @@ use std::time::Duration;
 use crate::error::Error;
 use bitcoin::bip32::{ChildNumber, Fingerprint, Xpub};
 use bitcoin::PublicKey;
-use elements::hex::ToHex;
+use elements::hex::DisplayHex;
 use serde::{Deserialize, Serialize};
 
 /// The default time duration that a network request is allowed to take before
@@ -170,7 +170,7 @@ impl NetworkParameters {
         let password = xpub.encode().to_vec();
         let salt = self.network.as_bytes().to_vec();
         let cost = 2048;
-        crate::util::pbkdf2_hmac_sha512_256(password, salt, cost).to_hex()
+        crate::util::pbkdf2_hmac_sha512_256(password, salt, cost).to_lower_hex_string()
     }
 
     pub fn xpub_hash_id(&self, master_xpub: &Xpub) -> String {
@@ -184,7 +184,7 @@ impl NetworkParameters {
         let password = xpub.encode().to_vec();
         let salt = "GREEN_XPUB_HASH_NETWORK".as_bytes().to_vec();
         let cost = 2048;
-        crate::util::pbkdf2_hmac_sha512_256(password, salt, cost).to_hex()
+        crate::util::pbkdf2_hmac_sha512_256(password, salt, cost).to_lower_hex_string()
     }
 
     pub fn bip32_network(&self) -> bitcoin::network::NetworkKind {

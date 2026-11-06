@@ -7,7 +7,7 @@ pub mod mkt;
 pub mod peg_amounts;
 pub mod pegx;
 
-use elements::hashes::Hash;
+use elements::bitcoin::hashes::Hash;
 pub use elements::{
     Address, Txid,
     confidential::{AssetBlindingFactor, ValueBlindingFactor},

@@ -73,8 +73,7 @@ impl SwSigner {
                     utxo.txout.value,
                     hash_ty,
                 );
-                let msg =
-                    elements::secp256k1_zkp::Message::from_digest_slice(&sighash[..]).unwrap();
+                let msg = elements::secp256k1_zkp::Message::from_digest(sighash.to_byte_array());
 
                 let path = address_user_path(utxo.subaccount, utxo.pointer);
 
@@ -87,12 +86,12 @@ impl SwSigner {
 
                 let user_sig = elements_miniscript::elementssig_to_rawsig(&(user_sig, hash_ty));
 
-                tx_input.witness.script_witness = vec![
+                tx_input.witness.script_witness = elements::Witness::from_slice(&[
                     vec![],
                     GREEN_DUMMY_SIG.to_vec(),
                     user_sig,
                     utxo.prevout_script.to_bytes(),
-                ];
+                ]);
             }
         }
 

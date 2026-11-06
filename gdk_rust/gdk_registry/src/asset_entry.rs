@@ -1,4 +1,3 @@
-use gdk_common::bitcoin::hashes::Hash;
 use gdk_common::elements::{AssetId, ContractHash, OutPoint, Txid};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -63,7 +62,7 @@ pub struct Prevout {
 impl Default for Prevout {
     fn default() -> Self {
         Self {
-            txid: Txid::all_zeros(),
+            txid: Txid::COINBASE_PREVOUT,
             vout: Default::default(),
         }
     }
@@ -78,7 +77,7 @@ pub struct Txin {
 impl Default for Txin {
     fn default() -> Self {
         Self {
-            txid: Txid::all_zeros(),
+            txid: Txid::COINBASE_PREVOUT,
             vin: Default::default(),
         }
     }

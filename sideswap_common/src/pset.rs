@@ -105,7 +105,7 @@ pub fn internal_sign_elements(
         sighash_type,
     );
 
-    let message = elements::secp256k1_zkp::Message::from_digest_slice(&sighash[..]).unwrap();
+    let message = elements::secp256k1_zkp::Message::from_digest(sighash.to_byte_array());
     let signature = secp.sign_ecdsa_low_r(&message, &private_key.inner);
     let mut signature = signature.serialize_der().to_vec();
     signature.push(sighash_type.as_u32() as u8);

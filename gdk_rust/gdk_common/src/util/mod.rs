@@ -45,10 +45,10 @@ impl serde::Serialize for MasterBlindingKey {
     where
         S: serde::Serializer,
     {
-        use elements::hex::ToHex;
+        use elements::hex::DisplayHex;
         let mut key64: [u8; 64] = [0; 64];
         key64[32..].copy_from_slice(self.0.as_bytes());
-        serde::Serialize::serialize(&key64.as_slice().to_hex(), serializer)
+        serde::Serialize::serialize(&key64.as_slice().to_lower_hex_string(), serializer)
     }
 }
 impl<'de> serde::Deserialize<'de> for MasterBlindingKey {
@@ -56,15 +56,14 @@ impl<'de> serde::Deserialize<'de> for MasterBlindingKey {
     where
         D: serde::Deserializer<'de>,
     {
-        use elements::hex::FromHex;
         let hex: String = serde::Deserialize::deserialize(deserializer)?;
 
-        let is_32bytes = <[u8; 32]>::from_hex(&hex);
+        let is_32bytes = elements::hex::decode_to_array::<32>(&hex);
         if is_32bytes.is_ok() {
             return Ok(MasterBlindingKey(Slip77MasterBlindingKey::from(is_32bytes.unwrap())));
         }
 
-        let is_64bytes = <[u8; 64]>::from_hex(&hex);
+        let is_64bytes = elements::hex::decode_to_array::<64>(&hex);
         if is_64bytes.is_ok() {
             let raw_bytes = <[u8; 32]>::try_from(&is_64bytes.unwrap()[32..]);
             return Ok(MasterBlindingKey(Slip77MasterBlindingKey::from(raw_bytes.unwrap())));
@@ -123,8 +122,7 @@ pub fn read_str(s: *const c_char) -> String {
 mod tests {
     use super::*;
     use bip39;
-    use elements::hex::FromHex;
-    use elements::hex::ToHex;
+    use elements::hex::DisplayHex;
     use elements::Script;
     use std::convert::TryInto;
     use std::str::FromStr;
@@ -137,7 +135,7 @@ mod tests {
         let mnemonic = bip39::Mnemonic::parse(mnemonic).unwrap();
         let seed = mnemonic.to_seed(passphrase);
         assert_eq!(seed.len(), 64);
-        assert_eq!(seed.to_hex(), "c76c4ac4f4e4a00d6b274d5c39c700bb4a7ddc04fbc6f78e85ca75007b5b495f74a9043eeb77bdd53aa6fc3a0e31462270316fa04b8c19114c8798706cd02ac8");
+        assert_eq!(seed.to_lower_hex_string(), "c76c4ac4f4e4a00d6b274d5c39c700bb4a7ddc04fbc6f78e85ca75007b5b495f74a9043eeb77bdd53aa6fc3a0e31462270316fa04b8c19114c8798706cd02ac8");
         let master_blinding_key = asset_blinding_key_from_seed(&seed);
         assert_eq!(
             master_blinding_key.0.to_string(),
@@ -146,7 +144,8 @@ mod tests {
 
         let unconfidential_addr = "2dpWh6jbhAowNsQ5agtFzi7j6nKscj6UnEr";
         let script =
-            Script::from_hex("76a914a579388225827d9f2fe9014add644487808c695d88ac").unwrap();
+            Script::from_hex_no_prefix("76a914a579388225827d9f2fe9014add644487808c695d88ac")
+                .unwrap();
         let blinding_key = asset_blinding_key_to_ec_private_key(&master_blinding_key, &script);
         let public_key = ec_public_key_from_private_key(blinding_key);
         let unconfidential_addr = elements::Address::from_str(&unconfidential_addr).unwrap();
@@ -170,7 +169,7 @@ mod tests {
         let cost = 2048;
         let bytes = pbkdf2_hmac_sha512_256(password, salt, cost);
         assert_eq!(
-            bytes.to_hex(),
+            bytes.to_lower_hex_string(),
             "657a9de33d1f7753edbb86c90b0ba064bd1b986570f1a5019ed80459877b013b"
         );
     }

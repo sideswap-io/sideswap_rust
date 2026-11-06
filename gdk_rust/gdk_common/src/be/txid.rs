@@ -1,4 +1,4 @@
-use elements::hex::ToHex;
+use bitcoin::hashes::Hash;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
@@ -15,8 +15,8 @@ pub enum BETxid {
 impl BETxid {
     pub fn to_hex(&self) -> String {
         match self {
-            Self::Bitcoin(txid) => txid.to_hex(),
-            Self::Elements(txid) => txid.to_hex(),
+            Self::Bitcoin(txid) => txid.to_string(),
+            Self::Elements(txid) => txid.to_string(),
         }
     }
     pub fn from_hex(s: &str, network: NetworkId) -> Result<Self, Error> {
@@ -78,7 +78,7 @@ impl BETxidConvert for bitcoin::Txid {
         self
     }
     fn into_elements(self) -> elements::Txid {
-        elements::Txid::from_raw_hash(*self.as_raw_hash())
+        elements::Txid::from_byte_array(self.to_byte_array())
     }
     fn into_be(self) -> BETxid {
         self.into()
@@ -87,7 +87,7 @@ impl BETxidConvert for bitcoin::Txid {
 
 impl BETxidConvert for elements::Txid {
     fn into_bitcoin(self) -> bitcoin::Txid {
-        bitcoin::Txid::from_raw_hash(*self.as_raw_hash())
+        bitcoin::Txid::from_byte_array(self.to_byte_array())
     }
     fn into_elements(self) -> elements::Txid {
         self

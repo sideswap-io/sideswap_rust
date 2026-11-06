@@ -5,17 +5,15 @@ use crate::NetworkId;
 use bitcoin::consensus::encode::deserialize as btc_des;
 use bitcoin::consensus::encode::serialize as btc_ser;
 use bitcoin::hashes::hex::FromHex;
-use bitcoin::hashes::Hash;
 use bitcoin::Sequence;
 use elements::confidential::{AssetBlindingFactor, ValueBlindingFactor};
 use elements::encode::deserialize as elm_des;
 use elements::encode::serialize as elm_ser;
 use log::trace;
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};
 
-#[derive(Debug, Clone, Serialize, Deserialize, Hash)]
+#[derive(Debug, Clone, Hash)]
 pub enum BETransaction {
     Bitcoin(bitcoin::Transaction),
     Elements(elements::Transaction),
@@ -94,7 +92,7 @@ impl BETransaction {
                 .iter()
                 .filter(|i| {
                     !(i.previous_output.vout == u32::max_value()
-                        && i.previous_output.txid == elements::Txid::all_zeros())
+                        && i.previous_output.txid == elements::Txid::COINBASE_PREVOUT)
                 })
                 .map(|i| i.previous_output.txid.into())
                 .collect(),
@@ -457,10 +455,10 @@ fn sum_inputs(tx: &bitcoin::Transaction, all_txs: &BETransactions) -> u64 {
         .sum()
 }
 
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct BETransactions(HashMap<BETxid, BETransactionEntry>);
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct BETransactionEntry {
     pub tx: BETransaction,
     pub size: usize,

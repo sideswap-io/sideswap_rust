@@ -387,11 +387,11 @@ dependencies = [
 
 [[package]]
 name = "base58ck"
-version = "0.1.1"
+version = "0.1.101"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8f1cba749a07c1efb1f4d87518f39cea4aec25d0991fb97e80459c057238f0d2"
+checksum = "365c0acd5b2e8dd0111a46c4faea83fb3cfb6e39a49a7c73a06e090db7b2eff0"
 dependencies = [
- "bitcoin_hashes",
+ "bitcoin_hashes 0.14.101",
 ]
 
 [[package]]
@@ -454,36 +454,64 @@ version = "2.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "90dbd31c98227229239363921e60fcf5e558e43ec69094d46fc4996f08d1d5bc"
 dependencies = [
- "bitcoin_hashes",
+ "bitcoin_hashes 0.14.101",
  "rand 0.8.6",
  "rand_core 0.6.4",
  "serde 1.0.228",
  "unicode-normalization",
+ "zeroize",
 ]
 
 [[package]]
 name = "bitcoin"
-version = "0.32.10"
+version = "0.32.102"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a1a121ccf1177a09084bd6ce97c52119919aac08ea3649967958eae41beceebf"
+checksum = "bb0ce8bd5baaa0d303a19915a6d93afed161f528654e42da2a7a97d05c59499a"
 dependencies = [
  "base58ck",
  "base64 0.21.7",
  "bech32 0.11.1",
+ "bitcoin-consensus-encoding",
  "bitcoin-io",
  "bitcoin-units",
- "bitcoin_hashes",
- "hex-conservative",
+ "bitcoin_hashes 0.14.101",
+ "hex-conservative 0.2.2",
  "hex_lit",
  "secp256k1",
  "serde 1.0.228",
 ]
 
 [[package]]
-name = "bitcoin-io"
-version = "0.1.4"
+name = "bitcoin-consensus-encoding"
+version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2dee39a0ee5b4095224a0cfc6bf4cc1baf0f9624b96b367e53b66d974e51d953"
+checksum = "9daa31138eb443d5751b207f3f64154e2bb09cd59960562ccc7a7112be38147f"
+dependencies = [
+ "bitcoin-internals 0.7.0",
+ "hex-conservative 1.3.0",
+ "serde 1.0.228",
+]
+
+[[package]]
+name = "bitcoin-internals"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d573f4cf32996a8dce612e4348cece65a241f1882ed594047c9ba348e8869fa5"
+
+[[package]]
+name = "bitcoin-internals"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e8bea3a9f0cfece4564e37cb49a38cc245ca5184719e50d7d0dda3268722c4e2"
+
+[[package]]
+name = "bitcoin-io"
+version = "0.1.101"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bb5de036369d1ac59d3c1819ebc4d850f89466f5401c571a285b6ed564a4cb78"
+dependencies = [
+ "bitcoin-consensus-encoding",
+]
 
 [[package]]
 name = "bitcoin-private"
@@ -493,21 +521,34 @@ checksum = "73290177011694f38ec25e165d0387ab7ea749a4b81cd4c80dae5988229f7a57"
 
 [[package]]
 name = "bitcoin-units"
-version = "0.1.4"
+version = "0.1.101"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c202276cab20ab02cf6cc9d4df0d4284f7c784031619d3842236de8bc2bd5c6c"
+checksum = "9cb95693f371d089a4b5b6fc41c6f3ea6e01ee8c15388335dfac8ea685173b51"
 dependencies = [
+ "bitcoin-consensus-encoding",
  "serde 1.0.228",
 ]
 
 [[package]]
 name = "bitcoin_hashes"
-version = "0.14.2"
+version = "0.14.101"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4ed83caece3afc59919481b33b472e1432d1abc4641ed9100be142ef5110b406"
+checksum = "bca4c7abb40c8817d77403c880988cfd484f23ab2365726afb2f798363e2c4a2"
 dependencies = [
  "bitcoin-io",
- "hex-conservative",
+ "hex-conservative 0.2.2",
+ "serde 1.0.228",
+]
+
+[[package]]
+name = "bitcoin_hashes"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5304e53726dbe5f93141535e102ed97b5bf4714fbecefdda8f9fb98d7fdaff0e"
+dependencies = [
+ "bitcoin-consensus-encoding",
+ "bitcoin-internals 0.6.0",
+ "hex-conservative 1.3.0",
  "serde 1.0.228",
 ]
 
@@ -1280,37 +1321,29 @@ dependencies = [
 
 [[package]]
 name = "elements"
-version = "0.25.3"
+version = "0.27.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "83c63a04238f4b7f3564fe9705921452c2900efd00982545e5c634fac9024fe2"
+checksum = "34e00f7ddcd826d2f4c9bd72d79a6b6991a0ac4286e7e2b2ff8eecd130549073"
 dependencies = [
  "bech32 0.11.1",
  "bitcoin",
+ "bitcoin-consensus-encoding",
+ "bitcoin-internals 0.6.0",
+ "bitcoin_hashes 1.2.0",
+ "hex-conservative 1.3.0",
  "secp256k1-zkp",
  "serde 1.0.228",
  "serde_json",
 ]
 
 [[package]]
-name = "elements"
-version = "0.26.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1210978e2686f892318085f806866014d4788479a37f0a634db97fcb39454bde"
-dependencies = [
- "bech32 0.11.1",
- "bitcoin",
- "secp256k1-zkp",
- "serde_json",
-]
-
-[[package]]
 name = "elements-miniscript"
-version = "0.4.0"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "571fa105690f83c7833df2109eb2e14ca0e62d633d2624ffcb166ff18a3da870"
+checksum = "0c18e931c81e6e7e58d63b6fea1c57f5534717f0e6721741c4fce72a6c547e19"
 dependencies = [
  "bitcoin",
- "elements 0.25.3",
+ "elements",
  "miniscript",
  "serde 1.0.228",
 ]
@@ -1642,7 +1675,7 @@ dependencies = [
  "bip39",
  "bitcoin",
  "electrum-client",
- "elements 0.25.3",
+ "elements",
  "elements-miniscript",
  "libc",
  "log",
@@ -1901,6 +1934,15 @@ name = "hex-conservative"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fda06d18ac606267c40c04e41b9947729bf8b9efe74bd4e82b61a5f26a510b9f"
+dependencies = [
+ "arrayvec 0.7.7",
+]
+
+[[package]]
+name = "hex-conservative"
+version = "1.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "271e0d19bcb473b6675739a2b536076b24a082316cb5199ad918edce10c599e8"
 dependencies = [
  "arrayvec 0.7.7",
 ]
@@ -2612,12 +2654,12 @@ checksum = "112b39cec0b298b6c1999fee3e31427f74f676e4cb9879ed1a121b43661a4154"
 
 [[package]]
 name = "lwk_common"
-version = "0.19.0"
-source = "git+https://github.com/sideswap-io/lwk.git?rev=ffb54217a5bbe3cb0b5edc8ee74af1eef0d39de1#ffb54217a5bbe3cb0b5edc8ee74af1eef0d39de1"
+version = "0.20.0"
+source = "git+https://github.com/sideswap-io/lwk.git?rev=1cadf91a510f265fc1548a72486136864a9a4931#1cadf91a510f265fc1548a72486136864a9a4931"
 dependencies = [
  "aes-gcm-siv 0.11.1",
- "base64 0.21.7",
- "elements 0.25.3",
+ "base64 0.22.1",
+ "elements",
  "elements-miniscript",
  "getrandom 0.2.17",
  "qr_code",
@@ -2629,46 +2671,76 @@ dependencies = [
 ]
 
 [[package]]
-name = "lwk_signer"
-version = "0.19.0"
-source = "git+https://github.com/sideswap-io/lwk.git?rev=ffb54217a5bbe3cb0b5edc8ee74af1eef0d39de1#ffb54217a5bbe3cb0b5edc8ee74af1eef0d39de1"
+name = "lwk_prices"
+version = "0.20.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4744760e05eab22ef1dfbb099994bc05fcc008d5e3e08708c50364d84d832a69"
 dependencies = [
- "base64 0.21.7",
+ "futures",
+ "reqwest",
+ "serde 1.0.228",
+ "serde_json",
+ "thiserror 2.0.18",
+ "web-time",
+]
+
+[[package]]
+name = "lwk_registry"
+version = "0.20.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a376998ff2395753045a441f06450758050b0e6160cf1906553288689772b1b"
+dependencies = [
+ "elements",
+ "futures",
+ "idna",
+ "lwk_common",
+ "regex-lite",
+ "reqwest",
+ "serde 1.0.228",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+]
+
+[[package]]
+name = "lwk_signer"
+version = "0.20.0"
+source = "git+https://github.com/sideswap-io/lwk.git?rev=1cadf91a510f265fc1548a72486136864a9a4931#1cadf91a510f265fc1548a72486136864a9a4931"
+dependencies = [
  "bip39",
  "elements-miniscript",
  "lwk_common",
  "thiserror 2.0.18",
+ "zeroize",
 ]
 
 [[package]]
 name = "lwk_wollet"
-version = "0.19.0"
-source = "git+https://github.com/sideswap-io/lwk.git?rev=ffb54217a5bbe3cb0b5edc8ee74af1eef0d39de1#ffb54217a5bbe3cb0b5edc8ee74af1eef0d39de1"
+version = "0.20.0"
+source = "git+https://github.com/sideswap-io/lwk.git?rev=1cadf91a510f265fc1548a72486136864a9a4931#1cadf91a510f265fc1548a72486136864a9a4931"
 dependencies = [
  "aes 0.8.4",
  "aes-gcm",
  "aes-gcm-siv 0.11.1",
  "age",
- "base64 0.21.7",
+ "base64 0.22.1",
  "bip39",
  "bitcoincore-rpc",
  "cbc",
  "electrum-client",
- "elements 0.25.3",
- "elements 0.26.2",
+ "elements",
  "elements-miniscript",
  "flate2",
  "futures",
  "fxhash",
  "hmac",
- "idna",
  "js-sys",
  "log",
  "lwk_common",
- "once_cell",
+ "lwk_prices",
+ "lwk_registry",
  "pbkdf2",
  "rand 0.8.6",
- "regex-lite",
  "reqwest",
  "rmp-serde",
  "rmpv",
@@ -2682,7 +2754,6 @@ dependencies = [
  "tokio-tungstenite",
  "url",
  "wasm-bindgen-futures",
- "web-sys",
 ]
 
 [[package]]
@@ -3621,12 +3692,14 @@ dependencies = [
  "sync_wrapper",
  "tokio",
  "tokio-rustls",
+ "tokio-util",
  "tower",
  "tower-http",
  "tower-service",
  "url",
  "wasm-bindgen",
  "wasm-bindgen-futures",
+ "wasm-streams",
  "web-sys",
  "webpki-roots 1.0.8",
 ]
@@ -3902,7 +3975,7 @@ version = "0.29.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9465315bc9d4566e1724f0fffcbcc446268cb522e60f9a27bcded6b19c108113"
 dependencies = [
- "bitcoin_hashes",
+ "bitcoin_hashes 0.14.101",
  "rand 0.8.6",
  "secp256k1-sys",
  "serde 1.0.228",
@@ -4186,10 +4259,10 @@ dependencies = [
  "base64 0.21.7",
  "bip39",
  "bitcoin",
- "bitcoin_hashes",
+ "bitcoin_hashes 0.14.101",
  "bytes",
  "ciborium",
- "elements 0.25.3",
+ "elements",
  "elements-miniscript",
  "futures",
  "hex",
@@ -4216,7 +4289,7 @@ dependencies = [
 name = "sideswap_api"
 version = "0.1.2"
 dependencies = [
- "elements 0.25.3",
+ "elements",
  "hex",
  "rand 0.8.6",
  "serde 1.0.228",
@@ -4239,7 +4312,7 @@ dependencies = [
  "chrono",
  "ciborium",
  "derive_more 0.99.20",
- "elements 0.25.3",
+ "elements",
  "elements-miniscript",
  "flexi_logger",
  "gdk-common",
@@ -4284,7 +4357,7 @@ dependencies = [
  "blake3",
  "ciborium",
  "derive_more 0.99.20",
- "elements 0.25.3",
+ "elements",
  "flexi_logger",
  "futures",
  "gdk-pin-client",
@@ -4315,7 +4388,7 @@ version = "0.1.2"
 dependencies = [
  "anyhow",
  "base64 0.21.7",
- "elements 0.25.3",
+ "elements",
  "futures",
  "hex",
  "log",
@@ -4343,7 +4416,7 @@ dependencies = [
  "base64 0.21.7",
  "bip39",
  "config",
- "elements 0.25.3",
+ "elements",
  "log",
  "rustls",
  "serde 1.0.228",
@@ -4364,7 +4437,7 @@ dependencies = [
  "base64 0.21.7",
  "config",
  "crc32fast",
- "elements 0.25.3",
+ "elements",
  "futures",
  "hex",
  "log",
@@ -4415,7 +4488,7 @@ dependencies = [
  "base64 0.21.7",
  "bip39",
  "config",
- "elements 0.25.3",
+ "elements",
  "hex",
  "log",
  "lwk_common",
@@ -4439,7 +4512,7 @@ dependencies = [
  "base64 0.21.7",
  "ciborium",
  "ciborium-io",
- "elements 0.25.3",
+ "elements",
  "hex",
  "log",
  "serde 1.0.228",
@@ -4459,7 +4532,7 @@ dependencies = [
  "anyhow",
  "base64 0.21.7",
  "bip39",
- "elements 0.25.3",
+ "elements",
  "hex",
  "log",
  "lwk_common",
@@ -4481,7 +4554,7 @@ dependencies = [
  "anyhow",
  "bip39",
  "config",
- "elements 0.25.3",
+ "elements",
  "futures",
  "log",
  "log4rs",
@@ -4522,7 +4595,7 @@ version = "0.1.2"
 dependencies = [
  "anyhow",
  "base64 0.21.7",
- "elements 0.25.3",
+ "elements",
  "rand 0.8.6",
  "serde 1.0.228",
  "sideswap_common",
@@ -4537,7 +4610,7 @@ dependencies = [
  "anyhow",
  "base64 0.21.7",
  "bip39",
- "elements 0.25.3",
+ "elements",
  "hex",
  "log",
  "serde 1.0.228",
@@ -4554,7 +4627,7 @@ name = "sideswap_types"
 version = "0.1.2"
 dependencies = [
  "base64 0.21.7",
- "elements 0.25.3",
+ "elements",
  "hex",
  "hex-literal",
  "rand 0.8.6",
@@ -4865,7 +4938,7 @@ checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 name = "stableapp_api"
 version = "0.1.0"
 dependencies = [
- "elements 0.25.3",
+ "elements",
  "serde 1.0.228",
  "sideswap_api",
  "thiserror 1.0.69",
@@ -5900,6 +5973,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "23939e44bb9a5d7576fa2b563dc2e136628f1224e88a8deed09e04858b77871f"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "wasm-streams"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "15053d8d85c7eccdbefef60f06769760a563c7f0a9d6902a13d35c7800b0ad65"
+dependencies = [
+ "futures-util",
+ "js-sys",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]

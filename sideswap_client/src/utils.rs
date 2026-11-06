@@ -4,7 +4,7 @@ use crate::worker::TX_CONF_COUNT_LIQUID;
 use anyhow::{bail, ensure};
 use bitcoin::bip32::{ChildNumber, Xpub};
 use elements::{AssetId, EcdsaSighashType};
-use elements::{hashes::Hash, pset::PartiallySignedTransaction, secp256k1_zkp::global::SECP256K1};
+use elements::{pset::PartiallySignedTransaction, secp256k1_zkp::global::SECP256K1};
 use elements_miniscript::slip77::MasterBlindingKey;
 use secp256k1::SecretKey;
 use sideswap_api::{Asset, Hash32};
@@ -86,7 +86,7 @@ fn convert_value(value: &serde_json::Value) -> ciborium::Value {
 pub fn encode_jade_tx(mut tx: elements::Transaction) -> serde_bytes::ByteBuf {
     // Remove unnecessary data to ensure that the request fits into DIY Jade
     for output in tx.output.iter_mut() {
-        output.witness.rangeproof = None;
+        output.witness.rangeproof = elements::RangeProof::EMPTY;
     }
     serde_bytes::ByteBuf::from(elements::encode::serialize(&tx))
 }
@@ -135,7 +135,9 @@ pub fn get_redeem_script(utxo: &models::Utxo) -> Option<elements::Script> {
         WalletType::AMP => Some(
             elements::script::Builder::new()
                 .push_int(0)
-                .push_slice(&elements::WScriptHash::hash(utxo.prevout_script.as_bytes())[..])
+                .push_slice(
+                    elements::WScriptHash::hash_script(&utxo.prevout_script).as_byte_array(),
+                )
                 .into_script(),
         ),
     }
@@ -160,8 +162,7 @@ pub fn get_witness(
     let value = utxo.value_commitment;
     let sighash =
         sighash_cache.segwitv0_sighash(input_index, &utxo.prevout_script, value, sighash_type);
-    let message =
-        elements::secp256k1_zkp::Message::from_digest_slice(&sighash[..]).expect("must not fail");
+    let message = elements::secp256k1_zkp::Message::from_digest(sighash.to_byte_array());
 
     let signature = SECP256K1.sign_ecdsa_grind_r(&message, priv_key, bytes_to_grind);
     let signature = elements_miniscript::elementssig_to_rawsig(&(signature, sighash_type));
@@ -282,14 +283,14 @@ pub fn get_tx_size(
         if let Some(utxo) = utxo {
             input.script_sig = get_script_sig(utxo).unwrap_or_default();
 
-            input.witness.script_witness = get_witness(
+            input.witness.script_witness = elements::Witness::from_slice(&get_witness(
                 &mut sighash_cache,
                 utxo,
                 input_index,
                 elements::EcdsaSighashType::All,
                 &secret_key,
                 bytes_to_grind,
-            );
+            ));
         }
     }
 
@@ -415,10 +416,10 @@ pub fn derive_amp_address(
 
     let script_to_hash = elements::script::Builder::new()
         .push_int(0)
-        .push_slice(&elements::WScriptHash::hash(prevout_script.as_bytes())[..])
+        .push_slice(elements::WScriptHash::hash_script(&prevout_script).as_byte_array())
         .into_script();
 
-    let script_hash = elements::ScriptHash::hash(script_to_hash.as_bytes());
+    let script_hash = elements::ScriptHash::hash_script(&script_to_hash);
 
     let payload = elements::address::Payload::ScriptHash(script_hash);
 

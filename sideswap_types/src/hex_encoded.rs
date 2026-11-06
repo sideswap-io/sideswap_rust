@@ -1,5 +1,3 @@
-use elements::hex::FromHex;
-
 #[derive(Debug, Copy, Clone)]
 pub struct HexEncoded<T>(pub T);
 
@@ -34,7 +32,7 @@ impl<T: elements::encode::Encodable> serde::Serialize for HexEncoded<T> {
 impl<'de, T: elements::encode::Decodable> serde::Deserialize<'de> for HexEncoded<T> {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let hex = String::deserialize(deserializer)?;
-        let vec = Vec::<u8>::from_hex(&hex).map_err(serde::de::Error::custom)?;
+        let vec = elements::hex::decode_to_vec(&hex).map_err(serde::de::Error::custom)?;
         let value = elements::encode::deserialize(&vec).map_err(serde::de::Error::custom)?;
         Ok(HexEncoded(value))
     }

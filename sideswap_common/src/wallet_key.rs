@@ -1,6 +1,9 @@
 use elements::{
-    bitcoin::{self, secp256k1::Message},
-    hashes::{Hash, HashEngine},
+    bitcoin::{
+        self,
+        hashes::{Hash, HashEngine},
+        secp256k1::Message,
+    },
     schnorr::{Keypair, XOnlyPublicKey},
     secp256k1_zkp::{self, SECP256K1},
 };

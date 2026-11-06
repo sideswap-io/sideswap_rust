@@ -421,18 +421,19 @@ impl Wallet {
             script_variant,
         } = params;
 
-        let is_mainnet = match network {
-            Network::Liquid => true,
-            Network::LiquidTestnet | Network::Regtest => false,
-        };
-
         let seed = mnemonic.to_seed("");
         let bitcoin_network = network.d().bitcoin_network;
         let master_key = bip32::Xpriv::new_master(bitcoin_network, &seed).unwrap();
         let master_blinding_key = MasterBlindingKey::from_seed(&seed);
 
-        let signer =
-            lwk_signer::SwSigner::new(&mnemonic.to_string(), is_mainnet).expect("must not fail");
+        let lwk_network = match network {
+            Network::Liquid => lwk_common::Network::Liquid,
+            Network::LiquidTestnet => lwk_common::Network::TestnetLiquid,
+            Network::Regtest => todo!(),
+        };
+
+        let signer = lwk_signer::SwSigner::new_with_network(&mnemonic.to_string(), lwk_network)
+            .expect("must not fail");
 
         let descriptor = singlesig_desc(
             &signer,
@@ -444,12 +445,6 @@ impl Wallet {
         let descriptor = descriptor
             .parse::<WolletDescriptor>()
             .expect("must not fail");
-
-        let lwk_network = match network {
-            Network::Liquid => lwk_common::Network::Liquid,
-            Network::LiquidTestnet => lwk_common::Network::TestnetLiquid,
-            Network::Regtest => todo!(),
-        };
 
         let wallet = lwk_wollet::WolletBuilder::new(lwk_network, descriptor.clone())
             .build()

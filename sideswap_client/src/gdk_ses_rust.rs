@@ -143,6 +143,19 @@ impl AccountData {
     }
 }
 
+pub fn lwk_network(env: Env) -> lwk_wollet::Network {
+    match env.d().network {
+        Network::Liquid => lwk_wollet::Network::Liquid,
+        Network::LiquidTestnet => lwk_wollet::Network::TestnetLiquid,
+        Network::Regtest => lwk_wollet::Network::CustomElements(
+            lwk_common::ElementsParamsBuilder::new()
+                .with_policy_asset(env.nd().policy_asset)
+                .build()
+                .expect("must not fail"),
+        ),
+    }
+}
+
 impl GdkSesRust {
     pub fn start_fast_sync(&self) {
         let _ = self
@@ -733,16 +746,7 @@ pub fn start_processing(
         ),
     };
 
-    let lwk_network = match login_info.env.d().network {
-        Network::Liquid => lwk_wollet::Network::Liquid,
-        Network::LiquidTestnet => lwk_wollet::Network::TestnetLiquid,
-        Network::Regtest => lwk_wollet::Network::CustomElements(
-            lwk_common::ElementsParamsBuilder::new()
-                .with_policy_asset(login_info.env.nd().policy_asset)
-                .build()
-                .expect("must not fail"),
-        ),
-    };
+    let lwk_network = lwk_network(login_info.env);
 
     let accounts = [
         (xpub_native, Singlesig::Wpkh),

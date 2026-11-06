@@ -58,10 +58,10 @@ pub struct Utxo {
     pub commitment: elements::confidential::Value,
     #[serde(deserialize_with = "helpers::deserialize_nonce")]
     pub nonce_commitment: elements::confidential::Nonce,
-    #[serde(deserialize_with = "helpers::deserialize_with_optional_empty_string")]
-    pub surj_proof: Option<Box<secp256k1_zkp::SurjectionProof>>,
-    #[serde(deserialize_with = "helpers::deserialize_with_optional_empty_string")]
-    pub range_proof: Option<Box<secp256k1_zkp::RangeProof>>,
+    #[serde(deserialize_with = "helpers::deserialize_surjection_proof")]
+    pub surj_proof: elements::SurjectionProof,
+    #[serde(deserialize_with = "helpers::deserialize_range_proof")]
+    pub range_proof: elements::RangeProof,
 }
 
 #[derive(Deserialize, Debug)]
@@ -96,12 +96,12 @@ pub struct TransactionEp {
     #[serde(default)]
     #[serde(deserialize_with = "helpers::deserialize_nonce")]
     pub nonce_commitment: elements::confidential::Nonce,
-    #[serde(default)]
-    #[serde(deserialize_with = "helpers::deserialize_with_optional_empty_string")]
-    pub surj_proof: Option<Box<secp256k1_zkp::SurjectionProof>>,
-    #[serde(default)]
-    #[serde(deserialize_with = "helpers::deserialize_with_optional_empty_string")]
-    pub range_proof: Option<Box<secp256k1_zkp::RangeProof>>,
+    #[serde(default = "helpers::empty_surjection_proof")]
+    #[serde(deserialize_with = "helpers::deserialize_surjection_proof")]
+    pub surj_proof: elements::SurjectionProof,
+    #[serde(default = "helpers::empty_range_proof")]
+    #[serde(deserialize_with = "helpers::deserialize_range_proof")]
+    pub range_proof: elements::RangeProof,
 }
 
 #[derive(Deserialize, Debug)]

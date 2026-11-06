@@ -11,7 +11,7 @@ impl BEBlockHash {
     pub fn into_bitcoin(&self) -> bitcoin::BlockHash {
         match self {
             Self::Bitcoin(h) => *h,
-            Self::Elements(h) => bitcoin::BlockHash::from_raw_hash(h.to_raw_hash()),
+            Self::Elements(h) => bitcoin::BlockHash::from_byte_array(h.to_byte_array()),
         }
     }
 }

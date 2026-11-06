@@ -430,10 +430,10 @@ fn signed_input(wallet: WalletType) -> elements::TxIn {
         sequence: elements::Sequence::MAX,
         asset_issuance: elements::AssetIssuance::default(),
         witness: elements::TxInWitness {
-            amount_rangeproof: None,
-            inflation_keys_rangeproof: None,
-            script_witness,
-            pegin_witness: Vec::new(),
+            amount_rangeproof: elements::RangeProof::EMPTY,
+            inflation_keys_rangeproof: elements::RangeProof::EMPTY,
+            script_witness: elements::Witness::from_slice(&script_witness),
+            pegin_witness: elements::PeginWitness::EMPTY,
         },
     }
 }

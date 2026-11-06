@@ -6,10 +6,7 @@ use std::{
     vec,
 };
 
-use bitcoin::{
-    bip32::{ChildNumber, Xpub},
-    hashes::Hash,
-};
+use bitcoin::bip32::{ChildNumber, Xpub};
 use elements::{
     Address, AssetId, TxOutSecrets, Txid,
     confidential::{AssetBlindingFactor, ValueBlindingFactor},
@@ -826,7 +823,7 @@ impl UtxoExt for Utxo {
 fn redeem_script(prevout_script: &elements::Script) -> elements::Script {
     elements::script::Builder::new()
         .push_int(0)
-        .push_slice(&elements::WScriptHash::hash(prevout_script.as_bytes())[..])
+        .push_slice(elements::WScriptHash::hash_script(prevout_script).as_byte_array())
         .into_script()
 }
 
@@ -977,10 +974,10 @@ fn get_address(
 ) -> elements::Address {
     let script = elements::script::Builder::new()
         .push_int(0)
-        .push_slice(&elements::WScriptHash::hash(prevout_script.as_bytes())[..])
+        .push_slice(elements::WScriptHash::hash_script(prevout_script).as_byte_array())
         .into_script();
 
-    let script_hash = elements::ScriptHash::hash(script.as_bytes());
+    let script_hash = elements::ScriptHash::hash_script(&script);
 
     let unconfidential_address = Address {
         params: network.d().elements_params,
