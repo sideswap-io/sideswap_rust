@@ -107,7 +107,24 @@ impl EventProofs {
         signature: &str,
     ) -> Result<(), anyhow::Error> {
         let last_hash = self.verify_client_signature(&event, signature)?;
+        self.apply_client_event(event, last_hash)
+    }
 
+    /// Same as `add_client_event`, but without the (slow) signature verification.
+    /// Use only for events whose signatures were already verified (for example, when replaying stored events).
+    pub fn add_client_event_trusted(
+        &mut self,
+        event: mkt::ClientEvent,
+    ) -> Result<(), anyhow::Error> {
+        let last_hash = append_event(&self.last_hash, EventHash::Client { event: &event });
+        self.apply_client_event(event, last_hash)
+    }
+
+    fn apply_client_event(
+        &mut self,
+        event: mkt::ClientEvent,
+        last_hash: HashArray,
+    ) -> Result<(), anyhow::Error> {
         match &event {
             ClientEvent::AddOrder {
                 asset_pair,
@@ -247,6 +264,21 @@ impl EventProofs {
             mkt::EventWithSignature::Client { event, signature } => {
                 self.add_client_event(event, &signature)
             }
+            mkt::EventWithSignature::Server { event } => self.add_server_event(event),
+        }
+    }
+
+    /// Same as `add_event`, but client signatures are not verified.
+    /// Use only for events whose signatures were already verified (for example, when replaying stored events).
+    pub fn add_event_trusted(
+        &mut self,
+        event: mkt::EventWithSignature,
+    ) -> Result<(), anyhow::Error> {
+        match event {
+            mkt::EventWithSignature::Client {
+                event,
+                signature: _,
+            } => self.add_client_event_trusted(event),
             mkt::EventWithSignature::Server { event } => self.add_server_event(event),
         }
     }
