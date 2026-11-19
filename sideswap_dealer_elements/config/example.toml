@@ -42,3 +42,17 @@ password = "<YOUR_RPC_PASSWORD>"
 # If the dealer is online, the order will be recreated.
 # This should help in situations where the dealer has been offline for a long time.
 #ttl_seconds = 3600
+
+# Orders for the members of a private order book (needs dealer_api_key of the dealer that owns the book).
+# They use the price source of the market above with their own interest and amounts,
+# and are served only to the members of the book with this tier or a higher one.
+#[[price_stream.private]]
+#book = "<BOOK_NAME>"
+#interest = 1.005
+#bid_amount = 1.0
+#ask_amount = 1.0
+#
+#[[price_stream.private]]
+#book = "<BOOK_NAME>"
+#tier = 1
+#interest = 1.002

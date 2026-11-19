@@ -690,6 +690,8 @@ fn submit_market_prices(data: &mut Data) {
             base_amount: btc_to_sat(base_amount_buy),
             price: NormalFloat::new(submit_price.bid).expect("must be valid"),
             ttl: Duration::from_secs(3600).into(),
+            book: None,
+            tier: None,
         });
 
         orders.push(market::AutomaticOrder {
@@ -698,6 +700,8 @@ fn submit_market_prices(data: &mut Data) {
             base_amount: btc_to_sat(base_amount_sell),
             price: NormalFloat::new(submit_price.ask).expect("must be valid"),
             ttl: Duration::from_secs(3600).into(),
+            book: None,
+            tier: None,
         });
     }
 

@@ -80,6 +80,10 @@ pub struct AutomaticOrder {
     pub base_amount: u64,
     pub price: NormalFloat,
     pub ttl: DurationMs,
+    /// Name of the private order book of the order (a public order if not set)
+    pub book: Option<String>,
+    /// The lowest tier of the private order book members the order is served to
+    pub tier: Option<u8>,
 }
 
 pub enum Command {
@@ -516,7 +520,25 @@ struct PublicSubscribe {
     ind_price: Option<NormalFloat>,
 }
 
-type OrderGroupKey = (AssetPair, TradeDir);
+/// A private order book and the lowest tier of its members an order is served to
+type BookTier = (String, u8);
+
+/// The automatic orders are synced with the server orders in groups:
+/// the market, the side and the order book (`None` for the public order book)
+type OrderGroupKey = (AssetPair, TradeDir, Option<BookTier>);
+
+fn order_group_key(
+    asset_pair: AssetPair,
+    trade_dir: TradeDir,
+    book: &Option<String>,
+    tier: Option<u8>,
+) -> OrderGroupKey {
+    // The server reports tier 0 for an order that was added without a tier
+    let book = book
+        .as_ref()
+        .map(|book| (book.clone(), tier.unwrap_or_default()));
+    (asset_pair, trade_dir, book)
+}
 
 struct StartedQuote {
     client_id: ClientId,
@@ -796,7 +818,12 @@ async fn process_ws_connected(data: &mut Data) {
 
     for order in orders {
         data.orders
-            .entry((order.asset_pair, order.trade_dir))
+            .entry(order_group_key(
+                order.asset_pair,
+                order.trade_dir,
+                &order.book,
+                order.tier,
+            ))
             .or_default()
             .server_orders
             .insert(order.order_id, order);
@@ -1102,7 +1129,12 @@ fn process_market_notif(data: &mut Data, notif: Notification) {
                 convert_own_order(&notif.order, &data.ticker_loader).expect("must not fail");
 
             data.orders
-                .entry((notif.order.asset_pair, notif.order.trade_dir))
+                .entry(order_group_key(
+                    notif.order.asset_pair,
+                    notif.order.trade_dir,
+                    &notif.order.book,
+                    notif.order.tier,
+                ))
                 .or_default()
                 .server_orders
                 .insert(notif.order.order_id, notif.order);
@@ -1780,6 +1812,8 @@ async fn process_client_command(data: &mut Data, command: ClientCommand) {
                     private: false,
                     client_order_id,
                     signature: None,
+                    book: None,
+                    tier: None,
                 })),
                 Box::new(move |res| {
                     let res = match res {
@@ -1922,7 +1956,12 @@ fn process_command(data: &mut Data, command: Command) {
 
             for order in orders {
                 data.orders
-                    .entry((order.asset_pair, order.trade_dir))
+                    .entry(order_group_key(
+                        order.asset_pair,
+                        order.trade_dir,
+                        &order.book,
+                        order.tier,
+                    ))
                     .or_default()
                     .dealer_orders
                     .push(order);
@@ -2178,8 +2217,34 @@ async fn try_sync_market(data: &mut Data, key: &OrderGroupKey) -> Result<(), any
                 private: false,
                 client_order_id: None,
                 signature: None,
+                book: dealer_order.book.clone(),
+                tier: dealer_order.tier,
             }
         )?;
+
+        // A server that does not know private order books ignores `book` and adds a public order.
+        // Do not leave an order with the private price in the public order book.
+        let expected_key = order_group_key(
+            dealer_order.asset_pair,
+            dealer_order.trade_dir,
+            &dealer_order.book,
+            dealer_order.tier,
+        );
+        let actual_key = order_group_key(
+            resp.order.asset_pair,
+            resp.order.trade_dir,
+            &resp.order.book,
+            resp.order.tier,
+        );
+        if actual_key != expected_key {
+            let order_id = resp.order.order_id;
+            make_market_request!(data.ws, CancelOrder, mkt::CancelOrderRequest { order_id })?;
+            return Err(anyhow!(
+                "the server has added the order {order_id} to a wrong order book, expected: {:?}, got: {:?}, the order is cancelled",
+                expected_key.2,
+                actual_key.2,
+            ));
+        }
 
         market.server_orders.insert(resp.order.order_id, resp.order);
     }
@@ -2197,7 +2262,7 @@ async fn process_timer(data: &mut Data) {
         match data.mode {
             Mode::PriceStream => {
                 // Sync orders
-                let keys = data.orders.keys().copied().collect::<Vec<_>>();
+                let keys = data.orders.keys().cloned().collect::<Vec<_>>();
                 for key in keys.iter() {
                     let res = try_sync_market(data, key).await;
                     if let Err(err) = res {
@@ -2330,4 +2395,40 @@ pub fn start(params: Params) -> (UnboundedSender<Command>, UnboundedReceiver<Eve
     }
 
     (command_sender, event_receiver)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn order_groups() {
+        let network = sideswap_types::network::Network::Liquid;
+        let asset_pair = AssetPair {
+            base: network.d().policy_asset,
+            quote: network.d().known_assets.USDt,
+        };
+        let key = |book: Option<&str>, tier: Option<u8>| {
+            order_group_key(asset_pair, TradeDir::Sell, &book.map(str::to_owned), tier)
+        };
+
+        // A public order
+        assert_eq!(key(None, None), (asset_pair, TradeDir::Sell, None));
+
+        // The server reports tier 0 for an order added without a tier: the same group
+        assert_eq!(key(Some("example"), None), key(Some("example"), Some(0)));
+
+        // Orders of different order books and tiers are synced separately
+        let keys = [
+            key(None, None),
+            key(Some("example"), None),
+            key(Some("example"), Some(1)),
+            key(Some("other"), None),
+        ];
+        for (index, first) in keys.iter().enumerate() {
+            for second in keys.iter().skip(index + 1) {
+                assert_ne!(first, second);
+            }
+        }
+    }
 }

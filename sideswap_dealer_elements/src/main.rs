@@ -163,6 +163,16 @@ async fn main() {
 
     sideswap_dealer::logs::init(&settings.work_dir);
 
+    // Only the dealer that owns a private order book can add orders to it
+    let has_private_orders = settings
+        .price_stream
+        .iter()
+        .any(|market| !market.private.is_empty());
+    assert!(
+        !has_private_orders || settings.dealer_api_key.is_some(),
+        "dealer_api_key must be set to add orders to private order books"
+    );
+
     sideswap_common::panic_handler::install_panic_handler();
 
     let server_url = settings.env.base_server_ws_url();
@@ -255,5 +265,73 @@ async fn main() {
                 break;
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn private_order_books_config() {
+        let text = r#"
+            env = "Testnet"
+            work_dir = "/tmp/sideswap/dealer"
+            bitcoin_amount_submit = 1.0
+            bitcoin_amount_max = 1.5
+            bitcoin_amount_min = 0.5
+            dealer_api_key = "key"
+
+            [rpc]
+            host = "localhost"
+            port = 7041
+            login = "dealer"
+            password = "password"
+
+            [[price_stream]]
+            base = "L-BTC"
+            quote = "USDt"
+            interest = 1.01
+            source = "Binance"
+            ttl_seconds = 3600
+
+            [[price_stream.private]]
+            book = "example"
+            interest = 1.005
+            bid_amount = 1.0
+            ask_amount = 0.0
+
+            [[price_stream.private]]
+            book = "example"
+            tier = 1
+            interest_bid = 1.002
+            interest_ask = 1.003
+
+            [[price_stream]]
+            base = "L-BTC"
+            quote = "EURx"
+            interest = 1.01
+            source = "Bitfinex"
+            ttl_seconds = 3600
+        "#;
+
+        let mut conf = config::Config::new();
+        conf.merge(config::File::from_str(text, config::FileFormat::Toml))
+            .unwrap();
+        let settings: Settings = conf.try_into().unwrap();
+
+        assert_eq!(settings.price_stream.len(), 2);
+
+        let private = &settings.price_stream[0].private;
+        assert_eq!(private.len(), 2);
+        assert_eq!(private[0].book, "example");
+        assert_eq!(private[0].tier, None);
+        assert_eq!(private[0].interests(), (1.005, 1.005));
+        assert_eq!(private[0].bid_amount, Some(1.0));
+        assert_eq!(private[0].ask_amount, Some(0.0));
+        assert_eq!(private[1].tier, Some(1));
+        assert_eq!(private[1].interests(), (1.002, 1.003));
+
+        assert!(settings.price_stream[1].private.is_empty());
     }
 }

@@ -1714,6 +1714,8 @@ fn try_online_order_submit(
             private,
             client_order_id,
             signature,
+            book: None,
+            tier: None,
         },
         SERVER_REQUEST_TIMEOUT_LONG
     )?;

@@ -192,6 +192,12 @@ pub struct OwnOrder {
     pub change_address: Option<Address>,
     /// Set iff the order is offline
     pub offline_utxos: Option<Vec<elements::OutPoint>>,
+    /// Name of the private order book the order is in (the public order book if not set)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub book: Option<String>,
+    /// The lowest tier of the private order book members the order is served to
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tier: Option<u8>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -460,6 +466,15 @@ pub struct AddOrderRequest {
     pub private: bool,
     pub client_order_id: Option<Box<String>>,
     pub signature: Option<String>,
+    /// Name of a private order book: the order is served only to the members of the book.
+    /// Only the dealer that owns the book can set it (`login_dealer` on the same connection).
+    /// The order is public if not set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub book: Option<String>,
+    /// The lowest tier of the members the order is served to (all members if not set).
+    /// Can be set only together with `book`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tier: Option<u8>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

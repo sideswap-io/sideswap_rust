@@ -8,8 +8,9 @@ use sideswap_common::{
     dealer_ticker::{DealerTicker, TickerLoader},
     exchange_pair::ExchangePair,
     price_stream,
+    types::MAX_BTC_AMOUNT,
 };
-use sideswap_types::{env::Env, normal_float::NormalFloat};
+use sideswap_types::{asset_precision::asset_int_amount_, env::Env, normal_float::NormalFloat};
 use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 
 use crate::{
@@ -26,8 +27,18 @@ enum Msg {
 
 pub struct Data {
     markets: price_stream::Markets,
+    /// Prices of the price sources
+    base_prices: BTreeMap<ExchangePair, PricePair>,
+    /// Prices of the public orders
     submit_prices: BTreeMap<ExchangePair, PricePair>,
     msg_receiver: UnboundedReceiver<Msg>,
+}
+
+fn apply_interests(base_price: &PricePair, interest_bid: f64, interest_ask: f64) -> PricePair {
+    PricePair {
+        bid: apply_interest_bid(base_price.bid, interest_bid),
+        ask: apply_interest_ask(base_price.ask, interest_ask),
+    }
 }
 
 impl Data {
@@ -37,6 +48,11 @@ impl Data {
         let (msg_sender, msg_receiver) = unbounded_channel::<Msg>();
 
         for market in markets.iter() {
+            // Fail at start, not when the first price arrives
+            for private in market.private.iter() {
+                let (_interest_bid, _interest_ask) = private.interests();
+            }
+
             let exchange_pair = market.exchange_pair();
             let msg_sender_copy = msg_sender.clone();
             let callback = Box::new(move |base_price| {
@@ -54,6 +70,7 @@ impl Data {
 
         Data {
             markets,
+            base_prices: BTreeMap::new(),
             submit_prices: BTreeMap::new(),
             msg_receiver,
         }
@@ -103,6 +120,8 @@ impl Data {
                             base_amount: bid_amount,
                             price: NormalFloat::new(submit_price.bid).expect("must be valid"),
                             ttl: market.ttl_seconds.duration().into(),
+                            book: None,
+                            tier: None,
                         });
                     }
                 }
@@ -116,7 +135,43 @@ impl Data {
                             base_amount: ask_amount,
                             price: NormalFloat::new(submit_price.ask).expect("must be valid"),
                             ttl: market.ttl_seconds.duration().into(),
+                            book: None,
+                            tier: None,
                         });
+                    }
+                }
+            }
+
+            // Orders for the members of the private order books:
+            // the same price source with the interest and the amounts of the book and tier
+            if let Some(base_price) = self.base_prices.get(&exchange_pair) {
+                let asset_pair = AssetPair {
+                    base: *ticker_loader.asset_id(market.base),
+                    quote: *ticker_loader.asset_id(market.quote),
+                };
+                let base_precision = ticker_loader.precision(market.base);
+
+                for private in market.private.iter() {
+                    let (interest_bid, interest_ask) = private.interests();
+                    let price = apply_interests(base_price, interest_bid, interest_ask);
+
+                    for (trade_dir, amount, price) in [
+                        (TradeDir::Buy, private.bid_amount, price.bid),
+                        (TradeDir::Sell, private.ask_amount, price.ask),
+                    ] {
+                        let base_amount =
+                            asset_int_amount_(amount.unwrap_or(MAX_BTC_AMOUNT), base_precision);
+                        if base_amount > 0 {
+                            orders.push(market::AutomaticOrder {
+                                asset_pair,
+                                trade_dir,
+                                base_amount,
+                                price: NormalFloat::new(price).expect("must be valid"),
+                                ttl: market.ttl_seconds.duration().into(),
+                                book: Some(private.book.clone()),
+                                tier: private.tier,
+                            });
+                        }
                     }
                 }
             }
@@ -153,14 +208,13 @@ impl Data {
 
                         self.submit_prices.insert(
                             exchange_pair,
-                            PricePair {
-                                bid: apply_interest_bid(base_price.bid, interest_bid),
-                                ask: apply_interest_ask(base_price.ask, interest_ask),
-                            },
+                            apply_interests(&base_price, interest_bid, interest_ask),
                         );
+                        self.base_prices.insert(exchange_pair, base_price);
                     }
                     None => {
                         self.submit_prices.remove(&exchange_pair);
+                        self.base_prices.remove(&exchange_pair);
                     }
                 }
             }

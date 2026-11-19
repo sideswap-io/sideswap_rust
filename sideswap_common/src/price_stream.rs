@@ -46,6 +46,42 @@ pub struct Market {
     pub interest_bid: Option<f64>,
     pub bid_amount: Option<f64>,
     pub ask_amount: Option<f64>,
+
+    /// Orders for the members of private order books.
+    /// They use the price source of the market with their own interest and amounts.
+    #[serde(default)]
+    pub private: Vec<PrivateOrders>,
+}
+
+/// Orders that are served only to the members of a private order book
+#[derive(Debug, Clone, Deserialize)]
+pub struct PrivateOrders {
+    /// Name of the private order book
+    pub book: String,
+    /// The lowest tier of the members the orders are served to (all members if not set)
+    pub tier: Option<u8>,
+
+    pub interest: Option<f64>,
+    pub interest_ask: Option<f64>,
+    pub interest_bid: Option<f64>,
+    /// Unlimited if not set, 0 for no orders on this side
+    pub bid_amount: Option<f64>,
+    pub ask_amount: Option<f64>,
+}
+
+impl PrivateOrders {
+    /// The bid and ask interests
+    pub fn interests(&self) -> (f64, f64) {
+        let interest_bid = self
+            .interest_bid
+            .or(self.interest)
+            .expect("interest_bid value of a private order book is empty");
+        let interest_ask = self
+            .interest_ask
+            .or(self.interest)
+            .expect("interest_ask value of a private order book is empty");
+        (interest_bid, interest_ask)
+    }
 }
 
 impl Market {
@@ -153,4 +189,46 @@ async fn run(
 
 pub fn start(env: Env, market: Market, ticker_loader: Arc<TickerLoader>, callback: PriceCallback) {
     tokio::spawn(run(env, market, ticker_loader, callback));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn private_orders_config() {
+        // Without private order books
+        let market: Market = serde_json::from_value(serde_json::json!({
+            "source": "Binance",
+            "base": "L-BTC",
+            "quote": "USDt",
+            "ttl_seconds": 3600,
+            "interest": 1.01,
+        }))
+        .unwrap();
+        assert!(market.private.is_empty());
+
+        let market: Market = serde_json::from_value(serde_json::json!({
+            "source": "Binance",
+            "base": "L-BTC",
+            "quote": "USDt",
+            "ttl_seconds": 3600,
+            "interest": 1.01,
+            "private": [
+                { "book": "example", "interest": 1.005, "bid_amount": 0.5 },
+                { "book": "example", "tier": 1, "interest_bid": 1.002, "interest_ask": 1.003 },
+            ],
+        }))
+        .unwrap();
+        assert_eq!(market.private.len(), 2);
+
+        assert_eq!(market.private[0].book, "example");
+        assert_eq!(market.private[0].tier, None);
+        assert_eq!(market.private[0].interests(), (1.005, 1.005));
+        assert_eq!(market.private[0].bid_amount, Some(0.5));
+        assert_eq!(market.private[0].ask_amount, None);
+
+        assert_eq!(market.private[1].tier, Some(1));
+        assert_eq!(market.private[1].interests(), (1.002, 1.003));
+    }
 }
