@@ -994,8 +994,10 @@ async fn process_bf_event(data: &mut Data, event: bfx_ws_api::Event) {
             balance,
         } => {
             if wallet_type == bfx_ws_api::WalletType::Exchange {
-                info!("exchange balance updated: {}: {}", &currency, balance);
-                data.all_exchange_balances.insert(currency.clone(), balance);
+                let old_balance = data.all_exchange_balances.insert(currency.clone(), balance);
+                if old_balance != Some(balance) {
+                    info!("exchange balance updated: {}: {}", &currency, balance);
+                }
 
                 let exchange_ticker = ExchangeTicker::find_bfx_name(data.network, &currency);
 

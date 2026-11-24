@@ -24,28 +24,45 @@ pattern = "logs/sideswap_dealer.{}.txt.gz"
 base = 0
 count = 10
 
+# Third-party crates log from info, own crates from debug.
+# (With a debug root every new dependency writes its debug output: h2 frames were 95% of the log.)
 [root]
-level = "debug"
+level = "info"
 appenders = ["file"]
 #appenders = ["file", "stdout"]
 
-[loggers.hyper]
-level = "info"
+[loggers.sideswap_amp]
+level = "debug"
 
-[loggers.reqwest]
-level = "info"
+[loggers.sideswap_api]
+level = "debug"
 
-[loggers.ureq]
-level = "info"
+[loggers.sideswap_common]
+level = "debug"
 
-[loggers.hyper_util]
-level = "info"
+[loggers.sideswap_dealer]
+level = "debug"
 
-[loggers.rustls]
-level = "info"
+[loggers.sideswap_dealer_amp]
+level = "debug"
 
-[loggers.tungstenite]
-level = "info"
+[loggers.sideswap_dealer_bitfinex]
+level = "debug"
 
-[loggers.lwk_wollet]
-level = "info"
+[loggers.sideswap_dealer_elements]
+level = "debug"
+
+[loggers.sideswap_dealer_lwk]
+level = "debug"
+
+[loggers.sideswap_lwk]
+level = "debug"
+
+[loggers.sideswap_manager]
+level = "debug"
+
+[loggers.sideswap_payjoin]
+level = "debug"
+
+[loggers.sideswap_types]
+level = "debug"

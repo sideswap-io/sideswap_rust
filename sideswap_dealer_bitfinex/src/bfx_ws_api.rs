@@ -451,12 +451,16 @@ fn get_events_from_array(
         state.last_hb = Instant::now();
         Ok(Vec::new())
     } else {
-        log::debug!("bf message received: {orig_msg}");
         let msg_type = list
             .get(1)
             .ok_or_else(|| anyhow!("no MSG_TYPE"))?
             .as_str()
             .ok_or_else(|| anyhow!("MSG_TYPE must be string"))?;
+
+        // "bu" (the account total) is not used and comes more often than anything else
+        if msg_type != "bu" {
+            log::debug!("bf message received: {orig_msg}");
+        }
 
         if chan_id == 0 && msg_type == "ws" {
             let wallet_snapshot = list

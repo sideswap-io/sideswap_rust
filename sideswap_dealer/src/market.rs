@@ -2009,9 +2009,6 @@ async fn try_sync_utxos(data: &mut Data) -> Result<(), anyhow::Error> {
 
     if !removed.is_empty() {
         let count = removed.len();
-        for utxo in removed.iter() {
-            log::debug!("try to remove utxo: {utxo}");
-        }
         make_market_request!(
             data.ws,
             RemoveUtxos,
@@ -2023,7 +2020,6 @@ async fn try_sync_utxos(data: &mut Data) -> Result<(), anyhow::Error> {
     let mut added = Vec::new();
     for utxo in data.wallet_utxos.iter() {
         if !data.server_utxos.contains(&utxo.outpoint()) {
-            log::debug!("try to add utxo: {}", utxo.outpoint());
             added.push(utxo.clone());
         }
     }
