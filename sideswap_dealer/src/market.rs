@@ -98,6 +98,16 @@ pub enum Command {
     },
 }
 
+/// An own order (or a part of it) taken by a swap the dealer is asked to sign
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SwapInfo {
+    pub asset_pair: AssetPair,
+    /// Direction of the own order
+    pub trade_dir: TradeDir,
+    pub base_amount: u64,
+    pub quote_amount: u64,
+}
+
 pub struct SendAssetReq {
     pub address: elements::Address,
     pub asset_id: AssetId,
@@ -109,9 +119,13 @@ pub struct SendAssetResp {
 }
 
 pub enum Event {
+    /// Reply with `Command::SignedSwap`, or do not reply to decline the swap
     SignSwap {
         quote_id: QuoteId,
         pset: PartiallySignedTransaction,
+        /// Own orders taken by the swap (empty when the dealer is the taker).
+        /// The maker signs last, so the swap is final once the signature is sent.
+        swaps: Vec<SwapInfo>,
     },
     NewAddress {
         chain: Chain,
@@ -833,7 +847,7 @@ fn process_ws_disconnected(data: &mut Data) {
 fn verify_sign_request(
     data: &mut Data,
     notif: mkt::MakerSignNotif,
-) -> Result<PartiallySignedTransaction, anyhow::Error> {
+) -> Result<(PartiallySignedTransaction, Vec<SwapInfo>), anyhow::Error> {
     let pset = b64::decode(&notif.pset).context("invalid base64 pset")?;
     let pset = elements::encode::deserialize::<PartiallySignedTransaction>(&pset)
         .context("invalid pset")?;
@@ -866,14 +880,32 @@ fn verify_sign_request(
 
     // FIXME: Verify PSET amounts
 
-    Ok(pset)
+    let swaps = notif
+        .orders
+        .iter()
+        .map(|order_info| {
+            let own_order = found_orders[&order_info.order_id];
+            SwapInfo {
+                asset_pair: own_order.asset_pair,
+                trade_dir: own_order.trade_dir,
+                base_amount: order_info.base_amount,
+                quote_amount: order_info.quote_amount,
+            }
+        })
+        .collect();
+
+    Ok((pset, swaps))
 }
 
 fn process_sign_notif(data: &mut Data, notif: mkt::MakerSignNotif) {
     let quote_id = notif.quote_id;
     let res = verify_sign_request(data, notif);
     match res {
-        Ok(pset) => data.event_sender.send(Event::SignSwap { quote_id, pset }),
+        Ok((pset, swaps)) => data.event_sender.send(Event::SignSwap {
+            quote_id,
+            pset,
+            swaps,
+        }),
         Err(err) => log::error!("PSET sign verify failed: {err}, quote_id: {quote_id:?}"),
     };
 }
@@ -1484,7 +1516,11 @@ fn try_sign_accepted_quote(
         }
     );
 
-    data.event_sender.send(Event::SignSwap { quote_id, pset });
+    data.event_sender.send(Event::SignSwap {
+        quote_id,
+        pset,
+        swaps: Vec::new(),
+    });
 
     Ok(())
 }

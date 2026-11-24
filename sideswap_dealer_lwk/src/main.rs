@@ -73,7 +73,11 @@ async fn new_address_task(
 
 fn process_market_event(data: &mut Data, event: market::Event) {
     match event {
-        market::Event::SignSwap { quote_id, pset } => {
+        market::Event::SignSwap {
+            quote_id,
+            pset,
+            swaps: _,
+        } => {
             log::info!("sign swap, quote_id: {}", quote_id.value());
 
             let pset = data.utxo_data.sign_pset(pset);

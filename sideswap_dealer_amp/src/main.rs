@@ -106,7 +106,11 @@ fn process_wallet_event(data: &mut Data, event: sideswap_amp::Event) {
 
 async fn process_market_event(data: &mut Data, event: market::Event) {
     match event {
-        market::Event::SignSwap { quote_id, pset } => {
+        market::Event::SignSwap {
+            quote_id,
+            pset,
+            swaps: _,
+        } => {
             log::info!("sign swap, quote_id: {}", quote_id.value());
 
             let wallet = Arc::clone(&data.wallet);

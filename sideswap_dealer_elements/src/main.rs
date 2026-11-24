@@ -68,7 +68,11 @@ fn process_dealer_event(data: &mut Data, event: dealer_rpc::Event) {
 
 fn process_market_event(data: &mut Data, event: market::Event) {
     match event {
-        market::Event::SignSwap { quote_id, pset } => {
+        market::Event::SignSwap {
+            quote_id,
+            pset,
+            swaps: _,
+        } => {
             let pset = data.utxo_data.sign_pset(pset);
             data.market_command_sender
                 .send(market::Command::SignedSwap { quote_id, pset });

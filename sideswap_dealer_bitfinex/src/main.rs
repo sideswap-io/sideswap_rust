@@ -4,6 +4,7 @@ mod bitfinex_api;
 mod bitfinex_worker;
 mod cli;
 mod external_prices;
+mod hedge;
 mod storage;
 
 use axum::extract::State;
@@ -148,7 +149,6 @@ struct ExternalPrice {
     updated_at: Instant,
 }
 type ExternalPrices = BTreeMap<BfxExchangePair, BTreeMap<external_prices::Source, ExternalPrice>>;
-type PendingOrders = BTreeMap<i64, Instant>;
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -237,6 +237,27 @@ impl BfxExchangePair {
         }
     }
 
+    /// Exchange currency that a hedge order sells for the base asset
+    fn base_exchange(self) -> ExchangeTicker {
+        match self {
+            BfxExchangePair::BtcUsdt | BfxExchangePair::BtcEur => ExchangeTicker::BTC,
+            BfxExchangePair::EurUsdt => ExchangeTicker::EUR,
+        }
+    }
+
+    /// Exchange currency that a hedge order pays for the base asset
+    fn quote_exchange(self) -> ExchangeTicker {
+        match self {
+            BfxExchangePair::BtcUsdt | BfxExchangePair::EurUsdt => ExchangeTicker::USDt,
+            BfxExchangePair::BtcEur => ExchangeTicker::EUR,
+        }
+    }
+
+    fn find(exchange_pair: ExchangePair) -> Option<BfxExchangePair> {
+        BfxExchangePair::iter()
+            .find(|item| item.base() == exchange_pair.base && item.quote() == exchange_pair.quote)
+    }
+
     fn find_bookname(bookname: &str) -> Option<BfxExchangePair> {
         BfxExchangePair::iter().find(|item| item.bfx_bookname() == bookname)
     }
@@ -294,9 +315,7 @@ struct Data {
     all_exchange_balances: AllExchangeBalances,
     all_exchange_balances_reported: AllExchangeBalances,
     profit_reports: Option<ProfitsReport>,
-    pending_orders: PendingOrders,
-    failed_orders_count: u32,
-    failed_orders_total: f64,
+    hedge: hedge::Hedge,
     bfx_prices: BfxPrices,
     external_prices: ExternalPrices,
     rejected_pairs: BTreeSet<BfxExchangePair>,
@@ -327,6 +346,17 @@ fn send_notification(msg: &str, slack_url: &Option<String>) {
 
 fn get_exchange_balance(exchange_balances: &ExchangeBalances, name: &ExchangeTicker) -> f64 {
     exchange_balances.get(name).cloned().unwrap_or_default() * BF_RESERVE
+}
+
+fn bfx_ask(data: &Data, exchange_pair: BfxExchangePair) -> Option<f64> {
+    data.bfx_prices.get(&exchange_pair).map(|price| price.ask)
+}
+
+/// Exchange balance that is free for new swaps: without what the pending hedges will take
+fn available_exchange_balance(data: &Data, ticker: ExchangeTicker) -> f64 {
+    let balance = get_exchange_balance(&data.exchange_balances, &ticker);
+    let reserved = data.hedge.reserved(ticker, |pair| bfx_ask(data, pair));
+    f64::max(balance - reserved, 0.0)
 }
 
 fn save_storage(storage: &storage::Storage, path: &str) {
@@ -369,6 +399,58 @@ pub async fn start_webserver(status_port: u16, status: HealthStatus) {
     axum::serve(listener, app).await.expect("must not fail");
 }
 
+/// Base amount to trade on the exchange for a swap (negative to sell)
+fn hedge_amount(trade_dir: TradeDir, base_amount: f64) -> f64 {
+    match trade_dir {
+        // The dealer has sent the base asset and buys it back
+        TradeDir::Sell => base_amount,
+        // The dealer has received the base asset and sells it
+        TradeDir::Buy => -base_amount,
+    }
+}
+
+/// Send a hedge order for what is owed and what the exchange balance allows
+fn submit_hedge_order(data: &mut Data, exchange_pair: BfxExchangePair) {
+    let skip_check = data.settings.skip_exchange_balances_check;
+    let ask = bfx_ask(data, exchange_pair);
+    let exchange_balances = &data.exchange_balances;
+    let order = data.hedge.next_order(
+        exchange_pair,
+        |ticker| match exchange_balances.get(&ticker) {
+            _ if skip_check => f64::INFINITY,
+            Some(balance) => *balance,
+            None => 0.0,
+        },
+        ask,
+        timestamp_now(),
+        Instant::now(),
+    );
+
+    if let Some(hedge::NewOrder { cid, amount }) = order {
+        let symbol = exchange_pair.bfx_bookname();
+        info!("submit hedge order, cid: {cid}, amount: {amount}, symbol: {symbol}");
+        data.profit_reports = Some(ProfitsReport {
+            wallet_balances: data.wallet_balances.clone(),
+            exchange_balances: data.exchange_balances.clone(),
+            created_at: Instant::now(),
+        });
+        data.bf_sender
+            .send(bitfinex_worker::Request::OrderSubmit(
+                bitfinex_worker::OrderSubmit {
+                    market_type: bitfinex_worker::MarketType::ExchangeMarket,
+                    symbol: symbol.to_owned(),
+                    cid,
+                    amount,
+                },
+            ))
+            .unwrap();
+    }
+}
+
+fn is_unhedged(data: &Data, exchange_pair: BfxExchangePair) -> bool {
+    data.hedge.unhedged(exchange_pair).abs() >= exchange_pair.min_bfx_amount()
+}
+
 fn hedge_order(
     data: &mut Data,
     SwapSucceed {
@@ -385,43 +467,22 @@ fn hedge_order(
 
     data.balancing_blocked = Instant::now();
 
-    let signed_base_amount = match trade_dir {
-        TradeDir::Sell => base_amount,
-        TradeDir::Buy => -base_amount,
-    };
-
-    let bfx_exchange_pair = BfxExchangePair::iter()
-        .find(|bfx_exchange_pair| {
-            exchange_pair.base == bfx_exchange_pair.base()
-                && exchange_pair.quote == bfx_exchange_pair.quote()
-        })
+    let bfx_exchange_pair = BfxExchangePair::find(exchange_pair)
         .unwrap_or_else(|| panic!("unknown exchange pair: {exchange_pair}"));
 
-    let min_amount = bfx_exchange_pair.min_bfx_amount();
+    data.hedge
+        .add_swap(bfx_exchange_pair, hedge_amount(trade_dir, base_amount));
+    submit_hedge_order(data, bfx_exchange_pair);
 
-    if base_amount >= min_amount {
-        data.profit_reports = Some(ProfitsReport {
-            wallet_balances: data.wallet_balances.clone(),
-            exchange_balances: data.exchange_balances.clone(),
-            created_at: Instant::now(),
-        });
-        let cid = timestamp_now();
-        let bookname = bfx_exchange_pair.bfx_bookname();
-        data.bf_sender
-            .send(bitfinex_worker::Request::OrderSubmit(
-                bitfinex_worker::OrderSubmit {
-                    market_type: bitfinex_worker::MarketType::ExchangeMarket,
-                    symbol: bookname.to_owned(),
-                    cid,
-                    amount: signed_base_amount,
-                },
-            ))
-            .unwrap();
-        data.pending_orders.insert(cid, Instant::now());
-    } else {
-        debug!(
-            "skip hedging as amount is too low: {signed_base_amount} {base}",
-            base = exchange_pair.base
+    // The rest is traded from the timer when the exchange balance allows it
+    if is_unhedged(data, bfx_exchange_pair) {
+        send_notification(
+            &format!(
+                ":fire: swap is not fully hedged, unhedged: {} {}",
+                data.hedge.unhedged(bfx_exchange_pair),
+                bfx_exchange_pair.bfx_bookname(),
+            ),
+            &data.settings.notifications.url,
         );
     }
 }
@@ -455,6 +516,33 @@ fn bfx_price_accepted(bfx_price: Price, external: &[(external_prices::Source, f6
         || external
             .iter()
             .any(|(_, external)| f64::abs((mid - external) / external) <= MAX_DIFF)
+}
+
+/// Count the swaps the dealer is about to sign as pending hedges,
+/// so the published order sizes go down before the server reports the swaps
+fn reserve_swaps(data: &mut Data, swaps: &[market::SwapInfo]) {
+    for swap in swaps {
+        let base = data.ticker_loader.ticker(&swap.asset_pair.base);
+        let quote = data.ticker_loader.ticker(&swap.asset_pair.quote);
+        let exchange_pair = base
+            .zip(quote)
+            .and_then(|(base, quote)| BfxExchangePair::find(ExchangePair { base, quote }));
+        let Some(exchange_pair) = exchange_pair else {
+            error!("unknown asset pair in a swap: {swap:?}");
+            continue;
+        };
+
+        let base_amount = asset_float_amount_(
+            swap.base_amount,
+            data.ticker_loader.precision(exchange_pair.base()),
+        );
+        data.hedge.swap_signed(
+            *swap,
+            exchange_pair,
+            hedge_amount(swap.trade_dir, base_amount),
+            Instant::now(),
+        );
+    }
 }
 
 fn get_bfx_price(data: &mut Data, exchange_pair: BfxExchangePair) -> Option<Price> {
@@ -591,11 +679,11 @@ fn submit_dealer_prices(data: &mut Data) {
             let exchange_btc_amount = if data.settings.skip_exchange_balances_check {
                 10.0
             } else {
-                get_exchange_balance(&data.exchange_balances, &ExchangeTicker::BTC)
+                available_exchange_balance(data, ExchangeTicker::BTC)
             };
             let exchange_asset_currency = match exchange_pair.quote() {
-                DealerTicker::USDT => &ExchangeTicker::USDt,
-                DealerTicker::EURX => &ExchangeTicker::EUR,
+                DealerTicker::USDT => ExchangeTicker::USDt,
+                DealerTicker::EURX => ExchangeTicker::EUR,
                 _ => panic!(),
             };
             let exchange_asset_amount =
@@ -603,7 +691,7 @@ fn submit_dealer_prices(data: &mut Data) {
                 if exchange_pair.quote() == DealerTicker::EURX || data.settings.skip_exchange_balances_check {
                     10.0 * bfx_price.ask
                 } else {
-                    get_exchange_balance(&data.exchange_balances, exchange_asset_currency)
+                    available_exchange_balance(data, exchange_asset_currency)
                 };
 
             dealer_rpc::DealerPrice {
@@ -673,10 +761,8 @@ fn submit_market_prices(data: &mut Data) {
 
         let (base_amount_buy, base_amount_sell) = match exchange_pair {
             BfxExchangePair::BtcUsdt => {
-                let btc_amount =
-                    get_exchange_balance(&data.exchange_balances, &ExchangeTicker::BTC);
-                let usdt_amount =
-                    get_exchange_balance(&data.exchange_balances, &ExchangeTicker::USDt);
+                let btc_amount = available_exchange_balance(data, ExchangeTicker::BTC);
+                let usdt_amount = available_exchange_balance(data, ExchangeTicker::USDt);
                 (btc_amount, usdt_amount / submit_price.ask)
                 // (MAX_BTC_AMOUNT, MAX_BTC_AMOUNT)
             }
@@ -768,7 +854,9 @@ async fn process_timer(data: &mut Data) {
         (balance_exchange_usdt < MIN_BALANCE_USDT).then_some("ExchangeTetherLow"),
         (balance_wallet_eurx < MIN_BALANCE_EURX).then_some("WalletEurxLow"),
         balancing_expired.then_some("BalancingStuck"),
-        (data.failed_orders_count != 0).then_some("FailedOrderSubmit"),
+        BfxExchangePair::iter()
+            .any(|pair| is_unhedged(data, pair))
+            .then_some("Unhedged"),
         external_prices_missing.then_some("ExternalPrices"),
         (!data.rejected_pairs.is_empty()).then_some("PriceDiscrepancy"),
     ]
@@ -913,20 +1001,20 @@ async fn process_timer(data: &mut Data) {
         }
     }
 
-    let expired_orders = data
-        .pending_orders
-        .iter()
-        .filter(|(_, timestamp)| {
-            now.duration_since(**timestamp) > std::time::Duration::from_secs(30)
-        })
-        .map(|(cid, _)| *cid)
-        .collect::<Vec<_>>();
-    for cid in expired_orders {
+    // Hedge what was left: balance has arrived, a failed order is to be retried, small amounts add up
+    for exchange_pair in BfxExchangePair::iter() {
+        submit_hedge_order(data, exchange_pair);
+    }
+
+    let expired = data.hedge.expire(now);
+    for swap in expired.swaps {
+        warn!("signed swap was not reported by the server: {swap:?}");
+    }
+    for cid in expired.orders {
         send_notification(
             &format!(":fire: bf order {} timeout", cid),
             &data.settings.notifications.url,
         );
-        data.pending_orders.remove(&cid);
     }
 }
 
@@ -949,16 +1037,16 @@ fn process_bf_worker(data: &mut Data, resp: bitfinex_worker::Response) {
         bitfinex_worker::Response::OrderSubmit(req, res) => match res {
             Ok(order) => {
                 info!("order submit succeed, order_id: {}", order.order_id);
+                data.hedge.order_accepted(req.cid, Instant::now());
             }
             Err(err) => {
                 error!("order submit failed: {}", err);
-                data.failed_orders_count += 1;
-                data.failed_orders_total += req.amount;
+                data.hedge.order_failed(req.cid, Instant::now());
 
                 send_notification(
                     &format!(
-                        "bfx order(s) submit failed, count: {}, total: {} btc",
-                        data.failed_orders_count, data.failed_orders_total,
+                        ":fire: bfx order {} submit failed ({} {}), will retry: {}",
+                        req.cid, req.amount, req.symbol, err,
                     ),
                     &data.settings.notifications.url,
                 );
@@ -1025,7 +1113,7 @@ async fn process_bf_event(data: &mut Data, event: bfx_ws_api::Event) {
                 "order created, cid: {}, id: {}, amount: {}, price: {}, symbol: {}",
                 cid, id, amount_orig, price_avg, symbol
             );
-            let pending_order = data.pending_orders.remove(&cid);
+            let pending_order = data.hedge.order_done(cid);
             match pending_order {
                 Some(v) => debug!(
                     "order created: {}, {} seconds",
@@ -1150,10 +1238,39 @@ fn process_msg(data: &mut Data, msg: Msg) {
 
 fn process_market_event(data: &mut Data, event: market::Event) {
     match event {
-        market::Event::SignSwap { quote_id, pset } => {
+        market::Event::SignSwap {
+            quote_id,
+            pset,
+            swaps,
+        } => {
+            info!(
+                "sign swap, quote_id: {}, swaps: {swaps:?}",
+                quote_id.value()
+            );
+            reserve_swaps(data, &swaps);
+
+            // The published sizes should not let this happen (the EURx orders have no size limit)
+            for ticker in [
+                ExchangeTicker::BTC,
+                ExchangeTicker::USDt,
+                ExchangeTicker::EUR,
+            ] {
+                let balance = data.exchange_balances.get(&ticker).copied();
+                let reserved = data.hedge.reserved(ticker, |pair| bfx_ask(data, pair));
+                if reserved > balance.unwrap_or_default() {
+                    warn!(
+                        "pending hedges need {reserved} {ticker:?}, the exchange has {balance:?}"
+                    );
+                }
+            }
+
             let pset = data.utxo_data.sign_pset(pset);
             data.market_command_sender
                 .send(market::Command::SignedSwap { quote_id, pset });
+
+            // Other orders use the same exchange balances, show their new sizes at once
+            submit_dealer_prices(data);
+            submit_market_prices(data);
         }
 
         market::Event::NewAddress {
@@ -1179,6 +1296,14 @@ fn process_market_event(data: &mut Data, event: market::Event) {
         } => {
             let base_ticker = data.ticker_loader.ticker(&base).expect("must be known");
             let quote_ticker = data.ticker_loader.ticker(&quote).expect("must be known");
+
+            // The swap is counted as owed from here (see hedge_order)
+            let signed =
+                data.hedge
+                    .swap_reported(AssetPair { base, quote }, trade_dir, base_amount);
+            if !signed {
+                debug!("swap {txid} was not counted when signed");
+            }
 
             let base_amount =
                 asset_float_amount_(base_amount, data.ticker_loader.precision(base_ticker));
@@ -1338,9 +1463,7 @@ async fn main() {
         all_exchange_balances: AllExchangeBalances::new(),
         all_exchange_balances_reported: AllExchangeBalances::new(),
         profit_reports: None,
-        pending_orders: PendingOrders::new(),
-        failed_orders_count: 0,
-        failed_orders_total: 0.0,
+        hedge: hedge::Hedge::default(),
         bfx_prices: BfxPrices::new(),
         external_prices: ExternalPrices::new(),
         rejected_pairs: BTreeSet::new(),

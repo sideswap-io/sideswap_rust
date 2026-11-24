@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use anyhow::{bail, ensure};
+use anyhow::bail;
 use log::{debug, error, info};
 use tokio::sync::mpsc::UnboundedReceiver;
 
@@ -93,12 +93,11 @@ async fn order_submit_with_retry(
 
             match history_res {
                 Ok(history) => {
-                    let cid_known = history.iter().any(|order| order.cid == req.cid);
-                    ensure!(
-                        !cid_known,
-                        "order with cid {} already exists in history",
-                        req.cid
-                    );
+                    // The failed request has reached the exchange
+                    if let Some(order) = history.iter().find(|order| order.cid == req.cid) {
+                        info!("order with cid {} found in history", req.cid);
+                        return Ok(bitfinex_api::submit::SubmitResponse { order_id: order.id });
+                    }
                 }
                 Err(err) => {
                     error!("loading order history failed: {err}");
