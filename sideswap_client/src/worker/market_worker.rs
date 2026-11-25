@@ -42,7 +42,7 @@ use sideswap_common::{
 };
 use sideswap_jade::jade_mng::{self, AE_STUB_DATA};
 use sideswap_types::{
-    asset_precision::{asset_float_amount_, asset_int_amount_, asset_scale},
+    asset_precision::{AssetPrecision, asset_float_amount_, asset_int_amount_, asset_scale},
     duration_ms::DurationMs,
     hex_encoded::HexEncoded,
     normal_float::NormalFloat,
@@ -1400,6 +1400,47 @@ pub fn try_sign_pset_jade(
     Ok(pset)
 }
 
+/// How far the quote amount of a swap may be from `base_amount * price`, as a share of it.
+/// Covers floating point differences between the server and the wallet.
+const SWAP_AMOUNT_RELATIVE_TOLERANCE: f64 = 0.0001;
+
+/// How far an amount of a swap may be from the price, in units of that amount (satoshi).
+/// The server fixes one amount and rounds the other one to whole units.
+const SWAP_AMOUNT_ROUNDING_TOLERANCE: f64 = 1.0;
+
+/// Verify that the amounts of a swap match its price.
+/// Both amounts are whole units, so the amounts of a small swap can't match the price closely:
+/// half a satoshi of 3000 is more than the relative tolerance. A maker that refuses such a swap
+/// misses the sign deadline, and the server suspends all its orders for that.
+fn verify_maker_swap_amounts(
+    base_amount: u64,
+    quote_amount: u64,
+    price: NormalFloat,
+    base_precision: AssetPrecision,
+    quote_precision: AssetPrecision,
+) -> Result<(), anyhow::Error> {
+    ensure!(base_amount > 0);
+    ensure!(quote_amount > 0);
+    ensure!(price.value() > 0.0, "unexpected price: {}", price.value());
+
+    // The price of one unit of the base asset in units of the quote asset
+    let unit_price = price.value() * asset_scale(quote_precision) / asset_scale(base_precision);
+    let expected_quote_amount = base_amount as f64 * unit_price;
+    let expected_base_amount = quote_amount as f64 / unit_price;
+    let quote_diff = (quote_amount as f64 - expected_quote_amount).abs();
+    let base_diff = (base_amount as f64 - expected_base_amount).abs();
+
+    ensure!(
+        quote_diff < expected_quote_amount * SWAP_AMOUNT_RELATIVE_TOLERANCE
+            || quote_diff <= SWAP_AMOUNT_ROUNDING_TOLERANCE
+            || base_diff <= SWAP_AMOUNT_ROUNDING_TOLERANCE,
+        "unexpected swap amounts, base_amount: {base_amount}, quote_amount: {quote_amount}, \
+         expected_base_amount: {expected_base_amount}, expected_quote_amount: {expected_quote_amount}"
+    );
+
+    Ok(())
+}
+
 fn try_sign_maker_pset(
     worker: &super::Data,
     notif: &mkt::MakerSignNotif,
@@ -1467,16 +1508,13 @@ fn try_sign_maker_pset(
         ensure!(swap.base_amount > 0);
         ensure!(swap.base_amount <= known_order.base_amount);
 
-        // Allow some tolerance in quote amount calculations
-        let expected_quote_amount =
-            asset_scale(quote_precision) * swap.base_amount as f64 * swap.price.value()
-                / asset_scale(base_precision);
-        let actual_quote_amount = swap.quote_amount as f64;
-        let diff = (1.0 - actual_quote_amount / expected_quote_amount).abs();
-        ensure!(
-            diff < 0.0001,
-            "actual_quote_amount: {actual_quote_amount}, expected_quote_amount: {expected_quote_amount}"
-        );
+        verify_maker_swap_amounts(
+            swap.base_amount,
+            swap.quote_amount,
+            swap.price,
+            base_precision,
+            quote_precision,
+        )?;
 
         total_base_amount += swap.base_amount;
         total_quote_amount += swap.quote_amount;
@@ -3261,3 +3299,6 @@ pub fn retry_start_quote(worker: &mut super::Data) {
         start_quotes(worker, msg, order_id, private_id);
     }
 }
+
+#[cfg(test)]
+mod tests;
